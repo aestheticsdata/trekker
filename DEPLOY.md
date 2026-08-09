@@ -184,10 +184,63 @@ location ~ ^/api/(transfers/stream|fs/tail|activity/stream) {
 
 The SSE block must come before the general `/api/` one, or `/api/` wins.
 
-## Master key rotation
+## The master key
 
-Not implemented yet — it arrives with the secret store in **TRE-8**, along with
-the `keyVersion` column that makes it possible. The procedure will live here.
+`TREKKER_MASTER_KEY` decrypts every stored SSH credential. Format is
+`<version>:<base64 of 32 bytes>`. Generate it **on the server**:
+
+```bash
+node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"
+```
+
+The API refuses to boot if it is missing, the wrong length, or still
+`REPLACE_ME`, and the error names the variable.
+
+It must live outside every path Trekker is allowed to browse. Otherwise a
+signed-in user browsing the local host reads the key that unlocks every other
+machine, and the encryption is decoration. TRE-11's denylist enforces that.
+
+**What this protects against is database disclosure, not host compromise.**
+Anyone who owns the API host reads the key out of the process environment and
+it is over. That is the accepted limit, not an oversight.
+
+### Rotation
+
+No downtime. Both keys are live during the rotation, and the version travels
+inside each key string so the pair cannot go out of step.
+
+1. Generate the new key with the **next** version number:
+
+   ```bash
+   node -e "console.log('2:' + require('crypto').randomBytes(32).toString('base64'))"
+   ```
+
+2. In `ecosystem.config.js`, move the current value to
+   `TREKKER_MASTER_KEY_PREVIOUS` and put the new one in `TREKKER_MASTER_KEY`.
+   Reload so the API can read both:
+
+   ```bash
+   pm2 reload trekker-api --update-env
+   ```
+
+3. Re-encrypt every row. `--dry-run` first if you want to see the count:
+
+   ```bash
+   pnpm rotate-key
+   ```
+
+   One transaction per row, and rows already at the new version are skipped —
+   an interrupted run is finished by running it again.
+
+4. Remove `TREKKER_MASTER_KEY_PREVIOUS` and reload again. Any row still on the
+   old version now fails to decrypt with a message saying exactly that, so a
+   missed row is loud rather than silent.
+
+Local sanity check of the whole envelope, no database needed:
+
+```bash
+pnpm --filter ./nest-api verify:secrets
+```
 
 ## Database backup
 

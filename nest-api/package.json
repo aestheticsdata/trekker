@@ -10,11 +10,13 @@
     "migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
+    "verify:secrets": "tsx scripts/verify-secret-store.ts",
+    "rotate-key": "tsx scripts/rotate-master-key.ts",
     "dev": "NODE_ENV=development nest start --watch",
     "start": "nest start",
     "start:prod": "node dist/src/main.js",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "lint": "eslint \"{src,test,prisma}/**/*.ts\" prisma.config.ts --fix",
+    "lint": "eslint \"{src,test,prisma,scripts}/**/*.ts\" prisma.config.ts --fix",
     "typecheck": "tsc --noEmit",
     "test": "jest --passWithNoTests",
     "test:db": "NODE_OPTIONS='--experimental-vm-modules' jest --config ./test/jest-db.json --runInBand"
@@ -82,6 +84,7 @@
       "^@redis/(.*)$": "<rootDir>/redis/$1",
       "^@database/(.*)$": "<rootDir>/database/$1",
       "^@health/(.*)$": "<rootDir>/health/$1",
+      "^@secrets/(.*)$": "<rootDir>/secrets/$1",
       "^@users/(.*)$": "<rootDir>/users/$1"
     },
     "collectCoverageFrom": [

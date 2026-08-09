@@ -34,6 +34,15 @@ const prodEnv = {
   // SSH keys is not a feature (TRE-7).
   SIGNUPS_ENABLED: "false",
 
+  // Decrypts every stored SSH credential (TRE-8). Generate ON THE SERVER:
+  //   node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"
+  // It must sit outside every path Trekker is allowed to browse (TRE-11),
+  // otherwise a signed-in user browsing the local host reads the key that
+  // unlocks every other machine.
+  TREKKER_MASTER_KEY: "REPLACE_ME",
+  // Set only during a rotation, to the key being retired. See DEPLOY.md.
+  // TREKKER_MASTER_KEY_PREVIOUS: "",
+
   // SHADOW_DATABASE_URL does NOT belong here. It exists only for
   // `prisma migrate dev`, which needs a scratch database to replay migrations
   // in. Production runs `migrate deploy`, which does no replay and no diffing.
@@ -41,9 +50,6 @@ const prodEnv = {
   // nothing ever reads.
 
   // Added by later tickets:
-  //   TREKKER_MASTER_KEY         TRE-8  — decrypts every stored SSH credential.
-  //     Do NOT put it here if the API's own directory is browsable. Prefer a
-  //     file outside every allowed root, or a systemd credential (TRE-11).
   //   TREKKER_DOWNLOAD_LINK_KEY  TRE-26 — signs expiring download links.
 };
 

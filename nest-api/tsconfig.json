@@ -20,6 +20,7 @@
       "@redis/*": ["./src/redis/*"],
       "@database/*": ["./src/database/*"],
       "@health/*": ["./src/health/*"],
+      "@secrets/*": ["./src/secrets/*"],
       "@users/*": ["./src/users/*"]
     },
     "incremental": true,
@@ -31,5 +32,5 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false
   },
-  "include": ["src/**/*", "test/**/*", "prisma/**/*", "prisma.config.ts"]
+  "include": ["src/**/*", "test/**/*", "prisma/**/*", "scripts/**/*", "prisma.config.ts"]
 }
