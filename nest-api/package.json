@@ -8,6 +8,7 @@
     "build": "nest build",
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
     "dev": "NODE_ENV=development nest start --watch",
     "start": "nest start",
