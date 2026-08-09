@@ -12,6 +12,14 @@ node_modules/
 .env.*
 !.env.example
 
+# deploy config and PM2 configs: they name real hosts and hold secrets.
+# Only the .example variants are tracked. Same rule pfa follows.
+deploy.env
+ecosystem.config.js
+ecosystem.config.cjs
+!ecosystem.config.example.js
+!ecosystem.config.example.cjs
+
 # secrets and key material
 *.pem
 *.key
