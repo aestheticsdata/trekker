@@ -6,6 +6,7 @@ import { DatabaseModule } from "@database/database.module";
 import { HealthModule } from "@health/health.module";
 import { loadEnv } from "@config/load-env";
 import { RedisModule } from "@redis/redis.module";
+import { UsersModule } from "@users/users.module";
 import { PrismaModule } from "./prisma/prisma.module";
 
 // Runs before the decorator below is evaluated, which is when ConfigModule
@@ -27,6 +28,7 @@ loadEnv();
     PrismaModule,
     RedisModule,
     HealthModule,
+    UsersModule,
   ],
 })
 export class AppModule {}

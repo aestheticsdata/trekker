@@ -86,6 +86,31 @@ curl -s localhost:6800/api/health
 Redis being down is survivable and the API says so. MySQL being down is not: the API refuses to
 boot rather than serve an endpoint that fails every request.
 
+## Auth
+
+Session cookie on Redis plus a per-session CSRF token, same shape as pfa.
+
+| Route | Auth |
+|---|---|
+| `POST /api/users` | public — sign in |
+| `POST /api/users/add` | public, gated by `SIGNUPS_ENABLED` |
+| `POST /api/users/recover` | public, throttled 5/hour |
+| `GET /api/users/me` | session |
+| `GET /api/users/csrf` | session |
+| `PATCH /api/users/password` | session + CSRF |
+| `POST /api/users/logout` | CSRF |
+
+Three things worth knowing:
+
+- **Sign-ups are closed unless `SIGNUPS_ENABLED` is exactly `"true"`.** pfa closes only on the
+  literal `"false"`, so a typo leaves registration open. On an app holding SSH credentials the
+  default has to be the other way round.
+- **The recovery passphrase is generated, not chosen**, shown once at sign-up and kept only as a
+  bcrypt hash. There is no email reset — an account with no passphrase can only be reset on the
+  host. A successful recovery destroys every session the account has.
+- **One live session per account.** Signing in revokes the others, so a stolen cookie stops
+  working as soon as the owner signs in again.
+
 ### Ports
 
 Allocated from the Zeus port registry, which is the authoritative source — never pick a port

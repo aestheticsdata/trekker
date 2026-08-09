@@ -1,5 +1,5 @@
 import { plainToInstance } from "class-transformer";
-import { IsNumberString, IsString, IsUrl, MinLength, validateSync, ValidationError } from "class-validator";
+import { IsIn, IsNumberString, IsString, IsUrl, MinLength, validateSync, ValidationError } from "class-validator";
 
 /**
  * Boot-time contract. Every variable the API needs is declared here, and a
@@ -32,6 +32,13 @@ class EnvironmentVariables {
     message: "SESSION_SECRET must be at least 32 characters — generate one with `openssl rand -base64 48`",
   })
   SESSION_SECRET!: string;
+
+  /**
+   * Declared, so a typo is a boot failure rather than a silently open door.
+   * The guard itself only accepts the exact string "true" (TRE-7).
+   */
+  @IsIn(["true", "false"], { message: 'SIGNUPS_ENABLED must be "true" or "false"' })
+  SIGNUPS_ENABLED!: string;
 }
 
 export function validate(config: Record<string, unknown>): EnvironmentVariables {
@@ -47,7 +54,7 @@ export function validate(config: Record<string, unknown>): EnvironmentVariables 
     const details = errors
       .map((error) => `  ${error.property}: ${Object.values(error.constraints ?? {}).join(", ")}`)
       .join("\n");
-    throw new Error(`Invalid environment.\n${details}\n\nSee nest-api/.env.example.`);
+    throw new Error(`Invalid environment.\n${details}\n\nSee nest-api/ecosystem.config.example.js.`);
   }
 
   return validatedConfig;

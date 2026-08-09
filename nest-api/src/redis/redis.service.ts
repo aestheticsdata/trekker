@@ -54,6 +54,61 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client;
   }
 
+  /**
+   * Destroys every stored session belonging to a user.
+   *
+   * Called on sign-in (one live session per account) and on recovery, where
+   * "all other sessions were revoked" has to be true rather than reassuring.
+   *
+   * SCAN rather than KEYS: KEYS blocks the Redis event loop for the whole scan,
+   * and this runs on a request path.
+   */
+  async clearSessionsForUser(userId: string): Promise<void> {
+    for await (const keys of this.client.scanIterator({ MATCH: `${SESSION_PREFIX}*`, COUNT: 100 })) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        try {
+          const value = await this.client.get(key);
+          if (!value) continue;
+          const session = JSON.parse(value) as { userId?: string };
+          if (session.userId === userId) {
+            await this.client.del(key);
+          }
+        } catch {
+          // A malformed or already-deleted entry is not a reason to leave the
+          // rest of the user's sessions alive.
+        }
+      }
+    }
+  }
+
+  /**
+   * Fixed-window counter, used to throttle auth attempts per account.
+   *
+   * Returns the count after this attempt. Redis being unreachable returns 0 —
+   * the request proceeds, because a session cannot be established without Redis
+   * anyway, so there is nothing to protect at that point.
+   */
+  async countAttempt(key: string, windowSeconds: number): Promise<number> {
+    try {
+      const count = await this.client.incr(key);
+      if (count === 1) {
+        await this.client.expire(key, windowSeconds);
+      }
+      return count;
+    } catch (error) {
+      this.logger.warn(`Rate-limit counter unavailable: ${(error as Error).message}`);
+      return 0;
+    }
+  }
+
+  async resetAttempts(key: string): Promise<void> {
+    try {
+      await this.client.del(key);
+    } catch {
+      // Best effort: a stale counter expires on its own.
+    }
+  }
+
   /** True when a round trip succeeds right now. Used by the health check. */
   async ping(): Promise<boolean> {
     if (!this.client.isOpen) return false;
