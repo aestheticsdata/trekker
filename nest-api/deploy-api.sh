@@ -100,6 +100,9 @@ EOF
     --exclude="ecosystem.config.js" \
     "$SCRIPT_DIR/" "$TREKKER_DEPLOY_HOST:$NEST_RELEASE_REMOTE/"
 
+  # The PM2 config lives above the app directory so it survives the release
+  # swap, which is why it is copied separately rather than left where rsync put
+  # it. It holds no secrets — see the file itself.
   log "➡️  Syncing ecosystem.config.js"
   scp -q "$ECOSYSTEM_FILE" "$TREKKER_DEPLOY_HOST:$API_ROOT/ecosystem.config.js"
 
@@ -114,13 +117,9 @@ set -Eeuo pipefail
 cd "$API_ROOT"
 [ -f "$NEST_RELEASE_REMOTE/package.json" ] || { echo "❌ ERROR: release looks empty" >&2; exit 1; }
 
-# The API keeps its .env on the server: it holds the master key, and that never
-# travels from a workstation.
-if [ -f "$NEST_DIR/.env" ]; then
-  cp "$NEST_DIR/.env" "$NEST_RELEASE_REMOTE/.env"
-else
-  echo "⚠️  No existing $NEST_DIR/.env — create it on the server before the first start" >&2
-fi
+# Nothing to carry forward into the release: configuration lives in
+# ecosystem.config.js at $API_ROOT, which sits outside the directory being
+# swapped and so survives on its own.
 
 rm -rf "$NEST_BACKUP_DIR"
 [ -d "$NEST_DIR" ] && mv "$NEST_DIR" "$NEST_BACKUP_DIR"
@@ -140,8 +139,42 @@ eval "$REMOTE_PATH_EXPORT"
 command -v pnpm >/dev/null 2>&1 || { echo "❌ ERROR: pnpm not found on the server" >&2; exit 1; }
 cd "$NEST_DIR"
 rm -rf node_modules dist
-pnpm install --frozen-lockfile --filter .
+# --prod=false explicitly: the build needs the Prisma CLI and dotenv, which are
+# devDependencies, and a NODE_ENV=production in the login shell would skip them.
+pnpm install --frozen-lockfile --filter . --prod=false
 pnpm build
+EOF
+
+  # Migrations run against the new code, before pm2 serves it. `migrate deploy`
+  # only applies what is already in the repo — it never generates, never resets
+  # and never prompts, which is what makes it the production verb.
+  #
+  # MySQL DDL is not transactional: a migration that fails midway leaves the
+  # database part-applied, and the code rollback below cannot undo that. Check
+  # `prisma migrate status` before re-running.
+  log "➡️  Applying migrations"
+  ssh "$TREKKER_DEPLOY_HOST" \
+    NEST_DIR="$NEST_DIR" \
+    API_ROOT="$API_ROOT" \
+    REMOTE_PATH_EXPORT="$REMOTE_PATH_EXPORT" \
+    'bash -s' << 'EOF'
+set -Eeuo pipefail
+eval "$REMOTE_PATH_EXPORT"
+cd "$NEST_DIR"
+
+# This runs outside PM2, so it does not inherit PM2's environment. Rather than
+# keep a second copy of DATABASE_URL in a .env beside it — two values that must
+# agree, with nothing checking that they do — read it out of the same ecosystem
+# file PM2 uses. A migration applied to one database while the app talks to
+# another is not a failure you notice quickly.
+DATABASE_URL=$(node -e "
+  const url = require('$API_ROOT/ecosystem.config.js').apps[0].env_production.DATABASE_URL;
+  if (!url) { console.error('DATABASE_URL missing from ecosystem.config.js'); process.exit(1); }
+  process.stdout.write(url);
+")
+export DATABASE_URL
+
+pnpm exec prisma migrate deploy
 EOF
 
   log "➡️  Reloading pm2"

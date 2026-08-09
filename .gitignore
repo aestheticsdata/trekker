@@ -7,18 +7,18 @@ node_modules/
 .pnp.js
 .pnpm-store/
 
-# env — only .env.example is tracked
+# There are no .env files in this project — configuration lives in
+# ecosystem.config.js on both sides. These stay as a backstop so one can never
+# be added by accident.
 .env
 .env.*
-!.env.example
 
-# deploy config and PM2 configs: they name real hosts and hold secrets.
-# Only the .example variants are tracked. Same rule pfa follows.
+# Deploy target: names the real host and paths. deploy.env.example is tracked.
 deploy.env
-ecosystem.config.js
-ecosystem.config.cjs
-!ecosystem.config.example.js
-!ecosystem.config.example.cjs
+
+# The API's PM2 config holds production secrets. Only the .example is tracked.
+# The front's config has none, so front/ecosystem.config.cjs IS committed.
+nest-api/ecosystem.config.js
 
 # secrets and key material
 *.pem
@@ -59,3 +59,5 @@ generated/
 .idea/
 .vscode/
 .claude/worktrees/
+
+credentials.txt

@@ -1,0 +1,353 @@
+// Trekker's data model. See docs/superpowers/specs/2026-08-09-trekker-design.md §6.
+//
+// Sessions are not here — they live in Redis (TRE-7).
+//
+// Two rules run through the whole file:
+//
+//   1. Deleting a host takes everything that only makes sense with it: its
+//      credential, its pinned keys, its roots, its bookmarks, its scans. An
+//      encrypted credential outliving its host is a secret nobody will ever
+//      look at again.
+//   2. Deleting a host does NOT take the audit trail. Transfer jobs and
+//      activity rows keep their story and null out the reference.
+//
+// Paths are VarChar(700) wherever they are indexed and Text where they are
+// not. InnoDB caps an index at 3072 bytes and utf8mb4 costs 4 bytes a
+// character, so an indexed path plus a CHAR(36) key has to stay under that.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../generated/prisma"
+  moduleFormat        = "cjs"
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ---------------------------------------------------------------- enums
+
+enum HostTransport {
+  LOCAL
+  SSH
+}
+
+enum CredentialKind {
+  PRIVATE_KEY
+  PASSWORD
+  AGENT
+}
+
+enum RootAccess {
+  READ
+  WRITE
+}
+
+enum TransferOperation {
+  COPY
+  MOVE
+}
+
+enum TransferStatus {
+  QUEUED
+  RUNNING
+  PAUSED
+  DONE
+  FAILED
+  CANCELLED
+}
+
+enum TransferItemStatus {
+  PENDING
+  RUNNING
+  DONE
+  SKIPPED
+  FAILED
+}
+
+/// What to do when the destination already exists. `ASK` is the initial state:
+/// the job stalls on that item until the user answers.
+enum ConflictDecision {
+  ASK
+  OVERWRITE
+  SKIP
+  RENAME
+  RESUME
+}
+
+enum ScanStatus {
+  RUNNING
+  DONE
+  FAILED
+}
+
+// ---------------------------------------------------------------- account
+
+model Users {
+  id                     String   @id @default(uuid(7)) @db.Char(36)
+  email                  String   @unique @db.VarChar(255)
+  passwordHash           String   @db.VarChar(255)
+  /// Set when the user opts into passphrase recovery (TRE-7). Null means they
+  /// have no recovery route and a lost password is a manual reset.
+  recoveryPassphraseHash String?  @db.VarChar(255)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  hosts        Hosts[]
+  views        Views[]
+  transferJobs TransferJobs[]
+  activity     ActivityLog[]
+}
+
+// ---------------------------------------------------------------- hosts
+
+model Hosts {
+  id        String        @id @default(uuid(7)) @db.Char(36)
+  userId    String        @db.Char(36)
+  /// Stable handle used in URLs and saved views, so renaming the label does
+  /// not break a bookmarked link.
+  slug      String        @db.VarChar(64)
+  label     String        @db.VarChar(64)
+  transport HostTransport
+  /// Null for LOCAL: there is nothing to dial.
+  address   String?       @db.VarChar(255)
+  port      Int           @default(22)
+  username  String?       @db.VarChar(64)
+  /// Accent colour for the pane header and the host chip, as a hex string.
+  colour    String        @default("#7fa8c9") @db.VarChar(16)
+  homePath  String        @default("/") @db.VarChar(700)
+
+  /// A user may have at most one LOCAL host. MySQL has no partial unique
+  /// index, so LOCAL rows set this to `true` and SSH rows leave it NULL — a
+  /// unique index counts every NULL as distinct, so only a second LOCAL row
+  /// collides. The hosts service is the only writer and sets it from
+  /// `transport`; the constraint is what makes a concurrent double-create
+  /// fail rather than race.
+  localSlot Boolean?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         Users            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credential   HostCredentials?
+  knownKeys    HostKnownKeys[]
+  roots        HostRoots[]
+  bookmarks    Bookmarks[]
+  diskScans    DiskScans[]
+  transfersOut TransferJobs[]   @relation("TransferSource")
+  transfersIn  TransferJobs[]   @relation("TransferDestination")
+  activity     ActivityLog[]
+
+  @@unique([userId, slug])
+  @@unique([userId, localSlot])
+}
+
+/// One credential per host — a host authenticates one way. There is no
+/// plaintext column, not even a nullable one: the absence of the column is the
+/// guarantee. TRE-8 owns how the ciphertext is produced.
+model HostCredentials {
+  id     String         @id @default(uuid(7)) @db.Char(36)
+  hostId String         @unique @db.Char(36)
+  kind   CredentialKind
+
+  /// AES-256-GCM. The IV and tag are fixed-width on purpose: a wrong-sized
+  /// value is a bug, and the column refuses it instead of failing at decrypt.
+  ciphertext Bytes @db.Blob
+  iv         Bytes @db.Binary(12)
+  authTag    Bytes @db.Binary(16)
+
+  /// Which master key encrypted this row. Rotation rewrites rows one version
+  /// at a time and can tell what it has already done.
+  keyVersion Int @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  host Hosts @relation(fields: [hostId], references: [id], onDelete: Cascade)
+}
+
+/// Host key pinning, trust on first use. The fingerprint is compared before
+/// any credential is offered (TRE-10).
+model HostKnownKeys {
+  id          String    @id @default(uuid(7)) @db.Char(36)
+  hostId      String    @db.Char(36)
+  algorithm   String    @db.VarChar(32)
+  fingerprint String    @db.VarChar(128)
+  firstSeenAt DateTime  @default(now())
+  /// Set when the user confirmed the fingerprint out of band. Null means it
+  /// was accepted on first sight and never checked against anything.
+  verifiedAt  DateTime?
+
+  host Hosts @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@unique([hostId, algorithm])
+}
+
+/// The allowlist. Nothing outside these roots is reachable, whatever path the
+/// request asks for (TRE-11).
+model HostRoots {
+  id     String     @id @default(uuid(7)) @db.Char(36)
+  hostId String     @db.Char(36)
+  path   String     @db.VarChar(700)
+  access RootAccess @default(READ)
+
+  host Hosts @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@unique([hostId, path])
+}
+
+model Bookmarks {
+  id       String  @id @default(uuid(7)) @db.Char(36)
+  hostId   String  @db.Char(36)
+  path     String  @db.VarChar(700)
+  label    String  @db.VarChar(64)
+  /// The small grey line under the label in the sidebar.
+  hint     String? @db.VarChar(128)
+  position Int     @default(0)
+
+  host Hosts @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@unique([hostId, path])
+  @@index([hostId, position])
+}
+
+// ---------------------------------------------------------------- layout
+
+/// A saved layout. The mockup keeps these in localStorage, which loses them
+/// per browser; they belong to the account. TRE-37 owns the UI.
+model Views {
+  id   String  @id @default(uuid(7)) @db.Char(36)
+  name String  @db.VarChar(64)
+  /// Optional keyboard shortcut, unique per user when set.
+  shortcut String? @db.VarChar(32)
+  userId   String  @db.Char(36)
+
+  /// One entry per pane: host, path, sort and selection. JSON because the
+  /// shape belongs to the front-end and will move; nothing queries into it.
+  panes Json
+
+  /// Left pane width as a percentage.
+  split     Int     @default(50)
+  /// Which pane is full width, or null for the split view.
+  solo      String? @db.VarChar(16)
+  inspector Boolean @default(true)
+  heat      Boolean @default(false)
+  glob      String? @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user Users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+  @@unique([userId, shortcut])
+}
+
+// ---------------------------------------------------------------- transfers
+
+model TransferJobs {
+  id     String @id @default(uuid(7)) @db.Char(36)
+  userId String @db.Char(36)
+
+  /// Nullable and set null on host deletion: the record of a transfer outlives
+  /// the host it touched.
+  srcHostId String? @db.Char(36)
+  srcPath   String  @db.Text
+  dstHostId String? @db.Char(36)
+  dstPath   String  @db.Text
+
+  operation TransferOperation
+  /// Per-job switches — preserve timestamps, follow symlinks, and so on.
+  options   Json?
+  status    TransferStatus    @default(QUEUED)
+
+  bytesTotal BigInt @default(0)
+  bytesDone  BigInt @default(0)
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  error      String?   @db.Text
+  createdAt  DateTime  @default(now())
+
+  user    Users  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  srcHost Hosts? @relation("TransferSource", fields: [srcHostId], references: [id], onDelete: SetNull)
+  dstHost Hosts? @relation("TransferDestination", fields: [dstHostId], references: [id], onDelete: SetNull)
+
+  items TransferItems[]
+
+  @@index([userId, status])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model TransferItems {
+  id     String @id @default(uuid(7)) @db.Char(36)
+  jobId  String @db.Char(36)
+  /// Path relative to the job's source, so the destination can be rebuilt.
+  name   String @db.VarChar(700)
+  bytes  BigInt @default(0)
+
+  conflict ConflictDecision   @default(ASK)
+  status   TransferItemStatus @default(PENDING)
+  error    String?            @db.Text
+
+  job TransferJobs @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, status])
+}
+
+// ---------------------------------------------------------------- disk
+
+model DiskScans {
+  id     String @id @default(uuid(7)) @db.Char(36)
+  hostId String @db.Char(36)
+  root   String @db.VarChar(700)
+
+  startedAt  DateTime   @default(now())
+  finishedAt DateTime?
+  totalBytes BigInt?
+  inodes     BigInt?
+  status     ScanStatus @default(RUNNING)
+
+  host    Hosts            @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  entries DiskScanEntries[]
+
+  @@index([hostId, startedAt(sort: Desc)])
+}
+
+model DiskScanEntries {
+  id     String @id @default(uuid(7)) @db.Char(36)
+  scanId String @db.Char(36)
+  path   String @db.Text
+  bytes  BigInt
+  /// Share of the scan root, so the treemap does not recompute totals.
+  percent Decimal @db.Decimal(5, 2)
+
+  scan DiskScans @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId, bytes(sort: Desc)])
+}
+
+// ---------------------------------------------------------------- audit
+
+/// The audit trail and the activity strip are the same rows: an action worth
+/// showing the user is an action worth recording. TRE-30 owns the vocabulary
+/// of `kind`, which is a string rather than an enum because it gains a value
+/// with nearly every feature and a migration per value is not worth it.
+model ActivityLog {
+  id      String  @id @default(uuid(7)) @db.Char(36)
+  userId  String  @db.Char(36)
+  hostId  String? @db.Char(36)
+  kind    String  @db.VarChar(32)
+  summary String  @db.VarChar(255)
+  /// Short badge shown on the strip — "3 files", "412 MB".
+  tag     String? @db.VarChar(32)
+  payload Json?
+
+  createdAt DateTime @default(now())
+
+  user Users  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  host Hosts? @relation(fields: [hostId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+}

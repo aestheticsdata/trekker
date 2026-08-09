@@ -17,8 +17,8 @@ WEB_ROOT="$TREKKER_REMOTE_ROOT"
 CURRENT_DIR="$WEB_ROOT/public_html"
 BACKUP_DIR="$WEB_ROOT/public_html.bak"
 RELEASES_DIR="$WEB_ROOT/front-releases"
+# Committed and rsynced with the rest of the front — it holds no secrets.
 PM2_ECOSYSTEM_FILE="ecosystem.config.cjs"
-ECOSYSTEM_FILE="$SCRIPT_DIR/$PM2_ECOSYSTEM_FILE"
 
 remote_pm2_reload() {
   ssh "$TREKKER_DEPLOY_HOST" \
@@ -50,8 +50,6 @@ EOF
 
 deploy() {
   cd "$SCRIPT_DIR"
-  # Setup problems before readiness problems — see deploy-api.sh.
-  [ -f "$ECOSYSTEM_FILE" ] || die "Missing $ECOSYSTEM_FILE — copy ecosystem.config.example.cjs and fill it in. It is not committed."
   check_tree_state
   compute_release_metadata
 
@@ -93,14 +91,9 @@ EOF
     --exclude ".next" \
     --exclude "node_modules" \
     --exclude "out" \
-    --exclude ".env.local" \
-    --exclude ".env*.local" \
     --exclude ".DS_Store" \
     --exclude "deploy-front.sh" \
-    --exclude "$PM2_ECOSYSTEM_FILE" \
     "$SCRIPT_DIR"/ "$TREKKER_DEPLOY_HOST:$STAGING_DIR/"
-
-  scp -q "$ECOSYSTEM_FILE" "$TREKKER_DEPLOY_HOST:$STAGING_DIR/$PM2_ECOSYSTEM_FILE"
 
   log "➡️  Installing and building on the server"
   ssh "$TREKKER_DEPLOY_HOST" \
@@ -115,14 +108,8 @@ command -v pm2  >/dev/null 2>&1 || { echo "❌ ERROR: pm2 not found on the serve
 
 cd "$STAGING_DIR"
 
-# Carry the environment forward from the live release. NEXT_PUBLIC_* values are
-# baked in at build time, so this has to happen before the build, not after.
-for env_file in .env.production.local .env.production .env.local; do
-  if [ -f "$CURRENT_DIR/$env_file" ] && [ ! -f "$STAGING_DIR/$env_file" ]; then
-    cp "$CURRENT_DIR/$env_file" "$STAGING_DIR/$env_file"
-  fi
-done
-
+# Nothing to carry forward: the front has no environment. Behind nginx the API
+# is same-origin under /api/, so there is nothing to point it at.
 pnpm install --frozen-lockfile
 pnpm build
 EOF

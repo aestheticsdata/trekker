@@ -1,10 +1,12 @@
 const isDev = process.env.NODE_ENV !== "production";
-const apiOrigin = process.env.NEXT_PUBLIC_API_ORIGIN;
+
+// In development the front is on 3005 and the API on 6800, so calls are
+// cross-origin and the API has to be allowed explicitly. In production nginx
+// serves both from one domain and /api/ is same-origin, so 'self' covers it and
+// there is nothing to configure. This is why the front has no env file.
+const apiOrigin = isDev ? "http://localhost:6800" : null;
 
 const devConnectSources = ["ws:", "wss:"];
-if (apiOrigin) {
-  devConnectSources.push(apiOrigin);
-}
 
 // Fonts are self-hosted through next/font, so no external font host is allowed
 // here. An app for private infrastructure should make no third-party request.

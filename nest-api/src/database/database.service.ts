@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import mariadb, { type Pool } from "mariadb";
+import { parseDatabaseUrl } from "@config/database-url";
 import { withTimeout } from "@infrastructure/with-timeout.util";
 
 const PING_TIMEOUT_MS = 2_000;
@@ -19,9 +20,7 @@ export class DatabaseService implements OnModuleDestroy {
   constructor() {
     // The pool connects lazily, so an unreachable database does not stop boot.
     this.pool = mariadb.createPool({
-      // mariadb accepts a mysql:// URL through `connectionLimit`-style options
-      // or a connection string; the string keeps one source of truth in .env.
-      ...parseConnectionString(process.env.DATABASE_URL!),
+      ...parseDatabaseUrl(process.env.DATABASE_URL),
       connectionLimit: 5,
       acquireTimeout: PING_TIMEOUT_MS,
       connectTimeout: PING_TIMEOUT_MS,
@@ -52,28 +51,4 @@ export class DatabaseService implements OnModuleDestroy {
       await connection?.release();
     }
   }
-}
-
-interface ConnectionOptions {
-  host: string;
-  port: number;
-  user: string;
-  password: string;
-  database: string;
-}
-
-/**
- * `DATABASE_URL` is a single variable so the same value can be handed to Prisma
- * in TRE-6 without a second set of discrete host/user/password variables that
- * would inevitably drift apart from it.
- */
-function parseConnectionString(url: string): ConnectionOptions {
-  const parsed = new URL(url);
-  return {
-    host: parsed.hostname,
-    port: parsed.port ? Number(parsed.port) : 3306,
-    user: decodeURIComponent(parsed.username),
-    password: decodeURIComponent(parsed.password),
-    database: parsed.pathname.replace(/^\//, ""),
-  };
 }

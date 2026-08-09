@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-const API_ORIGIN = process.env.NEXT_PUBLIC_API_ORIGIN ?? "http://localhost:6800";
+// Development runs the front on 3005 and the API on 6800. In production nginx
+// puts both behind one domain, so /api/ is same-origin and a bare relative URL
+// is correct. Next inlines NODE_ENV at build time, so there is nothing to
+// configure and no env file on this side.
+const API_ORIGIN = process.env.NODE_ENV === "production" ? "" : "http://localhost:6800";
 
 export const healthSchema = z.object({
   status: z.enum(["ok", "degraded"]),

@@ -11,19 +11,42 @@ backup, reloads PM2, and rolls back on its own if anything fails after the switc
 > consider restricting it by IP or VPN. Do not put it on the open internet because
 > it happens to have a login form.
 
-## What is not in this repo
+## Where configuration lives
 
-The repo is public, so three files that name real infrastructure or hold secrets
-are gitignored. Each has a tracked `.example` next to it:
+**In production: `nest-api/ecosystem.config.js`, and nothing else.** There is no
+`.env` on the server. Same as pfa and bkmk.
 
-| File | Copy from | Holds |
+| File | Tracked? | Contents |
 |---|---|---|
-| `deploy.env` | `deploy.env.example` | SSH target, remote root, ports |
-| `nest-api/ecosystem.config.js` | `ecosystem.config.example.js` | API env, including secrets |
-| `front/ecosystem.config.cjs` | `ecosystem.config.example.cjs` | front PM2 config |
+| `nest-api/ecosystem.config.js` | no | every variable the API reads, secrets included |
+| `deploy.env` | no | SSH host, remote root, ports |
+| `front/ecosystem.config.cjs` | **yes** | front process definition — holds nothing secret |
 
-`nest-api/.env` lives **only on the server** and is never uploaded — the deploy
-carries the live one forward across releases. It holds the master key.
+Both untracked files have a `.example` beside them. Copy and fill in:
+
+```bash
+cp deploy.env.example deploy.env
+cp nest-api/ecosystem.config.example.js nest-api/ecosystem.config.js
+```
+
+Two things follow from PM2 owning the environment. `pm2 save` copies the
+resolved values into `~/.pm2/dump.pm2`, so that file deserves a `chmod 600`.
+And `prisma migrate deploy` runs from the deploy script, outside PM2, so it
+cannot inherit them — rather than keep a second copy of `DATABASE_URL` in a
+`.env` beside it, `deploy-api.sh` reads the value back out of
+`ecosystem.config.js` with `node -e` and exports it for that one command. One
+place each value is written down.
+
+`SHADOW_DATABASE_URL` never appears in production. It exists only for
+`prisma migrate dev`, which needs a scratch database to replay migrations in.
+`migrate deploy` does no replay and no diffing.
+
+### Development
+
+The same file, its `env_development` block. `pnpm dev` runs Nest directly
+rather than under PM2, so `src/config/load-env.ts` reads the block and puts it
+into `process.env` before Nest boots — as do `prisma migrate dev`, `pnpm seed`
+and `pnpm test:db`. **This project has no `.env` files at all**, on either side.
 
 ## Ports
 
@@ -43,19 +66,29 @@ On the server, as the deploy user:
 mkdir -p /var/www/trekker/nest-api
 ```
 
-Create the database and its user, then write `/var/www/trekker/nest-api/.env`
-from `nest-api/.env.example`. Generate the secrets there, never on a workstation:
+Create the database and its user:
+
+```sql
+CREATE DATABASE trekker CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'trekker'@'127.0.0.1' IDENTIFIED BY 'a-generated-password';
+GRANT ALL PRIVILEGES ON trekker.* TO 'trekker'@'127.0.0.1';
+```
+
+No shadow database here — that is a `migrate dev` concern, and production only
+ever runs `migrate deploy`, which needs nothing beyond the app's own schema.
+
+Locally, fill in the two untracked files:
+
+```bash
+cp deploy.env.example deploy.env && cp nest-api/ecosystem.config.example.js nest-api/ecosystem.config.js
+```
+
+`ecosystem.config.js` needs every variable the API requires, `PORT` included —
+`env.validation.ts` refuses to boot without them and names the one that is
+missing. Generate the secrets on the server, never on a workstation:
 
 ```bash
 openssl rand -base64 48        # SESSION_SECRET
-```
-
-Locally:
-
-```bash
-cp deploy.env.example deploy.env                                   # then fill in
-cp nest-api/ecosystem.config.example.js nest-api/ecosystem.config.js
-cp front/ecosystem.config.example.cjs front/ecosystem.config.cjs
 ```
 
 Then deploy the API first — the front's health panel expects it to answer:
@@ -82,6 +115,23 @@ you genuinely mean it.
 Each ends by checking the thing it just shipped actually answers: the API on
 `/api/health`, the front on `/`. A deploy that reports success while the service
 is down is the failure this prevents.
+
+### Migrations
+
+`deploy-api.sh` runs `prisma migrate deploy` after the build and before PM2
+serves the new code, so the schema is never behind the code that expects it.
+`migrate deploy` applies only what is committed — it never generates, never
+resets and never prompts.
+
+MySQL DDL is not transactional. A migration that fails halfway leaves the
+database part-applied, and the script's rollback restores the *code* but cannot
+undo that. If a deploy fails during this step:
+
+```bash
+pnpm exec prisma migrate status      # in /var/www/trekker/nest-api
+```
+
+and finish or revert the migration by hand before deploying again.
 
 ## Rollback
 
@@ -141,5 +191,6 @@ the `keyVersion` column that makes it possible. The procedure will live here.
 
 ## Database backup
 
-Not set up yet. pfa's `db-backup` cron is the model to copy once there is a schema
-worth backing up (**TRE-6**).
+Not set up yet, and now overdue — there is a schema as of TRE-6. pfa's
+`db-backup` cron is the model to copy. Worth doing before the first migration
+that drops or rewrites a column.

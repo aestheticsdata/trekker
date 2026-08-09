@@ -3,11 +3,17 @@ packages:
   - nest-api
 
 allowBuilds:
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true
   sharp: true
   unrs-resolver: true
 
 onlyBuiltDependencies:
   - "@biomejs/biome"
   - "@nestjs/core"
+  - "@prisma/engines"
+  - esbuild
+  - prisma
   - sharp
   - unrs-resolver
