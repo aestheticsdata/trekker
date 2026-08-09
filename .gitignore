@@ -1,0 +1,53 @@
+# Trekker is a public repo and holds SSH credentials at runtime.
+# Nothing environment-specific ever gets committed. See TRE-5.
+
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+.pnpm-store/
+
+# env — only .env.example is tracked
+.env
+.env.*
+!.env.example
+
+# secrets and key material
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+id_ecdsa*
+known_hosts
+*.gpg
+
+# build output
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# runtime
+dump.rdb
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# testing
+coverage/
+test-results/
+playwright-report/
+e2e/.auth/
+
+# generated
+generated/
+
+# editors and OS
+.DS_Store
+.idea/
+.vscode/
+.claude/worktrees/

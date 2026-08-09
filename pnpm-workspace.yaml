@@ -1,0 +1,13 @@
+packages:
+  - front
+  - nest-api
+
+allowBuilds:
+  sharp: true
+  unrs-resolver: true
+
+onlyBuiltDependencies:
+  - "@biomejs/biome"
+  - "@nestjs/core"
+  - sharp
+  - unrs-resolver

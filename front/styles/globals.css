@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/*
+ * Placeholder surface only. The real token set — surfaces, ink, accent, the
+ * seven-step age ramp, the type scale and the density scale — is extracted from
+ * the mockup in TRE-14. Nothing here is meant to survive that ticket beyond the
+ * two font variables.
+ */
+@theme {
+  --color-app: #0c2a44;
+  --color-chrome: #08202f;
+  --color-ink: #e8f2f7;
+  --color-ink-dim: #8fc0d6;
+  --color-accent: #1f7cab;
+  --color-line: #0f3d5c;
+
+  --font-sans: var(--font-plex-sans), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
