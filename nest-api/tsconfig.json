@@ -20,6 +20,7 @@
       "@redis/*": ["./src/redis/*"],
       "@database/*": ["./src/database/*"],
       "@health/*": ["./src/health/*"],
+      "@hosts/*": ["./src/hosts/*"],
       "@secrets/*": ["./src/secrets/*"],
       "@users/*": ["./src/users/*"]
     },

@@ -4,9 +4,13 @@ packages:
 
 allowBuilds:
   '@prisma/engines': true
+  # Optional native accelerator for ssh2. Pure-JS crypto is the fallback and
+  # works fine; not worth a compiler on the deploy host.
+  cpu-features: false
   esbuild: true
   prisma: true
   sharp: true
+  ssh2: true
   unrs-resolver: true
 
 onlyBuiltDependencies:
@@ -15,5 +19,6 @@ onlyBuiltDependencies:
   - "@prisma/engines"
   - esbuild
   - prisma
+  - ssh2
   - sharp
   - unrs-resolver

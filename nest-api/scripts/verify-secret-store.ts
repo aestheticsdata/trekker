@@ -198,7 +198,10 @@ check(
   })(),
 );
 check("inspect shows no material", !inspect(sealed).includes(secret.toString("hex").slice(0, 16)));
-check("describe() carries only kind and version", JSON.stringify(sealed.describe()) === '{"kind":"PRIVATE_KEY","keyVersion":1}');
+check(
+  "describe() carries only kind and version",
+  JSON.stringify(sealed.describe()) === '{"kind":"PRIVATE_KEY","keyVersion":1}',
+);
 
 console.log(`\nPASS=${pass} FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);
