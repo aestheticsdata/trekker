@@ -154,11 +154,15 @@ EOF
     'bash -s' << 'EOF'
 set -Eeuo pipefail
 export PATH="$REMOTE_PATH:$PATH"
+# This IS production. Without it, prisma.config.ts's loadEnv() thinks it is in
+# development and demands the dev ecosystem.config.js, which rightly does not
+# exist inside the deployed package.
+export NODE_ENV=production
 command -v pnpm >/dev/null 2>&1 || { echo "❌ ERROR: pnpm not found on the server" >&2; exit 1; }
 cd "$NEST_DIR"
 # --prod=false explicitly: the build needs the Prisma CLI and the Nest CLI,
-# which are devDependencies, and a NODE_ENV=production in the login shell would
-# skip them. --filter keeps the front's dependencies out of this install.
+# which are devDependencies, and NODE_ENV=production would otherwise skip them.
+# --filter keeps the front's dependencies out of this install.
 pnpm install --frozen-lockfile --filter ./nest-api --prod=false
 pnpm --filter ./nest-api build
 EOF
@@ -178,6 +182,8 @@ EOF
     'bash -s' << 'EOF'
 set -Eeuo pipefail
 export PATH="$REMOTE_PATH:$PATH"
+# Same reason as the build step: loadEnv() must be a no-op here.
+export NODE_ENV=production
 cd "$APP_DIR"
 
 # This runs outside PM2, so it does not inherit PM2's environment. Rather than
