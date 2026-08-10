@@ -57,6 +57,7 @@ deploy() {
   cd "$SCRIPT_DIR"
   check_tree_state
   compute_release_metadata
+  zeus_init "front"
 
   local STAGING_DIR="$RELEASES_DIR/$RELEASE_NAME"
   local SWITCH_DONE="false"
@@ -68,11 +69,16 @@ deploy() {
       if remote_rollback; then
         remote_pm2_reload || true
         log "✅ Auto rollback succeeded"
+        # `rolled_back`, not `failed` — the deploy did fail, and the box is
+        # serving exactly what it served before.
+        zeus_report "rolled_back" "deploy failed at line $1 — previous release restored" || true
       else
         log "❌ Auto rollback failed, manual intervention required"
+        zeus_report "failed" "deploy failed at line $1 — rollback failed too" || true
       fi
     else
       log "ℹ️  No rollback needed: production was not modified yet"
+      zeus_report "failed" "deploy failed at line $1 — production was not modified" || true
     fi
   }
   trap 'on_error $LINENO' ERR
@@ -161,7 +167,8 @@ EOF
 
   trap - ERR
 
-  write_deploy_log "front" || log "⚠️  Deploy changelog update skipped (non-fatal)"
+  write_deploy_log "$ZEUS_ROLE" || log "⚠️  Deploy changelog update skipped (non-fatal)"
+  zeus_report "success" || log "⚠️  Zeus was not told about this deploy (non-fatal)"
 
   log "✅ Front deployed on port $TREKKER_FRONT_PORT"
   log "ℹ️  Previous version: $BACKUP_DIR"
@@ -171,8 +178,21 @@ EOF
 
 rollback() {
   log "↩️  Manual rollback"
-  remote_rollback || die "Rollback failed. Check the server."
+
+  # Reported for the same reason an automatic one is: it changes what is live.
+  # It ships no commits and names no release — what it restores is whatever was
+  # in the backup directory, and this script never learns its name.
+  ZEUS_ROLE="front"
+  ZEUS_STARTED_AT=$(date -u +%FT%TZ)
+  ZEUS_STARTED_EPOCH=$(date +%s)
+  ZEUS_REPORT_COMMITS="false"
+
+  if ! remote_rollback; then
+    zeus_report "failed" "manual rollback failed — the box needs looking at" || true
+    die "Rollback failed. Check the server."
+  fi
   remote_pm2_reload
+  zeus_report "rolled_back" "manual rollback — the previous release is live again" || true
   log "✅ Previous front version is live again"
 }
 
