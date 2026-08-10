@@ -6,8 +6,8 @@ import { IsIn, IsNumberString, IsOptional, IsString, IsUrl, MinLength, validateS
  * missing or malformed one stops the process at startup instead of surfacing
  * as a confusing failure on the first request that happens to need it.
  *
- * Keep this in sync with `.env.example` — a variable added to one and not the
- * other is a review failure (TRE-5).
+ * Keep this in sync with `ecosystem.config.example.js` — a variable added to
+ * one and not the other is a review failure (TRE-5).
  */
 class EnvironmentVariables {
   /**
