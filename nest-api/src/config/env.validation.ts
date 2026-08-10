@@ -1,5 +1,14 @@
 import { plainToInstance } from "class-transformer";
-import { IsIn, IsNumberString, IsOptional, IsString, IsUrl, MinLength, validateSync, ValidationError } from "class-validator";
+import {
+  IsIn,
+  IsNumberString,
+  IsOptional,
+  IsString,
+  IsUrl,
+  MinLength,
+  validateSync,
+  ValidationError,
+} from "class-validator";
 
 /**
  * Boot-time contract. Every variable the API needs is declared here, and a
