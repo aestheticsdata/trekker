@@ -57,10 +57,11 @@ module.exports = {
   apps: [
     {
       name: "trekker-api",
-      // This file lives one level above the app. `nest-api/` is replaced
-      // wholesale on every deploy, so a PM2 config inside it would be swapped
-      // out from under the running process.
-      cwd: join(__dirname, "nest-api"),
+      // This file sits at the remote root; the deployed unit below it is the
+      // whole pnpm workspace (the lockfile lives at its root), so the API
+      // package is one level further down: <root>/api/nest-api. Keeping the
+      // config outside `api/` is what lets it survive the release swap.
+      cwd: join(__dirname, "api", "nest-api"),
       // dist/src, not dist: the Prisma client is generated to ../generated, so
       // tsc's root covers the whole package and the layout is mirrored.
       script: "dist/src/main.js",

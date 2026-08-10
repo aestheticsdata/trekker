@@ -42,7 +42,15 @@ load_deploy_config() {
     die "deploy.env still holds the placeholder host. Set TREKKER_DEPLOY_HOST to your server."
   fi
 
-  REMOTE_PATH_EXPORT="export PATH=\"${TREKKER_REMOTE_PATH:-/usr/local/bin:/usr/bin:/bin:/usr/sbin}:\$PATH\""
+  # The VALUE only, never a whole `export PATH=...` statement.
+  #
+  # These are handed to ssh as `ssh host VAR=value 'bash -s'`, and ssh flattens
+  # its arguments into one command string that the remote shell re-parses. A
+  # value containing a space is split there: `REMOTE_PATH_EXPORT=export` and
+  # `PATH=...` become two separate assignments, and the later `eval "$VAR"` runs
+  # a bare `export`, which prints the entire environment instead of setting
+  # anything. A colon-separated path list has no spaces, so it survives intact.
+  REMOTE_PATH="${TREKKER_REMOTE_PATH:-/usr/local/bin:/usr/bin:/bin:/usr/sbin}"
 }
 
 # Release naming, shared so the API and front folders sort together by date.

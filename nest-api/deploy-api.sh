@@ -14,10 +14,22 @@ source "$SCRIPT_DIR/../scripts/deploy-common.sh"
 
 load_deploy_config
 
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 API_ROOT="$TREKKER_REMOTE_ROOT"
-NEST_DIR="$API_ROOT/nest-api"
-NEST_BACKUP_DIR="$API_ROOT/nest-api.bak"
-NEST_RELEASES_DIR="$API_ROOT/nest-api-releases"
+
+# The deployed unit is the whole pnpm workspace, not just nest-api/.
+#
+# pfa and bkmk ship one package because each of their halves is an independent
+# pnpm root with its own lockfile. Trekker is a single workspace, so the
+# lockfile and the workspace manifest live at the repo root — send only
+# nest-api/ and `pnpm install --frozen-lockfile` has nothing to work from.
+#
+#   $NEST_DIR   the workspace root on the server
+#   $APP_DIR    the API package inside it, which is what PM2 runs
+NEST_DIR="$API_ROOT/api"
+APP_DIR="$NEST_DIR/nest-api"
+NEST_BACKUP_DIR="$API_ROOT/api.bak"
+NEST_RELEASES_DIR="$API_ROOT/api-releases"
 ECOSYSTEM_FILE="$SCRIPT_DIR/ecosystem.config.js"
 
 remote_rollback() {
@@ -38,10 +50,10 @@ EOF
 restart_pm2() {
   ssh "$TREKKER_DEPLOY_HOST" \
     API_ROOT="$API_ROOT" \
-    REMOTE_PATH_EXPORT="$REMOTE_PATH_EXPORT" \
+    REMOTE_PATH="$REMOTE_PATH" \
     'bash -s' << 'EOF'
 set -Eeuo pipefail
-eval "$REMOTE_PATH_EXPORT"
+export PATH="$REMOTE_PATH:$PATH"
 cd "$API_ROOT"
 command -v pm2 >/dev/null 2>&1 || { echo "❌ ERROR: pm2 not found on the server" >&2; exit 1; }
 pm2 startOrReload ecosystem.config.js --env production --update-env
@@ -89,16 +101,21 @@ rm -rf "$NEST_RELEASE_REMOTE"
 mkdir -p "$NEST_RELEASE_REMOTE"
 EOF
 
-  log "➡️  Syncing API sources"
+  # From the repo root: the lockfile, pnpm-workspace.yaml and every package's
+  # package.json have to be present or --frozen-lockfile refuses to run.
+  log "➡️  Syncing workspace sources"
   rsync -az --delete \
     --exclude=".git" \
     --exclude="node_modules" \
     --exclude="dist" \
+    --exclude=".next" \
+    --exclude="out" \
+    --exclude="generated" \
     --exclude=".env" \
+    --exclude="deploy.env" \
     --exclude=".DS_Store" \
-    --exclude="deploy-api.sh" \
     --exclude="ecosystem.config.js" \
-    "$SCRIPT_DIR/" "$TREKKER_DEPLOY_HOST:$NEST_RELEASE_REMOTE/"
+    "$REPO_ROOT/" "$TREKKER_DEPLOY_HOST:$NEST_RELEASE_REMOTE/"
 
   # The PM2 config lives above the app directory so it survives the release
   # swap, which is why it is copied separately rather than left where rsync put
@@ -132,17 +149,18 @@ EOF
   log "➡️  Installing and building on the server"
   ssh "$TREKKER_DEPLOY_HOST" \
     NEST_DIR="$NEST_DIR" \
-    REMOTE_PATH_EXPORT="$REMOTE_PATH_EXPORT" \
+    APP_DIR="$APP_DIR" \
+    REMOTE_PATH="$REMOTE_PATH" \
     'bash -s' << 'EOF'
 set -Eeuo pipefail
-eval "$REMOTE_PATH_EXPORT"
+export PATH="$REMOTE_PATH:$PATH"
 command -v pnpm >/dev/null 2>&1 || { echo "❌ ERROR: pnpm not found on the server" >&2; exit 1; }
 cd "$NEST_DIR"
-rm -rf node_modules dist
-# --prod=false explicitly: the build needs the Prisma CLI and dotenv, which are
-# devDependencies, and a NODE_ENV=production in the login shell would skip them.
-pnpm install --frozen-lockfile --filter . --prod=false
-pnpm build
+# --prod=false explicitly: the build needs the Prisma CLI and the Nest CLI,
+# which are devDependencies, and a NODE_ENV=production in the login shell would
+# skip them. --filter keeps the front's dependencies out of this install.
+pnpm install --frozen-lockfile --filter ./nest-api --prod=false
+pnpm --filter ./nest-api build
 EOF
 
   # Migrations run against the new code, before pm2 serves it. `migrate deploy`
@@ -154,13 +172,13 @@ EOF
   # `prisma migrate status` before re-running.
   log "➡️  Applying migrations"
   ssh "$TREKKER_DEPLOY_HOST" \
-    NEST_DIR="$NEST_DIR" \
+    APP_DIR="$APP_DIR" \
     API_ROOT="$API_ROOT" \
-    REMOTE_PATH_EXPORT="$REMOTE_PATH_EXPORT" \
+    REMOTE_PATH="$REMOTE_PATH" \
     'bash -s' << 'EOF'
 set -Eeuo pipefail
-eval "$REMOTE_PATH_EXPORT"
-cd "$NEST_DIR"
+export PATH="$REMOTE_PATH:$PATH"
+cd "$APP_DIR"
 
 # This runs outside PM2, so it does not inherit PM2's environment. Rather than
 # keep a second copy of DATABASE_URL in a .env beside it — two values that must

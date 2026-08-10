@@ -13,21 +13,26 @@ source "$SCRIPT_DIR/../scripts/deploy-common.sh"
 
 load_deploy_config
 
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WEB_ROOT="$TREKKER_REMOTE_ROOT"
 CURRENT_DIR="$WEB_ROOT/public_html"
 BACKUP_DIR="$WEB_ROOT/public_html.bak"
 RELEASES_DIR="$WEB_ROOT/front-releases"
+# The deployed unit is the whole pnpm workspace — the lockfile lives at the repo
+# root, so shipping only front/ leaves --frozen-lockfile nothing to work from.
+# $CURRENT_DIR is therefore the workspace root and the Next app sits in front/.
+APP_SUBDIR="front"
 # Committed and rsynced with the rest of the front — it holds no secrets.
-PM2_ECOSYSTEM_FILE="ecosystem.config.cjs"
+PM2_ECOSYSTEM_FILE="$APP_SUBDIR/ecosystem.config.cjs"
 
 remote_pm2_reload() {
   ssh "$TREKKER_DEPLOY_HOST" \
     CURRENT_DIR="$CURRENT_DIR" \
     PM2_ECOSYSTEM_FILE="$PM2_ECOSYSTEM_FILE" \
-    REMOTE_PATH_EXPORT="$REMOTE_PATH_EXPORT" \
+    REMOTE_PATH="$REMOTE_PATH" \
     'bash -s' << 'EOF'
 set -Eeuo pipefail
-eval "$REMOTE_PATH_EXPORT"
+export PATH="$REMOTE_PATH:$PATH"
 cd "$CURRENT_DIR"
 [ -f "$PM2_ECOSYSTEM_FILE" ] || { echo "❌ ERROR: missing $CURRENT_DIR/$PM2_ECOSYSTEM_FILE" >&2; exit 1; }
 pm2 startOrReload "$CURRENT_DIR/$PM2_ECOSYSTEM_FILE" --update-env
@@ -83,26 +88,28 @@ rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
 EOF
 
-  # The lockfile lives at the workspace root, so it ships alongside the front —
-  # `pnpm install --frozen-lockfile` needs it and the workspace manifest.
-  log "➡️  Uploading front sources"
+  log "➡️  Uploading workspace sources"
   rsync -az --delete \
     --exclude ".git" \
     --exclude ".next" \
     --exclude "node_modules" \
     --exclude "out" \
+    --exclude "dist" \
+    --exclude "generated" \
+    --exclude ".env" \
+    --exclude "deploy.env" \
+    --exclude "ecosystem.config.js" \
     --exclude ".DS_Store" \
-    --exclude "deploy-front.sh" \
-    "$SCRIPT_DIR"/ "$TREKKER_DEPLOY_HOST:$STAGING_DIR/"
+    "$REPO_ROOT/" "$TREKKER_DEPLOY_HOST:$STAGING_DIR/"
 
   log "➡️  Installing and building on the server"
   ssh "$TREKKER_DEPLOY_HOST" \
     STAGING_DIR="$STAGING_DIR" \
     CURRENT_DIR="$CURRENT_DIR" \
-    REMOTE_PATH_EXPORT="$REMOTE_PATH_EXPORT" \
+    REMOTE_PATH="$REMOTE_PATH" \
     'bash -s' << 'EOF'
 set -Eeuo pipefail
-eval "$REMOTE_PATH_EXPORT"
+export PATH="$REMOTE_PATH:$PATH"
 command -v pnpm >/dev/null 2>&1 || { echo "❌ ERROR: pnpm not found on the server" >&2; exit 1; }
 command -v pm2  >/dev/null 2>&1 || { echo "❌ ERROR: pm2 not found on the server" >&2; exit 1; }
 
@@ -110,8 +117,9 @@ cd "$STAGING_DIR"
 
 # Nothing to carry forward: the front has no environment. Behind nginx the API
 # is same-origin under /api/, so there is nothing to point it at.
-pnpm install --frozen-lockfile
-pnpm build
+# --filter keeps the API's dependencies out of the front's install.
+pnpm install --frozen-lockfile --filter ./front --prod=false
+pnpm --filter ./front build
 EOF
 
   log "➡️  Atomic release switch"
@@ -119,9 +127,10 @@ EOF
     CURRENT_DIR="$CURRENT_DIR" \
     BACKUP_DIR="$BACKUP_DIR" \
     STAGING_DIR="$STAGING_DIR" \
+    APP_SUBDIR="$APP_SUBDIR" \
     'bash -s' << 'EOF'
 set -Eeuo pipefail
-[ -d "$STAGING_DIR/.next" ] || { echo "❌ ERROR: build output missing in staging" >&2; exit 1; }
+[ -d "$STAGING_DIR/$APP_SUBDIR/.next" ] || { echo "❌ ERROR: build output missing in staging" >&2; exit 1; }
 rm -rf "$BACKUP_DIR"
 [ -d "$CURRENT_DIR" ] && mv "$CURRENT_DIR" "$BACKUP_DIR"
 cp -a "$STAGING_DIR" "$CURRENT_DIR"
