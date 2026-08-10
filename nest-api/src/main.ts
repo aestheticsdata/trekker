@@ -60,8 +60,10 @@ async function bootstrap() {
     next();
   });
 
-  await app.listen(appConfig.port);
-  console.log(`Trekker API listening on :${appConfig.port}`);
+  // Host given explicitly: `listen(port)` alone binds every interface, and
+  // this API must only ever be reached through nginx on loopback (TRE-40).
+  await app.listen(appConfig.port, appConfig.host);
+  console.log(`Trekker API listening on ${appConfig.host}:${appConfig.port}`);
 }
 
 bootstrap().catch((error: Error) => {

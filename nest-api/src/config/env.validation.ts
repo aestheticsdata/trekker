@@ -1,5 +1,5 @@
 import { plainToInstance } from "class-transformer";
-import { IsIn, IsNumberString, IsString, IsUrl, MinLength, validateSync, ValidationError } from "class-validator";
+import { IsIn, IsNumberString, IsOptional, IsString, IsUrl, MinLength, validateSync, ValidationError } from "class-validator";
 
 /**
  * Boot-time contract. Every variable the API needs is declared here, and a
@@ -10,6 +10,16 @@ import { IsIn, IsNumberString, IsString, IsUrl, MinLength, validateSync, Validat
  * other is a review failure (TRE-5).
  */
 class EnvironmentVariables {
+  /**
+   * Listen address. Optional: unset means 127.0.0.1, which is right everywhere
+   * nginx fronts the API — binding wider is an explicit decision, never a
+   * default (TRE-40).
+   */
+  @IsOptional()
+  @IsString()
+  @MinLength(1, { message: "HOST, when set, must not be empty" })
+  HOST?: string;
+
   @IsNumberString({}, { message: "PORT must be a number" })
   PORT!: string;
 

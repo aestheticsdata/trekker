@@ -58,6 +58,13 @@ services there before the first deploy; do not pick a port without claiming it.
 | front | `3005` |
 | API | `6800` (block `6800-6899`) |
 
+Both processes bind `127.0.0.1` — nginx is the only public entrance, and the
+host firewall must never be the sole thing keeping these ports off the internet.
+The API defaults to loopback even with `HOST` unset (TRE-40); keep
+`HOST: "127.0.0.1"` in `ecosystem.config.js` anyway, so the file states what the
+process does. After a deploy, `ss -ltn` on the server must show both ports on
+`127.0.0.1`, never on `*` or `0.0.0.0`.
+
 ## First install
 
 On the server, as the deploy user:

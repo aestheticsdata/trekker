@@ -20,6 +20,11 @@ const { join } = require("node:path");
 const prodEnv = {
   NODE_ENV: "production",
 
+  // Loopback only — nginx is the single public entrance. Node with no bind
+  // host listens on every interface, leaving the host firewall as the only
+  // thing between an SSH gateway and the internet (TRE-40).
+  HOST: "127.0.0.1",
+
   // From the Zeus port registry: block 6800-6899.
   PORT: 6800,
 
