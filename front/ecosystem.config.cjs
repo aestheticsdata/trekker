@@ -4,9 +4,9 @@
  * Committed, no secrets, nothing to fill in. It ships with the release like
  * any other source file.
  *
- * The front needs no runtime configuration: NEXT_PUBLIC_* values are baked in
- * at build time, and the deploy carries `.env.production` forward from the
- * live release before building.
+ * The front needs no runtime configuration and no env file: behind nginx the
+ * API is same-origin under /api/, so there is nothing to point it at, and no
+ * NEXT_PUBLIC_* value exists to bake in (see next.config.js).
  *
  * Bound to 127.0.0.1 — nginx is the only thing that should reach it.
  */
