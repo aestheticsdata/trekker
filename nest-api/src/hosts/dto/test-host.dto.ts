@@ -8,6 +8,20 @@ import { CREDENTIAL_KINDS, type CredentialKindInput } from "@hosts/dto/host-cred
  * or echoed back.
  */
 export class TestHostDto {
+  /**
+   * The host being re-tested, when there is one (TRE-10 §2).
+   *
+   * Without it the probe has no pins to compare against and authenticates
+   * against whatever answers, comparing afterwards — which is the ordering
+   * this ticket exists to forbid, on the very screen where a key change is
+   * most likely to be noticed. Absent when testing a host that does not exist
+   * yet, which is a genuine first use.
+   */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  hostId?: string;
+
   @IsString()
   @MinLength(1)
   address!: string;

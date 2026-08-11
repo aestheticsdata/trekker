@@ -183,8 +183,14 @@ function toHttp(error: DriverError): HttpException {
       return body(HttpStatus.FORBIDDEN, "Permission denied on the host");
     case "ENOTDIR":
       return body(HttpStatus.BAD_REQUEST, "Not a directory");
-    case "EAUTH":
+    // TRE-10 §3: the mismatch must read as its own thing. The `code` already
+    // distinguished it, but the message did not, and the message is what a
+    // person sees — telling someone to check the network during a host key
+    // change is the worst possible advice, because the host answered fine.
     case "EHOSTKEY":
+      return body(HttpStatus.BAD_GATEWAY, "The host key does not match the pinned fingerprint");
+    case "EAUTH":
+      return body(HttpStatus.BAD_GATEWAY, "The host refused the credential");
     case "EUNREACHABLE":
     case "ETIMEDOUT":
       return body(HttpStatus.BAD_GATEWAY, "The host could not be reached");

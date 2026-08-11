@@ -1,14 +1,15 @@
-import { Injectable, Logger } from "@nestjs/common";
 import { DriverError } from "@hosts/drivers/driver-error";
 import type { HostDriver } from "@hosts/drivers/host-driver";
 import { LocalDriver } from "@hosts/drivers/local.driver";
+import { SshDriver } from "@hosts/drivers/ssh.driver";
 import {
   DEFAULT_POOL_SETTINGS,
   type HostConnectionSpec,
   type SshAuth,
   SshConnectionPool,
 } from "@hosts/drivers/ssh-connection.pool";
-import { SshDriver } from "@hosts/drivers/ssh.driver";
+import { HostKeyService } from "@hosts/host-key.service";
+import { Injectable, Logger } from "@nestjs/common";
 import { SecretStoreService } from "@secrets/secret-store.service";
 import { PrismaService } from "../../prisma/prisma.service";
 
@@ -28,6 +29,7 @@ export class HostDriverFactory {
     private readonly prisma: PrismaService,
     private readonly secrets: SecretStoreService,
     private readonly pool: SshConnectionPool,
+    private readonly hostKeys: HostKeyService,
   ) {}
 
   async forHost(hostId: string, userId: string): Promise<HostDriver> {
@@ -59,7 +61,14 @@ export class HostDriverFactory {
       port: host.port,
       username: host.username,
       auth: this.authFor(host.id, host.credential),
-      pinnedFingerprints: host.knownKeys.map((key) => key.fingerprint),
+      pins: host.knownKeys.map((key) => ({
+        algorithm: key.algorithm,
+        fingerprint: key.fingerprint,
+      })),
+      // Reported from inside the handshake, acted on off it (TRE-10). Without
+      // this the first sighting is never written down and the host is trusted
+      // on every connection rather than only the first.
+      onHostKey: (observed) => this.hostKeys.handleObservation(host.id, userId, observed),
     };
 
     return new SshDriver(spec, this.pool, DEFAULT_POOL_SETTINGS);
@@ -67,7 +76,13 @@ export class HostDriverFactory {
 
   private authFor(
     hostId: string,
-    credential: { kind: string; ciphertext: Uint8Array; iv: Uint8Array; authTag: Uint8Array; keyVersion: number },
+    credential: {
+      kind: string;
+      ciphertext: Uint8Array;
+      iv: Uint8Array;
+      authTag: Uint8Array;
+      keyVersion: number;
+    },
   ): SshAuth {
     // The plaintext lives only as long as the connection spec. It is never
     // logged, never returned from an endpoint, and never turned into a string

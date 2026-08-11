@@ -1,3 +1,16 @@
+import type { HostProbeResult } from "@hosts/drivers/ssh-connection.pool";
+// The DTOs are value imports, and must stay that way: `import type` erases the
+// token from `design:paramtypes`, so `@Body()` arrives as `Function`, the
+// global ValidationPipe strips every property under `whitelist: true`, and the
+// handler is called with an empty object and no validation. It fails silently —
+// a 201 with nothing saved — and neither tsc nor the linter says a word.
+import { AcceptHostKeyDto } from "@hosts/dto/accept-host-key.dto";
+import { CreateHostDto } from "@hosts/dto/create-host.dto";
+import { TestHostDto } from "@hosts/dto/test-host.dto";
+import { UpdateHostDto } from "@hosts/dto/update-host.dto";
+import { HostKeyService } from "@hosts/host-key.service";
+import type { HostSummary } from "@hosts/host-summary.service";
+import { HostsService, type HostView } from "@hosts/hosts.service";
 import {
   Body,
   Controller,
@@ -11,15 +24,9 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import type { Request } from "express";
-import type { HostProbeResult } from "@hosts/drivers/ssh-connection.pool";
-import { CreateHostDto } from "@hosts/dto/create-host.dto";
-import { TestHostDto } from "@hosts/dto/test-host.dto";
-import { UpdateHostDto } from "@hosts/dto/update-host.dto";
-import type { HostSummary } from "@hosts/host-summary.service";
-import { type HostView, HostsService } from "@hosts/hosts.service";
 import { CsrfGuard } from "@users/guards/csrf.guard";
 import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/session-auth.guard";
+import type { Request } from "express";
 
 /**
  * Hosts management (TRE-12). Every route is behind the session guard, and every
@@ -31,7 +38,10 @@ import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/sessi
 @Controller("hosts")
 @UseGuards(SessionAuthGuard)
 export class HostsController {
-  constructor(private readonly hosts: HostsService) {}
+  constructor(
+    private readonly hosts: HostsService,
+    private readonly hostKeys: HostKeyService,
+  ) {}
 
   @Get()
   list(@Req() req: Request): Promise<HostView[]> {
@@ -45,8 +55,8 @@ export class HostsController {
   @Post("test")
   @UseGuards(CsrfGuard)
   @HttpCode(HttpStatus.OK)
-  test(@Body() dto: TestHostDto): Promise<HostProbeResult> {
-    return this.hosts.test(dto);
+  test(@Req() req: Request, @Body() dto: TestHostDto): Promise<HostProbeResult> {
+    return this.hosts.test(dto, userIdOf(req));
   }
 
   @Get(":id")
@@ -71,6 +81,20 @@ export class HostsController {
   @HttpCode(HttpStatus.OK)
   update(@Req() req: Request, @Param("id") id: string, @Body() dto: UpdateHostDto): Promise<HostView> {
     return this.hosts.update(userIdOf(req), id, dto);
+  }
+
+  /**
+   * Replace the pinned host key, deliberately (TRE-10 §3).
+   *
+   * Its own route rather than a field on PATCH: a host key change is a security
+   * decision, and folding it into the save that also renames the host is how it
+   * becomes one careless click on a form the user opened for another reason.
+   */
+  @Post(":id/known-keys")
+  @UseGuards(CsrfGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async acceptKey(@Req() req: Request, @Param("id") id: string, @Body() dto: AcceptHostKeyDto): Promise<void> {
+    await this.hostKeys.accept(userIdOf(req), id, dto.algorithm, dto.fingerprint);
   }
 
   @Delete(":id")

@@ -1,17 +1,12 @@
 import { homedir } from "node:os";
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
-import {
-  type HostConnectionSpec,
-  type HostProbeResult,
-  type SshAuth,
-  SshConnectionPool,
-} from "@hosts/drivers/ssh-connection.pool";
+import { HostConnectionSpec, HostProbeResult, SshAuth, SshConnectionPool } from "@hosts/drivers/ssh-connection.pool";
 import type { CreateHostDto } from "@hosts/dto/create-host.dto";
 import type { HostRootInput, RootAccessInput } from "@hosts/dto/host-root.dto";
 import type { TestHostDto } from "@hosts/dto/test-host.dto";
 import type { UpdateHostDto } from "@hosts/dto/update-host.dto";
-import { HostSummaryService, type HostSummary } from "@hosts/host-summary.service";
+import { HostSummary, HostSummaryService } from "@hosts/host-summary.service";
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { SecretStoreService } from "@secrets/secret-store.service";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -30,7 +25,11 @@ export interface HostView {
   credentialKind: string | null;
   /** The allowlist, so the client can show and edit the boundary it is bound by. */
   roots: Array<{ path: string; access: "READ" | "WRITE" }>;
-  fingerprints: Array<{ algorithm: string; fingerprint: string; verified: boolean }>;
+  fingerprints: Array<{
+    algorithm: string;
+    fingerprint: string;
+    verified: boolean;
+  }>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -104,19 +103,28 @@ export class HostsService {
         });
 
         await tx.hostRoots.createMany({
-          data: roots.map((root) => ({ hostId: host.id, path: root.path, access: root.access })),
+          data: roots.map((root) => ({
+            hostId: host.id,
+            path: root.path,
+            access: root.access,
+          })),
         });
 
         if (dto.transport === "SSH" && dto.credentialKind && dto.credentialSecret) {
           await this.storeCredential(tx, host.id, dto.credentialKind, dto.credentialSecret);
         }
 
-        if (dto.fingerprint) {
+        // The algorithm is required alongside the fingerprint: a pin is a pair,
+        // and one recorded under the wrong algorithm never matches the key the
+        // host actually offers. Without both, no pin is written and the first
+        // real connection records what it sees (TRE-10 §1, §4).
+        if (dto.fingerprint && dto.fingerprintAlgorithm) {
           await tx.hostKnownKeys.create({
             data: {
               hostId: host.id,
-              algorithm: dto.fingerprintAlgorithm ?? "ssh",
+              algorithm: dto.fingerprintAlgorithm,
               fingerprint: dto.fingerprint,
+              // Confirmed on the create form against what the probe showed.
               verifiedAt: new Date(),
             },
           });
@@ -167,7 +175,10 @@ export class HostsService {
     }
     let credentialKind = dto.credentialKind;
     if (dto.credentialSecret !== undefined && credentialKind === undefined) {
-      const existing = await this.prisma.hostCredentials.findUnique({ where: { hostId: id }, select: { kind: true } });
+      const existing = await this.prisma.hostCredentials.findUnique({
+        where: { hostId: id },
+        select: { kind: true },
+      });
       if (!existing) {
         throw new BadRequestException("credentialKind is required: this host has no credential to replace");
       }
@@ -212,7 +223,11 @@ export class HostsService {
         // fresh on every request, so there is no cache to keep in step.
         await tx.hostRoots.deleteMany({ where: { hostId: id } });
         await tx.hostRoots.createMany({
-          data: roots.map((root) => ({ hostId: id, path: root.path, access: root.access })),
+          data: roots.map((root) => ({
+            hostId: id,
+            path: root.path,
+            access: root.access,
+          })),
         });
       }
       // The home is also the host's default root, seeded at creation. Moving
@@ -221,33 +236,55 @@ export class HostsService {
       // root that still matches the previous home moves with it. Skipped when
       // the request names its roots: it has already said where the boundary is.
       else if (dto.homePath !== undefined && dto.homePath !== host.homePath) {
-        const previous = await tx.hostRoots.findFirst({ where: { hostId: id, path: host.homePath } });
+        const previous = await tx.hostRoots.findFirst({
+          where: { hostId: id, path: host.homePath },
+        });
         if (previous) {
-          const clash = await tx.hostRoots.findFirst({ where: { hostId: id, path: dto.homePath } });
+          const clash = await tx.hostRoots.findFirst({
+            where: { hostId: id, path: dto.homePath },
+          });
           if (clash) {
             // The destination is already a root; drop the now-duplicate old
             // one rather than trip @@unique([hostId, path]).
             await tx.hostRoots.delete({ where: { id: previous.id } });
           } else {
-            await tx.hostRoots.update({ where: { id: previous.id }, data: { path: dto.homePath } });
+            await tx.hostRoots.update({
+              where: { id: previous.id },
+              data: { path: dto.homePath },
+            });
           }
         }
       }
 
-      if (dto.fingerprint) {
-        await tx.hostKnownKeys.upsert({
-          where: { hostId_algorithm: { hostId: id, algorithm: dto.fingerprintAlgorithm ?? "ssh" } },
-          create: {
-            hostId: id,
-            algorithm: dto.fingerprintAlgorithm ?? "ssh",
-            fingerprint: dto.fingerprint,
-            verifiedAt: new Date(),
-          },
-          update: { fingerprint: dto.fingerprint, verifiedAt: new Date() },
-        });
+      // A fingerprint on PATCH used to replace the pin outright, which made a
+      // host key change resolvable by pressing Save on the form the warning
+      // links to — the one careless click TRE-10 §3 exists to prevent. Pinning
+      // a host that has none is still fine, since there is nothing to override;
+      // replacing one goes through POST :id/known-keys and is audited.
+      //
+      // `skipDuplicates` alone was not enough: the unique key is
+      // (hostId, algorithm), so a save naming an algorithm the host has never
+      // been pinned under inserts happily and adds a second trusted key. That
+      // is a trust change riding along on a save by another name. A host with
+      // any pin at all is therefore off limits here.
+      if (dto.fingerprint && dto.fingerprintAlgorithm) {
+        const alreadyPinned = await tx.hostKnownKeys.count({ where: { hostId: id } });
+        if (alreadyPinned === 0) {
+          await tx.hostKnownKeys.create({
+            data: {
+              hostId: id,
+              algorithm: dto.fingerprintAlgorithm,
+              fingerprint: dto.fingerprint,
+              verifiedAt: new Date(),
+            },
+          });
+        }
       }
 
-      return tx.hosts.findFirstOrThrow({ where: { id }, include: { credential: true, knownKeys: true, roots: true } });
+      return tx.hosts.findFirstOrThrow({
+        where: { id },
+        include: { credential: true, knownKeys: true, roots: true },
+      });
     });
 
     if (connectionChanged) {
@@ -262,7 +299,9 @@ export class HostsService {
   async remove(userId: string, id: string): Promise<void> {
     // deleteMany scoped by user: a foreign id deletes nothing and reads as 404,
     // the same answer as an id that never existed.
-    const result = await this.prisma.hosts.deleteMany({ where: { id, userId } });
+    const result = await this.prisma.hosts.deleteMany({
+      where: { id, userId },
+    });
     if (result.count === 0) throw new NotFoundException("Host not found");
 
     // The row and its credential, roots and keys are gone (cascade, TRE-6);
@@ -273,9 +312,19 @@ export class HostsService {
   }
 
   /** Dry-run connect to a candidate SSH host. Persists nothing (TRE-12 §2). */
-  async test(dto: TestHostDto): Promise<HostProbeResult> {
+  async test(dto: TestHostDto, userId?: string): Promise<HostProbeResult> {
     const secret = Buffer.from(dto.credentialSecret, "utf8");
     const passphrase = dto.credentialPassphrase ? Buffer.from(dto.credentialPassphrase, "utf8") : undefined;
+
+    // Scoped by user, so a host id from another account contributes no pins
+    // rather than revealing that it exists.
+    const known =
+      dto.hostId && userId
+        ? await this.prisma.hostKnownKeys.findMany({
+            where: { hostId: dto.hostId, host: { userId } },
+            select: { algorithm: true, fingerprint: true },
+          })
+        : [];
 
     const spec: HostConnectionSpec = {
       // No persisted id — the probe never touches the pool map.
@@ -284,6 +333,9 @@ export class HostsService {
       port: dto.port ?? 22,
       username: dto.username,
       auth: authFromInput(dto.credentialKind, secret, passphrase),
+      // An existing host is held to its pins here too: the credential must not
+      // be offered to something that fails the check (TRE-10 §2).
+      pins: known,
     };
 
     try {
@@ -459,7 +511,11 @@ function toView(host: {
   createdAt: Date;
   updatedAt: Date;
   credential: { kind: string } | null;
-  knownKeys: Array<{ algorithm: string; fingerprint: string; verifiedAt: Date | null }>;
+  knownKeys: Array<{
+    algorithm: string;
+    fingerprint: string;
+    verifiedAt: Date | null;
+  }>;
   roots: Array<{ path: string; access: string }>;
 }): HostView {
   return {
@@ -478,7 +534,10 @@ function toView(host: {
     // the table has no order of its own.
     roots: [...host.roots]
       .sort((left, right) => left.path.localeCompare(right.path))
-      .map((root) => ({ path: root.path, access: root.access as "READ" | "WRITE" })),
+      .map((root) => ({
+        path: root.path,
+        access: root.access as "READ" | "WRITE",
+      })),
     fingerprints: host.knownKeys.map((key) => ({
       algorithm: key.algorithm,
       fingerprint: key.fingerprint,

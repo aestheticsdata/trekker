@@ -61,6 +61,8 @@ export interface HostInput {
 
 /** A dry-run connection, persisting nothing (TRE-12 §2). */
 export interface HostProbeInput {
+  /** Sent when re-testing a saved host, so the probe can hold it to its pins. */
+  hostId?: string;
   address: string;
   port?: number;
   username: string;
@@ -74,6 +76,12 @@ export interface HostProbeResult {
   authenticated: boolean;
   /** Present even when auth failed — the handshake happens first. */
   fingerprint: string | null;
+  /** The algorithm that fingerprint belongs to: a pin is the pair, not the hash. */
+  fingerprintAlgorithm: string | null;
+  /** The handshake was refused: this key is not what the host is pinned to. */
+  hostKeyMismatch: boolean;
+  /** What the host is pinned to for the offered algorithm. */
+  pinnedFingerprint: string | null;
   homeDir: string | null;
   remoteUser: string | null;
   detail: string;
@@ -118,4 +126,20 @@ export async function deleteHost(id: string, csrfToken: string | null): Promise<
 
 export async function testHost(input: HostProbeInput, csrfToken: string | null): Promise<HostProbeResult> {
   return (await apiRequest("/hosts/test", { method: "POST", body: input, csrfToken })) as HostProbeResult;
+}
+
+/**
+ * Replace the pinned host key, deliberately (TRE-10 §3).
+ *
+ * Its own call rather than a field on `updateHost`, because that is the point:
+ * a key change must not ride along on the save that also renamed the host. The
+ * algorithm and fingerprint name the exact key being trusted, so accepting is
+ * a decision about a key the user read, not about whatever answers next.
+ */
+export async function acceptHostKey(
+  id: string,
+  key: { algorithm: string; fingerprint: string },
+  csrfToken: string | null,
+): Promise<void> {
+  await apiRequest(`/hosts/${id}/known-keys`, { method: "POST", body: key, csrfToken });
 }

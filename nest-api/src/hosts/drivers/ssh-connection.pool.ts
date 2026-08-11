@@ -1,14 +1,54 @@
 import { createHash } from "node:crypto";
-import { Injectable, Logger, type OnModuleDestroy } from "@nestjs/common";
-import { Client, type ConnectConfig, type SFTPWrapper } from "ssh2";
 import { DriverError } from "@hosts/drivers/driver-error";
+import { Injectable, Logger, type OnModuleDestroy } from "@nestjs/common";
 import { secretsEqual } from "@secrets/secret-store.service";
+import { Client, type ConnectConfig, type SFTPWrapper } from "ssh2";
 
 /** How the pool authenticates. Material arrives decrypted from the secret store. */
 export type SshAuth =
   | { kind: "PRIVATE_KEY"; privateKey: Buffer; passphrase?: Buffer }
   | { kind: "PASSWORD"; password: Buffer }
   | { kind: "AGENT"; agentSocket: string };
+
+/** One pinned host key: what was negotiated on first connect (TRE-10 §4). */
+export interface HostKeyPin {
+  /** The SSH algorithm name off the wire — "ssh-ed25519", "ssh-rsa". */
+  algorithm: string;
+  /** "SHA256:<base64>", the format `ssh-keygen -lf` prints. */
+  fingerprint: string;
+}
+
+/** What the handshake actually offered, and how it compared to the pins. */
+export interface ObservedHostKey {
+  algorithm: string;
+  fingerprint: string;
+  /**
+   * `trusted` — nothing was pinned, so this is first use and wants recording.
+   * `matched` — it equals the pin for its algorithm.
+   * `mismatch` — the host is pinned and this is not it. The connection was
+   * refused before authentication, so `pinned` is what we expected to see.
+   */
+  verdict: "trusted" | "matched" | "mismatch";
+  /** The fingerprint pinned for this algorithm, or null when none is. */
+  pinned: string | null;
+  /**
+   * Set when this key matched a pin stored under a stale algorithm label, and
+   * names that label. The caller rewrites the row so the next connection takes
+   * the ordinary path.
+   */
+  relabelFrom: string | null;
+}
+
+/**
+ * The algorithm every pin written before TRE-10 carries.
+ *
+ * It was a placeholder, not a wire name — the form hardcoded it and the API
+ * defaulted to it — so no key a server offers can ever equal it. Left alone,
+ * per-algorithm matching would refuse every host that existed before this
+ * ticket, permanently, with no migration able to guess what the label should
+ * have been: the wire algorithm was never recorded.
+ */
+export const LEGACY_ALGORITHM = "ssh";
 
 export interface HostConnectionSpec {
   hostId: string;
@@ -17,12 +57,22 @@ export interface HostConnectionSpec {
   username: string;
   auth: SshAuth;
   /**
-   * Fingerprints this host is pinned to, "SHA256:<base64>". Empty means trust
-   * on first use — TRE-10 owns recording what was seen. The verifier refuses
-   * *before* authentication either way, so a mismatched host never sees the
-   * credential.
+   * The keys this host is pinned to. Empty means trust on first use, and
+   * `onHostKey` is what turns that first sighting into a pin — without it the
+   * host is trusted on *every* use, which is not TOFU, it is no verification.
+   *
+   * The verifier refuses before authentication either way, so a host that
+   * fails the check never sees the credential.
    */
-  pinnedFingerprints?: readonly string[];
+  pins?: readonly HostKeyPin[];
+  /**
+   * Called from inside the host verifier with what was offered.
+   *
+   * Synchronous and must stay cheap: ssh2 is mid-handshake and waiting on the
+   * return value of the verifier, so anything slow here is added latency on
+   * every connection. Persisting is the caller's job, off this stack.
+   */
+  onHostKey?: (observed: ObservedHostKey) => void;
 }
 
 export interface PoolSettings {
@@ -72,12 +122,22 @@ export interface HostProbeResult {
   authenticated: boolean;
   /** "SHA256:...", captured during the handshake — present even on auth failure. */
   fingerprint: string | null;
+  /** The algorithm that fingerprint belongs to, so the pin records what was negotiated. */
+  fingerprintAlgorithm: string | null;
   /** The login directory, resolved once authenticated. */
   homeDir: string | null;
   /** The user the connection authenticated as. */
   remoteUser: string | null;
   /** A short human message with no credential in it. */
   detail: string;
+  /**
+   * The handshake was refused because the key did not match what this host is
+   * pinned to. `reachable` is still true — the host answered, it just is not
+   * the one we trust — and no credential was offered.
+   */
+  hostKeyMismatch: boolean;
+  /** What this host is pinned to for the offered algorithm, when it is pinned. */
+  pinnedFingerprint: string | null;
 }
 
 /**
@@ -212,7 +272,14 @@ export class SshConnectionPool implements OnModuleDestroy {
 
           settled = true;
 
-          const entry: PooledEntry = { client, sftp, inFlight: 0, waiting: [], idleTimer: null, connecting: null };
+          const entry: PooledEntry = {
+            client,
+            sftp,
+            inFlight: 0,
+            waiting: [],
+            idleTimer: null,
+            connecting: null,
+          };
           this.entries.set(key, entry);
 
           // A server-side disconnect must not leave a dead entry in the map to
@@ -262,16 +329,15 @@ export class SshConnectionPool implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Runs during the handshake, before any credential is offered (TRE-10 §2).
+   * Returning false here is the whole ticket: it aborts the connection while
+   * the private key is still ours.
+   */
   private verifyHostKey(key: Buffer, spec: HostConnectionSpec): boolean {
-    const pins = spec.pinnedFingerprints ?? [];
-    if (pins.length === 0) {
-      // Trust on first use. TRE-10 records what was seen so the second
-      // connection is checked against it.
-      return true;
-    }
-
-    const seen = Buffer.from(fingerprintOf(key), "utf8");
-    return pins.some((pin) => secretsEqual(seen, Buffer.from(pin, "utf8")));
+    const { allow, ...observed } = evaluateHostKey(key, spec.pins ?? []);
+    spec.onHostKey?.(observed);
+    return allow;
   }
 
   /**
@@ -289,6 +355,9 @@ export class SshConnectionPool implements OnModuleDestroy {
     return new Promise<HostProbeResult>((resolve) => {
       const client = new Client();
       let fingerprint: string | null = null;
+      let fingerprintAlgorithm: string | null = null;
+      let mismatch = false;
+      let pinnedFingerprint: string | null = null;
       let settled = false;
 
       const done = (result: HostProbeResult): void => {
@@ -305,6 +374,9 @@ export class SshConnectionPool implements OnModuleDestroy {
             reachable: false,
             authenticated: false,
             fingerprint,
+            fingerprintAlgorithm,
+            hostKeyMismatch: mismatch,
+            pinnedFingerprint,
             homeDir: null,
             remoteUser: null,
             detail: "Timed out",
@@ -322,9 +394,30 @@ export class SshConnectionPool implements OnModuleDestroy {
             reachable: true,
             authenticated: false,
             fingerprint,
+            fingerprintAlgorithm,
+            hostKeyMismatch: mismatch,
+            pinnedFingerprint,
             homeDir: null,
             remoteUser: null,
             detail: "Authentication refused",
+          });
+          return;
+        }
+
+        // The host answered and we refused it. Reporting that as unreachable
+        // would send the user to look at the network, and would make the one
+        // screen where a key change is caught describe it as a blip.
+        if (mismatch) {
+          done({
+            reachable: true,
+            authenticated: false,
+            fingerprint,
+            fingerprintAlgorithm,
+            hostKeyMismatch: true,
+            pinnedFingerprint,
+            homeDir: null,
+            remoteUser: null,
+            detail: "Host key does not match the pinned fingerprint — no credential was sent",
           });
           return;
         }
@@ -332,6 +425,9 @@ export class SshConnectionPool implements OnModuleDestroy {
           reachable: false,
           authenticated: false,
           fingerprint,
+          fingerprintAlgorithm,
+          hostKeyMismatch: mismatch,
+          pinnedFingerprint,
           homeDir: null,
           remoteUser: null,
           detail: classified.message,
@@ -345,6 +441,9 @@ export class SshConnectionPool implements OnModuleDestroy {
               reachable: true,
               authenticated: true,
               fingerprint,
+              fingerprintAlgorithm,
+              hostKeyMismatch: mismatch,
+              pinnedFingerprint,
               homeDir: null,
               remoteUser: spec.username,
               detail: "Connected, SFTP unavailable",
@@ -356,6 +455,9 @@ export class SshConnectionPool implements OnModuleDestroy {
               reachable: true,
               authenticated: true,
               fingerprint,
+              fingerprintAlgorithm,
+              hostKeyMismatch: mismatch,
+              pinnedFingerprint,
               homeDir: realpathError ? null : home,
               remoteUser: spec.username,
               detail: "Connected",
@@ -375,10 +477,22 @@ export class SshConnectionPool implements OnModuleDestroy {
         client.connect({
           ...config,
           hostVerifier: (key: Buffer) => {
-            fingerprint = fingerprintOf(key);
-            // A test trusts on first use — the fingerprint is being shown to
-            // the user precisely so they can decide whether to pin it.
-            return true;
+            // The same decision the pool makes, for the same reason. A test
+            // against an already-pinned host that skipped this would hand the
+            // credential to whatever answered and only compare afterwards —
+            // which is the ordering TRE-10 §2 exists to forbid, and it is the
+            // one screen where a mismatch is most likely to be discovered.
+            //
+            // With no pins it still trusts on first use: the fingerprint is
+            // being shown precisely so the user can decide whether to pin it.
+            const evaluated = evaluateHostKey(key, spec.pins ?? []);
+            fingerprint = evaluated.fingerprint;
+            fingerprintAlgorithm = evaluated.algorithm;
+            if (!evaluated.allow) {
+              mismatch = true;
+              pinnedFingerprint = evaluated.pinned;
+            }
+            return evaluated.allow;
           },
         });
       } catch (error) {
@@ -386,6 +500,9 @@ export class SshConnectionPool implements OnModuleDestroy {
           reachable: false,
           authenticated: false,
           fingerprint,
+          fingerprintAlgorithm,
+          hostKeyMismatch: mismatch,
+          pinnedFingerprint,
           homeDir: null,
           remoteUser: null,
           // ssh2's own text ("Cannot parse privateKey: ...") names the
@@ -436,9 +553,99 @@ export class SshConnectionPool implements OnModuleDestroy {
   }
 }
 
-/** OpenSSH's format, so a fingerprint can be compared with `ssh-keyscan` output. */
+/**
+ * The whole of TRE-10 §2 and §4, as a pure function: given what the server
+ * offered and what we have pinned, may this connection continue?
+ *
+ * Separated from the pool because it is the one decision in this file that is
+ * worth testing on its own — everything around it needs a socket, and a
+ * security check nobody can exercise is a security check nobody has checked.
+ */
+export function evaluateHostKey(hostKey: Buffer, pins: readonly HostKeyPin[]): ObservedHostKey & { allow: boolean } {
+  const algorithm = algorithmOf(hostKey);
+  const fingerprint = fingerprintOf(hostKey);
+
+  if (pins.length === 0) {
+    // Trust on first use — and the caller must record it, or the host is
+    // trusted on every connection rather than only the first.
+    return {
+      algorithm,
+      fingerprint,
+      verdict: "trusted",
+      pinned: null,
+      relabelFrom: null,
+      allow: true,
+    };
+  }
+
+  const pin = pins.find((candidate) => candidate.algorithm === algorithm);
+  if (!pin) {
+    // A pin written before TRE-10 is labelled "ssh", which matches no wire
+    // name. Its *fingerprint* is still the one the user confirmed, so it is
+    // honoured — but only on an exact fingerprint match, which is the same bar
+    // every other pin has to clear. Nothing is trusted here that would not be
+    // trusted under the correct label; only the label is wrong.
+    const legacy = pins.find((candidate) => candidate.algorithm === LEGACY_ALGORITHM);
+    if (legacy && secretsEqual(Buffer.from(fingerprint, "utf8"), Buffer.from(legacy.fingerprint, "utf8"))) {
+      return {
+        algorithm,
+        fingerprint,
+        verdict: "matched",
+        pinned: legacy.fingerprint,
+        relabelFrom: LEGACY_ALGORITHM,
+        allow: true,
+      };
+    }
+
+    // Otherwise: a pinned host that suddenly offers an algorithm we have never
+    // seen is a mismatch, not a second key to record (§4). Recording it instead
+    // would let anyone in front of the address pick an unpinned algorithm and
+    // be trusted.
+    return {
+      algorithm,
+      fingerprint,
+      verdict: "mismatch",
+      pinned: null,
+      relabelFrom: null,
+      allow: false,
+    };
+  }
+
+  const matched = secretsEqual(Buffer.from(fingerprint, "utf8"), Buffer.from(pin.fingerprint, "utf8"));
+  return {
+    relabelFrom: null,
+    algorithm,
+    fingerprint,
+    verdict: matched ? "matched" : "mismatch",
+    pinned: pin.fingerprint,
+    allow: matched,
+  };
+}
+
+/**
+ * OpenSSH's format, so a fingerprint can be read aloud against `ssh-keygen -lf`
+ * on the real host. Verified byte for byte against ssh-keygen for ed25519 and
+ * RSA — the base64 is unpadded, which is the part that is easy to get wrong.
+ */
 export function fingerprintOf(hostKey: Buffer): string {
   return `SHA256:${createHash("sha256").update(hostKey).digest("base64").replace(/=+$/, "")}`;
+}
+
+/**
+ * The algorithm name off the wire: an SSH public key blob opens with a
+ * uint32 length and that many bytes of name ("ssh-ed25519", "rsa-sha2-512").
+ *
+ * Read from the key itself rather than from anything the client configured,
+ * because the point is to record what the *server* offered.
+ */
+export function algorithmOf(hostKey: Buffer): string {
+  if (hostKey.length < 4) return "unknown";
+  const length = hostKey.readUInt32BE(0);
+  // A malformed blob must not become an out-of-range read or a huge string.
+  if (length === 0 || length > 64 || hostKey.length < 4 + length) return "unknown";
+  const name = hostKey.subarray(4, 4 + length).toString("utf8");
+  // The name is printable ASCII; anything else means this is not a key blob.
+  return /^[\x21-\x7e]+$/.test(name) ? name : "unknown";
 }
 
 /**

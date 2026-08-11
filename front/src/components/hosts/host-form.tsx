@@ -5,7 +5,7 @@ import { Button, Field, Segmented, TextInput } from "@components/hosts/field";
 import { RootsEditor } from "@components/hosts/roots-editor";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ApiError } from "@lib/api/client";
-import { createHost, deleteHost, testHost, updateHost } from "@lib/api/hosts";
+import { acceptHostKey, createHost, deleteHost, fetchHosts, testHost, updateHost } from "@lib/api/hosts";
 import { CREDENTIAL_LABELS, cleanPath, HOST_COLOURS, hostSchemaFor } from "@schemas/host";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -42,6 +42,7 @@ export function HostForm({
   const [probe, setProbe] = useState<HostProbeResult | null>(null);
   const [probing, setProbing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [accepting, setAccepting] = useState(false);
   const [typedName, setTypedName] = useState("");
 
   const {
@@ -62,11 +63,52 @@ export function HostForm({
   const homePath = watch("homePath");
   const colour = watch("colour");
 
-  /** The pin we would save: whatever the last probe saw, else what is stored. */
+  /**
+   * A pin is (algorithm, fingerprint). Comparing the hashes alone would call a
+   * host "changed" the moment it negotiated ed25519 where RSA was pinned, and
+   * would call it "unchanged" if the same hash were pinned for another
+   * algorithm — so both sides of the comparison are looked up by algorithm.
+   */
+  const probedAlgorithm = probe?.fingerprintAlgorithm ?? null;
+  const pinnedForProbed = probedAlgorithm
+    ? (host?.fingerprints.find((entry) => entry.algorithm === probedAlgorithm)?.fingerprint ?? null)
+    : null;
   const storedFingerprint = host?.fingerprints[0]?.fingerprint ?? null;
   const fingerprint = probe?.fingerprint ?? storedFingerprint;
-  const fingerprintChanged =
-    probe?.fingerprint != null && storedFingerprint != null && probe.fingerprint !== storedFingerprint;
+
+  /**
+   * The server's verdict, not ours. It ran the comparison inside the handshake
+   * and decided whether to continue; re-deriving it here from fingerprint
+   * strings would be a second, weaker copy of the check that can disagree with
+   * the one actually guarding anything.
+   */
+  const fingerprintMismatch = probe?.hostKeyMismatch === true;
+
+  /**
+   * Which pin the panel is describing, and whether anyone ever checked it.
+   * `verifiedAt` null means it was taken on first sight and compared against
+   * nothing — a real state, and one the screen should not render identically
+   * to a fingerprint the user read off the host.
+   */
+  const shownAlgorithm = probedAlgorithm ?? host?.fingerprints[0]?.algorithm ?? null;
+  const shownVerified = host?.fingerprints.find((entry) => entry.algorithm === shownAlgorithm)?.verified ?? null;
+
+  const acceptOfferedKey = async () => {
+    if (!host || !probe?.fingerprint || !probedAlgorithm) return;
+    setFailure(null);
+    setAccepting(true);
+    try {
+      await acceptHostKey(host.id, { algorithm: probedAlgorithm, fingerprint: probe.fingerprint }, csrfToken);
+      // Re-read rather than patching local state: the server owns what is
+      // pinned, and this screen must show what it would actually connect to.
+      const fresh = (await fetchHosts()).find((entry) => entry.id === host.id);
+      if (fresh) onSaved(fresh);
+    } catch (error) {
+      setFailure(error instanceof ApiError ? error.message : "Could not accept the host key.");
+    } finally {
+      setAccepting(false);
+    }
+  };
 
   const runTest = async () => {
     setFailure(null);
@@ -81,6 +123,9 @@ export function HostForm({
       setProbe(
         await testHost(
           {
+            // So the probe holds a saved host to its pins and refuses before
+            // sending the credential, rather than comparing afterwards.
+            hostId: host?.id,
             address: values.address,
             port: Number(values.port),
             username: values.username,
@@ -100,7 +145,7 @@ export function HostForm({
   const onSubmit = async (values: HostFormValues) => {
     setFailure(null);
     try {
-      const payload = payloadFor(values, host, fingerprint);
+      const payload = payloadFor(values, host, probe);
       const saved = host ? await updateHost(host.id, payload, csrfToken) : await createHost(payload, csrfToken);
       onSaved(saved);
     } catch (error) {
@@ -271,7 +316,13 @@ export function HostForm({
               probe={probe}
               probing={probing}
               fingerprint={fingerprint}
-              fingerprintChanged={fingerprintChanged}
+              pinnedFingerprint={probe?.pinnedFingerprint ?? pinnedForProbed}
+              fingerprintMismatch={fingerprintMismatch}
+              canAccept={host != null && probe?.fingerprint != null && probedAlgorithm != null}
+              algorithm={shownAlgorithm}
+              verified={shownVerified}
+              accepting={accepting}
+              onAcceptKey={acceptOfferedKey}
               onTest={runTest}
               onUseHome={(dir) => setValue("homePath", dir)}
             />
@@ -381,14 +432,26 @@ function ProbePanel({
   probe,
   probing,
   fingerprint,
-  fingerprintChanged,
+  pinnedFingerprint,
+  fingerprintMismatch,
+  algorithm,
+  verified,
+  canAccept,
+  accepting,
+  onAcceptKey,
   onTest,
   onUseHome,
 }: {
   probe: HostProbeResult | null;
   probing: boolean;
   fingerprint: string | null;
-  fingerprintChanged: boolean;
+  pinnedFingerprint: string | null;
+  fingerprintMismatch: boolean;
+  algorithm: string | null;
+  verified: boolean | null;
+  canAccept: boolean;
+  accepting: boolean;
+  onAcceptKey: () => void;
   onTest: () => void;
   onUseHome: (dir: string) => void;
 }) {
@@ -413,17 +476,53 @@ function ProbePanel({
 
       {probe && <p className="text-ink-muted font-mono text-2xs break-words">{probe.detail}</p>}
 
-      {fingerprint && (
+      {fingerprint && !fingerprintMismatch && (
         <div className="flex flex-col gap-0.5">
-          <span className="text-ink-faint font-mono text-3xs tracking-label">HOST KEY</span>
-          <span className={`font-mono text-2xs break-all ${fingerprintChanged ? "text-danger-soft" : "text-ink-soft"}`}>
-            {fingerprint}
+          <span className="text-ink-faint font-mono text-3xs tracking-label">
+            HOST KEY{algorithm ? ` · ${algorithm}` : ""}
           </span>
-          {fingerprintChanged && (
-            <span className="text-danger-soft font-mono text-2xs">
-              This is not the key that was pinned. Either the host was rebuilt, or you are not talking to the machine
-              you think you are. Saving replaces the pin.
+          <span className="text-ink-soft font-mono text-2xs break-all">{fingerprint}</span>
+          {verified === false && (
+            <span className="text-warning font-mono text-2xs">
+              Taken on first sight and never checked against the host.
             </span>
+          )}
+          <span className="text-ink-muted font-mono text-2xs">
+            Compare it against <code>ssh-keygen -lf {keyFileFor(probe?.fingerprintAlgorithm)}</code> on the host itself.
+            Pinning only means something if someone read it once.
+          </span>
+        </div>
+      )}
+
+      {fingerprintMismatch && (
+        <div className="border-danger-soft flex flex-col gap-1 rounded-xs border p-2">
+          <span className="text-danger-soft font-mono text-3xs tracking-label">HOST KEY DOES NOT MATCH</span>
+
+          <div className="flex flex-col gap-0.5">
+            <span className="text-ink-faint font-mono text-3xs tracking-label">PINNED</span>
+            <span className="text-ink-soft font-mono text-2xs break-all">
+              {pinnedFingerprint ?? "— (this algorithm was never pinned)"}
+            </span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-ink-faint font-mono text-3xs tracking-label">OFFERED NOW</span>
+            <span className="text-danger-soft font-mono text-2xs break-all">{probe?.fingerprint}</span>
+          </div>
+
+          <p className="text-ink-muted font-mono text-2xs">
+            The connection was refused during key exchange, before any credential was offered, so nothing was sent to
+            whatever answered. Either the host was rebuilt, or you are not talking to the machine you think you are.
+            Check the fingerprint on the host itself before accepting — not over the connection that is failing.
+          </p>
+
+          {canAccept && (
+            <Button
+              type="button"
+              onClick={onAcceptKey}
+              disabled={accepting}
+            >
+              {accepting ? "accepting…" : "accept the offered key"}
+            </Button>
           )}
         </div>
       )}
@@ -481,7 +580,20 @@ function defaultsFor(host: HostView | null, localTaken: boolean): HostFormValues
  * something — a PATCH that names `transport` would be refused, and one that
  * names an empty secret would ask the server to store nothing.
  */
-function payloadFor(values: HostFormValues, host: HostView | null, fingerprint: string | null): HostInput {
+/**
+ * Where OpenSSH keeps the host key for a given algorithm, so "compare it
+ * against" names the file that actually holds the key being shown. Naming the
+ * ed25519 file for an RSA host sends the reader to a fingerprint that cannot
+ * match, which teaches them to ignore a mismatch.
+ */
+function keyFileFor(algorithm: string | null | undefined): string {
+  if (algorithm?.includes("ed25519")) return "/etc/ssh/ssh_host_ed25519_key.pub";
+  if (algorithm?.includes("rsa")) return "/etc/ssh/ssh_host_rsa_key.pub";
+  if (algorithm?.includes("ecdsa")) return "/etc/ssh/ssh_host_ecdsa_key.pub";
+  return "/etc/ssh/ssh_host_*_key.pub";
+}
+
+function payloadFor(values: HostFormValues, host: HostView | null, probe: HostProbeResult | null): HostInput {
   const payload: HostInput = {
     label: values.label,
     colour: values.colour,
@@ -499,11 +611,14 @@ function payloadFor(values: HostFormValues, host: HostView | null, fingerprint: 
       payload.credentialKind = values.credentialKind;
       payload.credentialSecret = values.credentialSecret;
     }
-    // Only pinned once it has been seen. Sending back the value the server
-    // already holds would re-stamp `verifiedAt` on every unrelated save.
-    if (fingerprint && fingerprint !== host?.fingerprints[0]?.fingerprint) {
-      payload.fingerprint = fingerprint;
-      payload.fingerprintAlgorithm = "ssh";
+    // A pin travels with a save only when the host has none at all — creating,
+    // or an SSH host that was never probed. Replacing one is POST
+    // :id/known-keys, so a key change can never ride along on the save that
+    // renamed the host (TRE-10 §3). The algorithm comes off the wire; hardcoding
+    // it wrote pins that could never match what the host offers.
+    if (probe?.fingerprint && probe.fingerprintAlgorithm && !host?.fingerprints.length) {
+      payload.fingerprint = probe.fingerprint;
+      payload.fingerprintAlgorithm = probe.fingerprintAlgorithm;
     }
   }
 
