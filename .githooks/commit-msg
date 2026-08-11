@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Refuses a commit message that names infrastructure (TRE-5 §1).
+#
+# This exists because it is the hole the repo actually fell through. TRE-5 lists
+# commit messages alongside code, and the pre-commit hook never sees them — it
+# judges the diff. gitleaks does not read them either, in any mode: a message is
+# not a blob, so `gitleaks git` walks straight past it. A real user@host pair
+# reached the public remote in four messages while every content guard passed.
+#
+# Messages are also the worst place to leak: fixing one rewrites history, which
+# is why this refuses before the commit exists rather than after.
+
+set -uo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=.githooks/infra-patterns.sh
+. "$here/infra-patterns.sh"
+
+# $1 is the file git has prepared the message in.
+message=$(grep -v '^#' "$1" || true)
+[ -z "${message//[[:space:]]/}" ] && exit 0
+
+if ! scan_infra "$message"; then
+  printf '\n  Commit refused: the message names infrastructure.\n' >&2
+  printf '  Say "the deploy host" rather than its alias, and describe paths generically.\n' >&2
+  printf '  If it is genuinely a placeholder, commit with --no-verify.\n\n' >&2
+  exit 1
+fi
+
+exit 0

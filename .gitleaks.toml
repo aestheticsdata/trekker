@@ -22,9 +22,12 @@ useDefault = true
 [[rules]]
 id = "trekker-ssh-target"
 description = "A user@host literal that is not a placeholder — a real deploy target"
-# user@host where the host has a dot or a hyphen (fleet aliases look like a-b)
-# The negative lookbehind on `/` is what keeps `owner/repo@ref` out of it.
-regex = '''(?i)(?:^|[^/\w.-])[a-z_][a-z0-9_-]{1,31}@(?!(?:[a-z0-9-]+\.)?example\.(?:com|org|net)\b)(?!localhost\b)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)*\b'''
+# user@host where the host has a dot or a hyphen (fleet aliases look like a-b).
+# Consuming `[^/\w.-]` before the user is what keeps `owner/repo@ref` out of it —
+# gitleaks compiles with RE2, which has no lookbehind and no lookahead, so every
+# exclusion below lives in the allowlist rather than in the pattern. Writing them
+# as `(?!…)` compiles nowhere and panics the whole scan on config load.
+regex = '''(?i)(?:^|[^/\w.-])[a-z_][a-z0-9_-]{1,31}@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)*\b'''
 tags = ["trekker", "infrastructure", "reconnaissance"]
 [rules.allowlist]
 regexTarget = "match"
@@ -33,7 +36,10 @@ regexes = [
   '''@(?:[a-z0-9-]+\.)?example\.(?:com|org|net)''',
   '''@localhost''',
   '''@127\.0\.0\.1''',
-  '''@host\b''',
+  # Bare `deploy@host`, and nothing else. `@host\b` ended at the word boundary
+  # before the dot, so any real domain whose first label happened to be `host`
+  # was waved through on the strength of that label alone.
+  '''@host$''',
   '''@\$\{?[A-Z_]''',        # @$HOST, @${TREKKER_DEPLOY_HOST}
   '''@[a-z0-9-]+\.(?:local|test|invalid|internal)\b''',
   # `uses: actions/checkout@v5` and every other pinned action or package ref.
@@ -43,8 +49,15 @@ regexes = [
 [[rules]]
 id = "trekker-real-home-path"
 description = "An absolute home directory from a real machine"
-regex = '''(?:/Users/|/home/)(?!(?:example-user|user|deploy|debian|ubuntu|runner|node)\b)[a-z_][a-z0-9_-]{1,31}(?:/|\b)'''
+regex = '''(?:/Users/|/home/)[a-z_][a-z0-9_-]{1,31}(?:/|\b)'''
 tags = ["trekker", "infrastructure"]
+[rules.allowlist]
+regexTarget = "match"
+regexes = [
+  # The accounts a public repo is allowed to name: the placeholders TRE-5
+  # mandates, plus the ones CI and the base images actually create.
+  '''/(?:Users|home)/(?:example-user|user|deploy|debian|ubuntu|runner|node)(?:/|$)''',
+]
 
 [[rules]]
 id = "trekker-public-ipv4"

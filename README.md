@@ -42,15 +42,20 @@ fingerprints or key material. Placeholders instead — `host.example.com`, `depl
 pnpm hooks:install
 ```
 
-That points `core.hooksPath` at `.githooks/`, which refuses a commit carrying any of the above.
-Hooks are not cloned, so it is one command per checkout; CI runs `gitleaks` over the full history
-on every push regardless, and that is the actual guarantee. `pnpm scan` runs the same check
-locally if you have gitleaks installed.
+That points `core.hooksPath` at `.githooks/`, which refuses both a diff and a **commit message**
+carrying any of the above. Hooks are not cloned, so it is one command per checkout; CI runs
+`gitleaks` over the full history on every push regardless, and that is the actual guarantee.
+`pnpm scan` runs the same check locally if you have gitleaks installed.
 
-The hook exists because the leak this repo actually had was not a key. It was a real `user@host`
+The hooks exist because the leak this repo actually had was not a key. It was a real `user@host`
 pair sitting in a comment — inside a sentence explaining that publishing such a pair is free
 reconnaissance. Entropy-based scanners do not catch prose, so `.gitleaks.toml` adds rules that
 match the *shape* of infrastructure and allowlist the placeholders.
+
+The same pair reached four commit messages, which is the quieter half of the problem: a message is
+not a blob, so `gitleaks git` walks past it in every mode, and a pre-commit hook only ever sees the
+diff. Hence `commit-msg` alongside `pre-commit`, sharing one set of patterns. Both had to be fixed
+by rewriting published history, which is the cost this is here to avoid paying twice.
 
 ## Stack
 
