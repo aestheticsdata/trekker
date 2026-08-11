@@ -145,7 +145,8 @@ export function Pane({
         ) : host === null ? (
           <Placeholder
             title="no host"
-            detail="This pane has nothing to browse yet. Hosts arrive with the sidebar (TRE-18)."
+            detail="This pane has nothing to browse yet. Add the machine the API runs on, or an SSH host."
+            action={{ label: "add a host", onSelect: callbacks.onHostMenu }}
             onUp={callbacks.onUp}
           />
         ) : error ? (

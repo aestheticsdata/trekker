@@ -2,12 +2,13 @@
 
 import { Pane } from "@components/explorer/pane";
 import { explorerReducer, initialState, pathOf } from "@components/explorer/pane-state";
+import { HostManager } from "@components/hosts/host-manager";
 import { useToast } from "@components/ui/toast";
 import { globToRegExp, joinPath, resolveTarget, sortRows } from "@helpers/listing";
 import { fetchListing } from "@lib/api/fs";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useState } from "react";
 
 import type { PaneCallbacks } from "@components/explorer/pane";
 import type { PaneIndex, PaneState } from "@components/explorer/pane-state";
@@ -53,6 +54,10 @@ export function Explorer({
   const [state, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
   const { push } = useToast();
   const queryClient = useQueryClient();
+
+  // Which pane opened the host manager (TRE-43) — it is also the pane a pick
+  // binds to, so "null" and "which one" are the same piece of state.
+  const [managerPane, setManagerPane] = useState<PaneIndex | null>(null);
 
   // One host for both panes until the sidebar can choose (TRE-18). The panes
   // are already independent; only the picker is missing.
@@ -150,6 +155,8 @@ export function Explorer({
   };
 
   useKeyboard({
+    // The manager is a modal: ↓ over it belongs to nothing behind it.
+    enabled: managerPane === null,
     onKey: (event) => {
       const index = state.active;
       const names = views[index].rows.map((row) => row.name);
@@ -203,7 +210,7 @@ export function Explorer({
         extend: modifiers.extend,
         toggle: modifiers.toggle,
       }),
-    onHostMenu: () => push({ tone: "info", message: "Choosing a host", detail: "The sidebar arrives in TRE-18" }),
+    onHostMenu: () => setManagerPane(index),
     onClearGlob: () => onGlobChange(""),
   });
 
@@ -239,6 +246,28 @@ export function Explorer({
     const name = (target as HTMLElement | null)?.closest?.<HTMLElement>("[data-row]")?.dataset.row;
     const row = name ? rows.find((candidate) => candidate.name === name) : undefined;
     if (row) prefetch(pane, row);
+  };
+
+  /**
+   * A host that has just been created, edited or deleted (TRE-43).
+   *
+   * The list is refetched rather than patched — the server owns the slug, the
+   * normalised roots and whether a credential is stored — and any pane left
+   * pointing at a deleted host is unbound, which hands it back to the binding
+   * effect above: it rebinds to whatever host is left, or to none, and the
+   * pane says so instead of asking for a directory that has no machine.
+   */
+  const onHostsChanged = ({ host, deleted }: { host: HostView; deleted?: boolean }) => {
+    void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.HOSTS] });
+    if (!deleted) {
+      void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, host.id] });
+      return;
+    }
+    for (const index of [0, 1] as const) {
+      if (state.panes[index].hostId === host.id) {
+        dispatch({ type: "host", pane: index, hostId: null });
+      }
+    }
   };
 
   return (
@@ -277,6 +306,16 @@ export function Explorer({
           </div>
         );
       })}
+
+      {managerPane !== null && (
+        <HostManager
+          hosts={hosts}
+          boundHostId={state.panes[managerPane].hostId}
+          onPick={(host) => dispatch({ type: "host", pane: managerPane, hostId: host.id, path: host.homePath })}
+          onChanged={onHostsChanged}
+          onClose={() => setManagerPane(null)}
+        />
+      )}
     </div>
   );
 }
@@ -308,8 +347,9 @@ function matcher(glob: string): (row: FileRow) => boolean {
  * field would swallow `⌫` and the arrow keys would move the cursor instead of
  * the caret.
  */
-function useKeyboard({ onKey }: { onKey: (event: KeyboardEvent) => boolean }) {
+function useKeyboard({ enabled, onKey }: { enabled: boolean; onKey: (event: KeyboardEvent) => boolean }) {
   useEffect(() => {
+    if (!enabled) return;
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
@@ -326,5 +366,5 @@ function useKeyboard({ onKey }: { onKey: (event: KeyboardEvent) => boolean }) {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onKey]);
+  }, [enabled, onKey]);
 }

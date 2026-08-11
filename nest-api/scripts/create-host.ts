@@ -1,10 +1,15 @@
 /**
  * Creates a host from the command line, on the machine the API runs on.
  *
- * A deployed Trekker with no host row can browse nothing, and until the
- * sidebar grows a host form (TRE-18) there is no way in through the UI. This
- * is the counterpart to `account:create`: the same shape, the same reason to
- * exist, run in the same place.
+ * **The bootstrap path only.** Since TRE-43 the app manages its own hosts —
+ * the pane's host chip opens a manager that adds, edits, tests and removes
+ * them, and an install with no hosts leads there from the empty pane. Use the
+ * browser. This survives for the case the UI cannot cover: a deployment where
+ * something is wrong enough that the front will not load, and for symmetry
+ * with `account:create`, which has the same shape and the same reason to exist.
+ *
+ * It is also deliberately narrower than the UI: it seeds roots but cannot edit
+ * them, and it refuses key material outright (see below).
  *
  *   HOST_EMAIL=you@example.com \
  *   HOST_ROOTS='/var/www:READ,/var/log:READ' \

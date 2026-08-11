@@ -8,6 +8,7 @@ import {
   SshConnectionPool,
 } from "@hosts/drivers/ssh-connection.pool";
 import type { CreateHostDto } from "@hosts/dto/create-host.dto";
+import type { HostRootInput, RootAccessInput } from "@hosts/dto/host-root.dto";
 import type { TestHostDto } from "@hosts/dto/test-host.dto";
 import type { UpdateHostDto } from "@hosts/dto/update-host.dto";
 import { HostSummaryService, type HostSummary } from "@hosts/host-summary.service";
@@ -27,6 +28,8 @@ export interface HostView {
   homePath: string;
   hasCredential: boolean;
   credentialKind: string | null;
+  /** The allowlist, so the client can show and edit the boundary it is bound by. */
+  roots: Array<{ path: string; access: "READ" | "WRITE" }>;
   fingerprints: Array<{ algorithm: string; fingerprint: string; verified: boolean }>;
   createdAt: Date;
   updatedAt: Date;
@@ -47,7 +50,7 @@ export class HostsService {
   async list(userId: string): Promise<HostView[]> {
     const hosts = await this.prisma.hosts.findMany({
       where: { userId },
-      include: { credential: true, knownKeys: true },
+      include: { credential: true, knownKeys: true, roots: true },
       orderBy: { createdAt: "asc" },
     });
     return hosts.map(toView);
@@ -56,7 +59,7 @@ export class HostsService {
   async get(userId: string, id: string): Promise<HostView> {
     const host = await this.prisma.hosts.findFirst({
       where: { id, userId },
-      include: { credential: true, knownKeys: true },
+      include: { credential: true, knownKeys: true, roots: true },
     });
     // A host that is not yours is a 404, never a 403 — the response must not
     // confirm the id exists (TRE-12).
@@ -74,6 +77,12 @@ export class HostsService {
     // bootstrap default. An SSH host has no home we can know before connecting,
     // so it starts at `/` and the client narrows it after a successful test.
     const homePath = dto.homePath ?? (dto.transport === "LOCAL" ? homedir() : "/");
+
+    // Without an explicit list the home is the only root, read-write, which is
+    // what every host had before TRE-43 and still the right default: the one
+    // directory you named is the one you meant to reach.
+    const roots = dto.roots ? normaliseRoots(dto.roots) : [{ path: cleanRootPath(homePath), access: "WRITE" as const }];
+    requireHomeInsideRoots(homePath, roots);
 
     const created = await this.prisma
       .$transaction(async (tx) => {
@@ -94,8 +103,9 @@ export class HostsService {
           },
         });
 
-        // The home directory is the first root, read-write (TRE-11 default).
-        await tx.hostRoots.create({ data: { hostId: host.id, path: homePath, access: "WRITE" } });
+        await tx.hostRoots.createMany({
+          data: roots.map((root) => ({ hostId: host.id, path: root.path, access: root.access })),
+        });
 
         if (dto.transport === "SSH" && dto.credentialKind && dto.credentialSecret) {
           await this.storeCredential(tx, host.id, dto.credentialKind, dto.credentialSecret);
@@ -114,7 +124,7 @@ export class HostsService {
 
         return tx.hosts.findFirstOrThrow({
           where: { id: host.id },
-          include: { credential: true, knownKeys: true },
+          include: { credential: true, knownKeys: true, roots: true },
         });
         // A second LOCAL host trips the unique (userId, localSlot) index. That is
         // the constraint doing its job — surfaced as a 409, not a 500.
@@ -141,6 +151,12 @@ export class HostsService {
   async update(userId: string, id: string, dto: UpdateHostDto): Promise<HostView> {
     const host = await this.prisma.hosts.findFirst({ where: { id, userId } });
     if (!host) throw new NotFoundException("Host not found");
+
+    // Checked against whichever home the host ends the request with, so moving
+    // the home and narrowing the roots in one PATCH is judged as one change
+    // rather than as two that each look fine on their own.
+    const roots = dto.roots ? normaliseRoots(dto.roots) : null;
+    if (roots) requireHomeInsideRoots(dto.homePath ?? host.homePath, roots);
 
     // Half a credential is never "no credential change" — silently keeping the
     // old secret while answering 200 would tell an operator rotating a leaked
@@ -189,11 +205,22 @@ export class HostsService {
         await this.storeCredential(tx, id, credentialKind!, dto.credentialSecret!);
       }
 
+      if (roots) {
+        // Replaced wholesale rather than diffed. `@@unique([hostId, path])`
+        // means an incremental merge is a sequence of deletes and inserts that
+        // reaches exactly this state anyway, and the guard reads the table
+        // fresh on every request, so there is no cache to keep in step.
+        await tx.hostRoots.deleteMany({ where: { hostId: id } });
+        await tx.hostRoots.createMany({
+          data: roots.map((root) => ({ hostId: id, path: root.path, access: root.access })),
+        });
+      }
       // The home is also the host's default root, seeded at creation. Moving
       // one without the other either leaves the pane pointing outside every
       // root (nothing is browsable) or leaves the old root granted — so the
-      // root that still matches the previous home moves with it.
-      if (dto.homePath !== undefined && dto.homePath !== host.homePath) {
+      // root that still matches the previous home moves with it. Skipped when
+      // the request names its roots: it has already said where the boundary is.
+      else if (dto.homePath !== undefined && dto.homePath !== host.homePath) {
         const previous = await tx.hostRoots.findFirst({ where: { hostId: id, path: host.homePath } });
         if (previous) {
           const clash = await tx.hostRoots.findFirst({ where: { hostId: id, path: dto.homePath } });
@@ -220,7 +247,7 @@ export class HostsService {
         });
       }
 
-      return tx.hosts.findFirstOrThrow({ where: { id }, include: { credential: true, knownKeys: true } });
+      return tx.hosts.findFirstOrThrow({ where: { id }, include: { credential: true, knownKeys: true, roots: true } });
     });
 
     if (connectionChanged) {
@@ -341,6 +368,53 @@ export class HostsService {
 type TxClient = Parameters<Parameters<PrismaService["$transaction"]>[0]>[0];
 type CredentialKind = "PRIVATE_KEY" | "PASSWORD" | "AGENT";
 
+/** A normalised root row, ready for the database. */
+interface NormalisedRoot {
+  path: string;
+  access: RootAccessInput;
+}
+
+/**
+ * Collapse duplicate separators and drop the trailing slash, so a root stored
+ * here compares equal to what the guard computes from a request path.
+ */
+function cleanRootPath(path: string): string {
+  return `/${path.trim().split("/").filter(Boolean).join("/")}`;
+}
+
+/**
+ * Two rows naming the same directory is an edited form, not an attack, so the
+ * wider access wins rather than the request failing — the guard stops at the
+ * first root that admits the path, so keeping both would mean the same thing
+ * with an extra row.
+ */
+function normaliseRoots(rows: readonly HostRootInput[]): NormalisedRoot[] {
+  const byPath = new Map<string, RootAccessInput>();
+  for (const row of rows) {
+    const path = cleanRootPath(row.path);
+    if (byPath.get(path) !== "WRITE") byPath.set(path, row.access);
+  }
+  return [...byPath].map(([path, access]) => ({ path, access }));
+}
+
+/**
+ * A home outside every root is a host whose pane opens on a refusal — a
+ * misconfiguration worth catching at the edge rather than at first listing.
+ *
+ * String containment, deliberately: the real check happens in the guard, after
+ * both sides are resolved on the host, and reaching out to the machine to
+ * validate a form field would make saving a host depend on it being up.
+ */
+function requireHomeInsideRoots(homePath: string, roots: readonly NormalisedRoot[]): void {
+  const home = cleanRootPath(homePath);
+  const inside = roots.some((root) => home === root.path || home.startsWith(root.path === "/" ? "/" : `${root.path}/`));
+  if (!inside) {
+    throw new BadRequestException(
+      `The home ${home} sits outside every root, so this host would open on a refusal. Add a root that contains it.`,
+    );
+  }
+}
+
 /** Prisma's unique-constraint failure, without importing its error classes. */
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002";
@@ -386,6 +460,7 @@ function toView(host: {
   updatedAt: Date;
   credential: { kind: string } | null;
   knownKeys: Array<{ algorithm: string; fingerprint: string; verifiedAt: Date | null }>;
+  roots: Array<{ path: string; access: string }>;
 }): HostView {
   return {
     id: host.id,
@@ -399,6 +474,11 @@ function toView(host: {
     homePath: host.homePath,
     hasCredential: host.credential !== null,
     credentialKind: host.credential?.kind ?? null,
+    // Sorted by path so the editor lists them the same way twice running;
+    // the table has no order of its own.
+    roots: [...host.roots]
+      .sort((left, right) => left.path.localeCompare(right.path))
+      .map((root) => ({ path: root.path, access: root.access as "READ" | "WRITE" })),
     fingerprints: host.knownKeys.map((key) => ({
       algorithm: key.algorithm,
       fingerprint: key.fingerprint,

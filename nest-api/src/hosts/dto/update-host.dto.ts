@@ -1,5 +1,21 @@
-import { IsHexColor, IsIn, IsInt, IsOptional, IsString, Matches, Max, Min, MinLength } from "class-validator";
+import { Type } from "class-transformer";
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsHexColor,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  Min,
+  MinLength,
+  ValidateNested,
+} from "class-validator";
 import { CREDENTIAL_KINDS, type CredentialKindInput } from "@hosts/dto/host-credential.dto";
+import { HostRootInput, MAX_ROOTS } from "@hosts/dto/host-root.dto";
 
 /**
  * Every field optional — a PATCH changes only what it names. Transport is not
@@ -20,6 +36,19 @@ export class UpdateHostDto {
   @IsString()
   @Matches(/^\//, { message: "homePath must be absolute" })
   homePath?: string;
+
+  /**
+   * Replaces the whole allowlist — this is not a merge. Editing roots is
+   * removing them as often as adding them, and a PATCH that could only ever
+   * widen the boundary would be a strange security control.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1, { message: "a host with no roots can serve nothing" })
+  @ArrayMaxSize(MAX_ROOTS, { message: `a host has at most ${MAX_ROOTS} roots` })
+  @ValidateNested({ each: true })
+  @Type(() => HostRootInput)
+  roots?: HostRootInput[];
 
   @IsOptional()
   @IsString()

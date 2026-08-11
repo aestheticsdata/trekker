@@ -53,7 +53,8 @@ export function initialState(path = "/"): ExplorerState {
 export type ExplorerAction =
   | { type: "focus"; pane: PaneIndex }
   | { type: "switch" }
-  | { type: "host"; pane: PaneIndex; hostId: string; path?: string }
+  /** `null` unbinds — what a pane is left with when its host is deleted. */
+  | { type: "host"; pane: PaneIndex; hostId: string | null; path?: string }
   | { type: "cd"; pane: PaneIndex; path: string; history?: boolean }
   | { type: "up"; pane: PaneIndex }
   | { type: "back"; pane: PaneIndex }
