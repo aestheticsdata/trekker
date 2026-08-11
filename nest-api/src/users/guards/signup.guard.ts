@@ -8,10 +8,19 @@ import { CanActivate, ForbiddenException, Injectable } from "@nestjs/common";
  * that stores SSH credentials and is deployed from a public repo: anyone who
  * finds the host gets an account. Closed unless explicitly opened.
  */
+/**
+ * The one reading of the flag. The guard enforces it and `/users/signup-status`
+ * reports it, and both come through here so the screen can never say the door
+ * is open while the guard is closing it.
+ */
+export function signupsOpen(): boolean {
+  return process.env.SIGNUPS_ENABLED === "true";
+}
+
 @Injectable()
 export class SignupGuard implements CanActivate {
   canActivate(): boolean {
-    if (process.env.SIGNUPS_ENABLED !== "true") {
+    if (!signupsOpen()) {
       throw new ForbiddenException("Sign-ups are currently disabled");
     }
 

@@ -1,5 +1,6 @@
 import "@styles/globals.css";
 import Providers from "@app/providers";
+import { getServerSession } from "@auth/server/getServerSession";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 
 import type { Metadata } from "next";
@@ -25,7 +26,13 @@ export const metadata: Metadata = {
   description: "A file explorer for the servers you actually run.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Resolved on the server so the app renders already knowing who is signed in.
+  // Anonymous visitors cost nothing here: with no cookie this returns without
+  // a round trip. Memoised per request, so the private layout's own check
+  // below does not ask twice.
+  const session = await getServerSession();
+
   return (
     <html
       lang="en"
@@ -33,7 +40,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
     >
       <body className="bg-app text-ink font-sans antialiased">
-        <Providers>{children}</Providers>
+        <Providers
+          initialUser={session?.user ?? null}
+          initialCsrfToken={session?.csrfToken ?? null}
+        >
+          {children}
+        </Providers>
       </body>
     </html>
   );

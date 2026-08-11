@@ -37,6 +37,11 @@ const contentSecurityPolicy = Object.entries(cspDirectives)
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // The React Compiler does the memoising. Nothing in this app writes useMemo,
+  // useCallback or React.memo by hand: a stale dependency array is a bug the
+  // compiler would never have written, and duplicating its work only adds
+  // noise for a reader to check.
+  reactCompiler: true,
   async headers() {
     return [
       {

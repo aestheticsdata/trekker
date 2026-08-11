@@ -8,7 +8,7 @@ import { RecoverDto } from "@users/dto/recover.dto";
 import { SignInDto } from "@users/dto/sign-in.dto";
 import { CsrfGuard } from "@users/guards/csrf.guard";
 import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/session-auth.guard";
-import { SignupGuard } from "@users/guards/signup.guard";
+import { SignupGuard, signupsOpen } from "@users/guards/signup.guard";
 import { SESSION_COOKIE_NAME } from "@users/session.constants";
 import { UsersService, type SignInResponse } from "@users/users.service";
 
@@ -31,6 +31,17 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   csrf(@Req() req: Request): { csrfToken: string } {
     return { csrfToken: getOrCreateCsrfToken(req) };
+  }
+
+  /**
+   * Public, and deliberately so: the registration screen has to know whether
+   * to render a form or an explanation, and finding out by submitting and
+   * being refused is a worse experience than being told. It leaks nothing an
+   * attacker could not learn by pressing the button once.
+   */
+  @Get("signup-status")
+  signupStatus(): { open: boolean } {
+    return { open: signupsOpen() };
   }
 
   @Post()

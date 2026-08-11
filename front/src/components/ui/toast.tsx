@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 /**
  * Toasts (TRE-14 §4): bottom right, stacked, auto-dismissing.
@@ -35,20 +35,21 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<readonly Toast[]>([]);
   const nextId = useRef(1);
 
-  const dismiss = useCallback((id: number) => {
+  // Plain functions and a plain object: the React Compiler does the memoising,
+  // so a hand-written useCallback here would only be a dependency array for a
+  // reader to check.
+  const dismiss = (id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
-  }, []);
+  };
 
-  const push = useCallback((toast: Omit<Toast, "id">) => {
+  const push = (toast: Omit<Toast, "id">) => {
     const id = nextId.current++;
     setToasts((current) => [...current, { ...toast, id }]);
     return id;
-  }, []);
-
-  const value = useMemo(() => ({ toasts, push, dismiss }), [toasts, push, dismiss]);
+  };
 
   return (
-    <ToastContext.Provider value={value}>
+    <ToastContext.Provider value={{ toasts, push, dismiss }}>
       {children}
       <ToastViewport />
     </ToastContext.Provider>
