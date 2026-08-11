@@ -490,7 +490,7 @@ function Row({
         onClick(row.name, { extend: event.shiftKey, toggle: event.metaKey || event.ctrlKey });
       }}
       onDoubleClick={() => onOpen(row)}
-      className={`grid h-row items-center font-mono text-xs ${GRID} -ml-0.5 border-l-2 ${
+      className={`grid h-row cursor-pointer items-center font-mono text-xs ${GRID} -ml-0.5 border-l-2 ${
         selected
           ? `${paneActive ? "bg-pane-sel" : "bg-pane-sel-idle"} border-on-pane-strong`
           : "hover:bg-pane-hover border-transparent"

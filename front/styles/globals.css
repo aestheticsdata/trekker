@@ -231,6 +231,24 @@ body {
   outline-offset: 1px;
 }
 
+/*
+ * Anything clickable says so. Tailwind's preflight resets buttons to the
+ * browser default cursor, which is an arrow — so every control in this app
+ * looked inert, and the fix belongs here once rather than as a `cursor-pointer`
+ * on each of the forty-odd buttons, where the next one added would forget it.
+ *
+ * `:not(:disabled)` leaves the explicit `cursor-not-allowed` on the M2 actions
+ * and the dead nav arrows alone: those are correctly not clickable.
+ */
+@layer base {
+  button:not(:disabled),
+  select:not(:disabled),
+  summary,
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+}
+
 @keyframes shimmer {
   0%,
   100% {

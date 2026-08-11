@@ -8,7 +8,7 @@ export default function ErrorBoundary({ error, reset }: { error: Error & { diges
       <button
         type="button"
         onClick={reset}
-        className="border-line text-ink-dim hover:text-ink cursor-pointer border px-3 py-1.5 text-xs tracking-widest"
+        className="border-line text-ink-dim hover:text-ink border px-3 py-1.5 text-xs tracking-widest"
       >
         RETRY
       </button>
