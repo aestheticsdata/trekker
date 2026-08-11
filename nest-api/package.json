@@ -15,6 +15,7 @@
     "verify:ssh": "tsx scripts/verify-ssh-driver.ts",
     "verify:fs": "tsx scripts/verify-fs-listing.ts",
     "account:create": "tsx scripts/create-account.ts",
+    "host:create": "tsx scripts/create-host.ts",
     "rotate-key": "tsx scripts/rotate-master-key.ts",
     "dev": "NODE_ENV=development nest start --watch",
     "start": "nest start",
