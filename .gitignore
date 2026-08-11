@@ -10,26 +10,54 @@ node_modules/
 # There are no .env files in this project — configuration lives in
 # ecosystem.config.js on both sides. These stay as a backstop so one can never
 # be added by accident.
+#
+# `.env.*` only catches a *suffix*, so `prod.env` and `secrets.env` walked
+# straight past it until TRE-5's audit; `*.env` is the rule that matters. The
+# `!` lines are what keeps the tracked templates tracked.
 .env
 .env.*
+*.env
+!*.env.example
 
 # Deploy target: names the real host and paths. deploy.env.example is tracked.
 deploy.env
 
 # The API's PM2 config holds production secrets. Only the .example is tracked.
-# The front's config has none, so front/ecosystem.config.cjs IS committed.
-nest-api/ecosystem.config.js
+# Unanchored, so a copy at the root or in front/ is caught too — the old rule
+# named one path and missed both. front/ecosystem.config.cjs is a .cjs and holds
+# no secrets, so it stays committed.
+ecosystem.config.js
+!ecosystem.config.example.js
 
 # secrets and key material
 *.pem
 *.key
 *.p12
 *.pfx
+*.ppk
+*.jks
+*.keystore
 id_rsa*
+id_dsa*
 id_ed25519*
 id_ecdsa*
-known_hosts
+known_hosts*
+authorized_keys*
+.ssh/
 *.gpg
+*.asc
+
+# credentials by any other name, at the root where they get dropped
+/credentials.*
+/secrets.*
+.npmrc
+.pgpass
+.netrc
+
+# database dumps — never *.sql, which would swallow prisma/migrations
+*.dump
+*-backup.sql
+dump.sql
 
 # build output
 .next/
@@ -41,6 +69,7 @@ next-env.d.ts
 
 # runtime
 dump.rdb
+dump.pm2
 *.log
 npm-debug.log*
 pnpm-debug.log*

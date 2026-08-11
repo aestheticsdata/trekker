@@ -22,6 +22,36 @@ follow from that:
   closed, and ideally an IP or VPN restriction. An authenticated Trekker session is shell-adjacent
   access to every host it knows.
 
+The master key is yours to generate and is never derived from anything in this repo — 32 bytes of
+randomness, into `TREKKER_MASTER_KEY`, kept outside every root a host is allowed to browse:
+
+```bash
+openssl rand -base64 32
+```
+
+Losing it makes every stored credential unrecoverable, which is the intended failure mode.
+
+### Contributing to a public repo about SSH credentials
+
+This repo is public and it is about holding the keys to machines. Nothing environment-specific
+ever gets committed: no hostnames, IPs, usernames, absolute paths from real machines, host key
+fingerprints or key material. Placeholders instead — `host.example.com`, `deploy`, `/srv/app`,
+`127.0.0.1`.
+
+```bash
+pnpm hooks:install
+```
+
+That points `core.hooksPath` at `.githooks/`, which refuses a commit carrying any of the above.
+Hooks are not cloned, so it is one command per checkout; CI runs `gitleaks` over the full history
+on every push regardless, and that is the actual guarantee. `pnpm scan` runs the same check
+locally if you have gitleaks installed.
+
+The hook exists because the leak this repo actually had was not a key. It was a real `user@host`
+pair sitting in a comment — inside a sentence explaining that publishing such a pair is free
+reconnaissance. Entropy-based scanners do not catch prose, so `.gitleaks.toml` adds rules that
+match the *shape* of infrastructure and allowlist the placeholders.
+
 ## Stack
 
 | | |

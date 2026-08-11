@@ -7,7 +7,10 @@
     "build": "pnpm --filter \"./nest-api\" build && pnpm --filter \"./front\" build",
     "lint": "pnpm --recursive lint",
     "typecheck": "pnpm --recursive typecheck",
-    "test": "pnpm --recursive test"
+    "test": "pnpm --recursive test",
+    "hooks:install": "git config core.hooksPath .githooks && echo '✓ pre-commit hook active (TRE-5)'",
+    "scan": "gitleaks dir --config .gitleaks.toml --redact --verbose --exit-code 1 .",
+    "scan:history": "gitleaks git --config .gitleaks.toml --redact --verbose --exit-code 1 ."
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3"

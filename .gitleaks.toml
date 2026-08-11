@@ -1,0 +1,87 @@
+# Secret scanning for a public repo that is about SSH credentials (TRE-5 §4).
+#
+# The stock rules catch key material, tokens and connection strings, and they
+# are extended rather than replaced. What they do not catch is this repo's
+# actual failure mode, which was never a key: it was a real `user@host` pair and
+# a real hostname sitting in prose, inside a comment whose own point was that
+# publishing such a pair is free reconnaissance. Secret scanners look for
+# secrets. Trekker also has to not publish a map.
+#
+# So the rules below are about identity, not entropy. None of them names a real
+# host, user or domain — a denylist of real values would be the leak it is
+# meant to prevent. They match the *shape* of infrastructure and allowlist the
+# placeholders TRE-5 mandates.
+
+title = "Trekker"
+
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------- identity ---
+
+[[rules]]
+id = "trekker-ssh-target"
+description = "A user@host literal that is not a placeholder — a real deploy target"
+# user@host where the host has a dot or a hyphen (fleet aliases look like a-b)
+# The negative lookbehind on `/` is what keeps `owner/repo@ref` out of it.
+regex = '''(?i)(?:^|[^/\w.-])[a-z_][a-z0-9_-]{1,31}@(?!(?:[a-z0-9-]+\.)?example\.(?:com|org|net)\b)(?!localhost\b)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)*\b'''
+tags = ["trekker", "infrastructure", "reconnaissance"]
+[rules.allowlist]
+regexTarget = "match"
+regexes = [
+  # The placeholders TRE-5 requires, plus package/email shapes that are not targets.
+  '''@(?:[a-z0-9-]+\.)?example\.(?:com|org|net)''',
+  '''@localhost''',
+  '''@127\.0\.0\.1''',
+  '''@host\b''',
+  '''@\$\{?[A-Z_]''',        # @$HOST, @${TREKKER_DEPLOY_HOST}
+  '''@[a-z0-9-]+\.(?:local|test|invalid|internal)\b''',
+  # `uses: actions/checkout@v5` and every other pinned action or package ref.
+  '''@(?:v?[0-9]|main|master|latest|sha256)''',
+]
+
+[[rules]]
+id = "trekker-real-home-path"
+description = "An absolute home directory from a real machine"
+regex = '''(?:/Users/|/home/)(?!(?:example-user|user|deploy|debian|ubuntu|runner|node)\b)[a-z_][a-z0-9_-]{1,31}(?:/|\b)'''
+tags = ["trekker", "infrastructure"]
+
+[[rules]]
+id = "trekker-public-ipv4"
+description = "An IPv4 address that is neither loopback, unspecified, nor documentation"
+regex = '''\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'''
+tags = ["trekker", "infrastructure"]
+[rules.allowlist]
+regexTarget = "match"
+regexes = [
+  '''^127\.''',                       # loopback
+  '''^0\.0\.0\.0$''',                 # unspecified
+  '''^255\.255\.''',                  # netmasks
+  '''^(?:10|127)\.''',                # RFC 1918 / loopback
+  '''^192\.168\.''',                  # RFC 1918
+  '''^172\.(?:1[6-9]|2[0-9]|3[01])\.''',
+  '''^192\.0\.2\.''',                 # RFC 5737 documentation
+  '''^198\.51\.100\.''',
+  '''^203\.0\.113\.''',
+  '''^(?:[0-9]{1,3}\.){3}(?:x|X|N|0/[0-9]+)$''',
+]
+
+[[rules]]
+id = "trekker-host-key-fingerprint"
+description = "An SSH host key fingerprint"
+regex = '''\b(?:SHA256:[A-Za-z0-9+/]{43}=?|MD5:(?:[0-9a-f]{2}:){15}[0-9a-f]{2})'''
+tags = ["trekker", "ssh"]
+
+# ----------------------------------------------------------------- global ----
+
+[allowlist]
+description = "Paths that cannot leak, and the files whose whole job is to be fake"
+paths = [
+  '''(^|/)pnpm-lock\.yaml$''',
+  '''(^|/)node_modules/''',
+  '''(^|/)\.next/''',
+  '''(^|/)dist/''',
+  '''(^|/)generated/''',
+  # This file: the rules quote the shapes they match, which trips the rules.
+  '''^\.gitleaks\.toml$''',
+]

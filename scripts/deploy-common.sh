@@ -249,9 +249,9 @@ zeus_commits_json() {
 
 # Tell Zeus what this deploy did: `zeus_report <success|failed|rolled_back> [summary]`.
 #
-# The POST happens on the deploy host over ssh rather than from here: the endpoint is
-# loopback-only and Zeus's nginx denies it from outside the box. The URL and
-# token are read there too — see load_deploy_config.
+# The POST happens on the deploy host over ssh rather than from here: the
+# endpoint is loopback-only and Zeus's nginx denies it from outside the box. The
+# URL and token are read there too — see load_deploy_config.
 zeus_report() {
   local status="$1"
   local summary="${2:-}"
