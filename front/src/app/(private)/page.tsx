@@ -2,33 +2,45 @@
 
 import { Explorer } from "@components/explorer/explorer";
 import { AppShell } from "@components/shell/app-shell";
+import { Sidebar } from "@components/sidebar/sidebar";
 import { formatSize } from "@helpers/listing";
 import { fetchHealth } from "@lib/api/health";
-import { fetchHosts } from "@lib/api/hosts";
+import { fetchHostSummary, fetchHosts } from "@lib/api/hosts";
 import { QUERY_KEYS } from "@lib/query/keys";
+import { explorerParams, LEFT_KEYS, paneParams, RIGHT_KEYS } from "@lib/url/explorer-params";
 import { useQuery } from "@tanstack/react-query";
+import { useQueryStates } from "nuqs";
 import { useState } from "react";
 
+import type { PaneUrl } from "@components/explorer/explorer";
+import type { PaneIndex } from "@components/explorer/pane-state";
 import type { SelectionSummary } from "@components/shell/status-bar";
-import type { SplitMode, ViewMode } from "@components/shell/toolbar";
 import type { FileRow } from "@lib/api/fs";
+import type { HostView } from "@lib/api/hosts";
 
 /**
- * The explorer, in the chrome (TRE-16).
+ * The explorer, in the chrome (TRE-16, TRE-18).
  *
- * This page owns what the bars and the panes share — the glob, the split mode,
- * the heat toggle and whatever is selected — because the toolbar draws some of
- * it and the panes act on it. TRE-18 moves all of it into the URL through
- * nuqs, at which point this becomes a much shorter file.
+ * This page owns the layout, and the layout lives in the URL. Copy the address
+ * into another tab and both panes come back on their own hosts, at their own
+ * paths, sorted the way they were, with the same split, heat map and glob — a
+ * saved view is a link, which is the whole reason TRE-18 did this before there
+ * were more components to rewrite.
+ *
+ * The selection and the cursor are deliberately not here. They change on every
+ * arrow key and mean nothing to whoever opens the link.
  */
 
 export default function HomePage() {
-  const [viewMode, setViewMode] = useState<ViewMode>("detail");
-  const [splitMode, setSplitMode] = useState<SplitMode>("split");
-  const [glob, setGlob] = useState("");
+  const [shared, setShared] = useQueryStates(explorerParams);
+  const [left, setLeft] = useQueryStates(paneParams, { urlKeys: LEFT_KEYS });
+  const [right, setRight] = useQueryStates(paneParams, { urlKeys: RIGHT_KEYS });
+
+  // Neither is worth a URL: one is a render detail, the other changes with the
+  // keyboard cursor.
   const [globMatches, setGlobMatches] = useState<number | null>(null);
-  const [heat, setHeat] = useState(false);
   const [selection, setSelection] = useState<{ row: FileRow; path: string } | null>(null);
+  const [manageHostsFor, setManageHostsFor] = useState<PaneIndex | null>(null);
 
   const { data: health } = useQuery({
     queryKey: [QUERY_KEYS.HEALTH],
@@ -44,53 +56,96 @@ export default function HomePage() {
     throwOnError: false,
   });
 
-  // Until the sidebar owns which host is active (TRE-18), the chip describes
-  // the one the panes opened on.
-  const host = hosts?.find((candidate) => candidate.transport === "LOCAL") ?? hosts?.[0] ?? null;
+  const active = shared.active as PaneIndex;
+  const panes: readonly [PaneUrl, PaneUrl] = [left, right];
+  const setPane = (pane: PaneIndex, patch: Partial<PaneUrl>) => {
+    void (pane === 0 ? setLeft(patch) : setRight(patch));
+  };
+
+  // The chrome describes the active pane's host, which is now a real answer
+  // rather than "the first one" — the sidebar can point each pane anywhere.
+  const activeHost = hosts?.find((host) => host.id === panes[active].host) ?? null;
+
+  // Its stats come from the host, not from the API process. The top bar used to
+  // show the NestJS uptime and a literal 1ms ping, which described the wrong
+  // machine entirely.
+  const { data: summary } = useQuery({
+    queryKey: [QUERY_KEYS.HOST_SUMMARY, activeHost?.id],
+    queryFn: () => fetchHostSummary(activeHost?.id as string),
+    enabled: Boolean(activeHost),
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    retry: false,
+    throwOnError: false,
+  });
 
   return (
     <AppShell
       host={
-        host
+        activeHost
           ? {
-              label: host.label,
-              colour: host.colour,
-              transport: host.transport === "LOCAL" ? "local" : "ssh",
-              pingMs: health ? 1 : null,
+              label: activeHost.label,
+              colour: activeHost.colour,
+              transport: activeHost.transport === "LOCAL" ? "local" : "ssh",
+              pingMs: summary?.pingMs ?? null,
             }
           : null
       }
       stats={{
-        uptime: health ? formatUptime(health.uptimeSeconds) : null,
+        uptime: summary?.uptimeSeconds != null ? formatUptime(summary.uptimeSeconds) : null,
         cpu: null,
-        ram: null,
-        io: null,
-        load: [],
+        ram: summary?.memory ? formatMemory(summary.memory) : null,
+        io: health ? "ok" : null,
+        load: summary?.load ? [summary.load.fifteen, summary.load.five, summary.load.one] : [],
       }}
       views={[]}
       selection={selection ? summarise(selection) : null}
-      viewMode={viewMode}
-      onViewModeChange={setViewMode}
-      splitMode={splitMode}
-      onSplitModeChange={setSplitMode}
-      glob={glob}
-      onGlobChange={setGlob}
+      viewMode={shared.view}
+      onViewModeChange={(view) => void setShared({ view })}
+      splitMode={shared.split}
+      onSplitModeChange={(split) => void setShared({ split })}
+      glob={shared.glob}
+      onGlobChange={(glob) => void setShared({ glob })}
       globMatches={globMatches}
-      heat={heat}
-      onHeatChange={setHeat}
+      heat={shared.heat}
+      onHeatChange={(heat) => void setShared({ heat })}
+      sidebar={
+        <Sidebar
+          hosts={hosts ?? []}
+          paneHostIds={[panes[0].host, panes[1].host]}
+          activePane={active}
+          onBindHost={(pane, host) => bind(pane, host)}
+          onNavigate={(host, path) => bind(active, host, path)}
+        />
+      }
     >
       <Explorer
         hosts={hosts ?? []}
         hostsPending={hostsPending}
-        glob={glob}
-        onGlobChange={setGlob}
+        panes={panes}
+        onPaneChange={setPane}
+        active={active}
+        onActiveChange={(pane) => void setShared({ active: pane })}
+        glob={shared.glob}
+        onGlobChange={(glob) => void setShared({ glob })}
         onMatchesChange={setGlobMatches}
-        splitMode={splitMode}
-        heat={heat}
+        splitMode={shared.split}
+        heat={shared.heat}
         onSelectionChange={setSelection}
+        manageHostsFor={manageHostsFor}
+        onManageHosts={setManageHostsFor}
       />
     </AppShell>
   );
+
+  /**
+   * Point a pane at a host (TRE-18 §2). Binding resets the pane to that host's
+   * home unless a favourite named somewhere else, and the pane's own effect
+   * clears the selection and shows the skeleton because the path changed.
+   */
+  function bind(pane: PaneIndex, host: HostView, path?: string) {
+    setPane(pane, { host: host.id, path: path ?? host.homePath });
+  }
 }
 
 function summarise({ row, path }: { row: FileRow; path: string }): SelectionSummary {
@@ -108,4 +163,10 @@ function formatUptime(seconds: number): string {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86400)}d`;
+}
+
+/** How much is in use, which is the question the bar answers. */
+function formatMemory({ totalKb, availableKb }: { totalKb: number; availableKb: number }): string {
+  if (totalKb <= 0) return "—";
+  return `${Math.round(((totalKb - availableKb) / totalKb) * 100)}%`;
 }

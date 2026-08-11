@@ -5,7 +5,7 @@ import { ageDays, ageIndex, breadcrumbs, formatAge, formatSize, formatTotal, typ
 import { ApiError } from "@lib/api/client";
 import { useEffect, useRef } from "react";
 
-import type { PaneState } from "@components/explorer/pane-state";
+import type { PaneView } from "@components/explorer/pane-state";
 import type { Crumb, SortKey } from "@helpers/listing";
 import type { FileRow, ListMeta } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
@@ -68,7 +68,7 @@ export function Pane({
   now,
   callbacks,
 }: {
-  pane: PaneState;
+  pane: PaneView;
   active: boolean;
   host: HostView | null;
   /** Already filtered and sorted by the explorer. */
@@ -224,7 +224,7 @@ function TabStrip({
   host,
   callbacks,
 }: {
-  pane: PaneState;
+  pane: PaneView;
   active: boolean;
   host: HostView | null;
   callbacks: PaneCallbacks;
@@ -287,7 +287,7 @@ function PathRow({
   shownBytes,
   callbacks,
 }: {
-  pane: PaneState;
+  pane: PaneView;
   active: boolean;
   host: HostView | null;
   crumbs: readonly Crumb[];

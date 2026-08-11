@@ -3,20 +3,24 @@ import { joinPath, parentPath } from "@helpers/listing";
 import type { SortDirection, SortKey } from "@helpers/listing";
 
 /**
- * What the two panes remember (TRE-16 §2, §3, §5).
+ * What the two panes remember (TRE-16 §2, §3, §5), minus what the URL now owns
+ * (TRE-18 §1).
  *
- * A reducer rather than a scatter of `useState` calls because these fields
- * change together and the rules between them are the ticket: navigating clears
- * the selection, the cursor is not the selection, and history is per pane and
- * survives a host switch. Every field is a string, a number or an array of
- * them, so TRE-18 can lift the whole thing into the URL through nuqs without
- * reshaping it.
+ * The split is the interesting part. A pane's host, path, sort key and sort
+ * direction are in the query string, because those four are what a link has to
+ * reproduce. Everything here is what a link should not carry: the open tabs,
+ * the back and forward stacks — unbounded arrays appended on every navigation,
+ * which would walk a long session into a URL no browser accepts — and the
+ * selection and cursor, which change on every arrow key.
+ *
+ * So the reducer no longer decides where a pane is. It is told, and it keeps
+ * the memory around that: actions carry the path, and the caller writes the
+ * same path to the URL. One direction, no sync loop.
  */
 
-export interface PaneState {
-  /** Null until the hosts query answers. */
-  hostId: string | null;
-  /** One path per open tab; the pane's path is the active tab's. */
+/** The half of a pane's state that lives in React. */
+export interface PaneMemory {
+  /** One path per open tab; `tabs[tab]` mirrors the URL's path for this pane. */
   tabs: string[];
   tab: number;
   /** Visited paths, newest last. Back pops, forward pushes. */
@@ -26,133 +30,75 @@ export interface PaneState {
   sel: string[];
   /** The row the keyboard is on, which is not necessarily selected. */
   cur: string | null;
+}
+
+/** A pane's memory joined with what the URL owns — what a `Pane` renders from. */
+export interface PaneView extends PaneMemory {
+  /** Null until a host is bound. */
+  hostId: string | null;
+  path: string;
   sort: SortKey;
   dir: SortDirection;
 }
 
 export interface ExplorerState {
-  panes: [PaneState, PaneState];
-  /** Exactly one pane is active, and every toolbar action means "this one". */
-  active: 0 | 1;
+  panes: [PaneMemory, PaneMemory];
 }
 
 export type PaneIndex = 0 | 1;
 
-export function pathOf(pane: PaneState): string {
-  return pane.tabs[pane.tab] ?? "/";
+export function pathOf(pane: PaneView): string {
+  return pane.path;
 }
 
-function newPane(path: string): PaneState {
-  return { hostId: null, tabs: [path], tab: 0, hist: [], fwd: [], sel: [], cur: null, sort: "name", dir: 1 };
+function newPane(path: string): PaneMemory {
+  return { tabs: [path], tab: 0, hist: [], fwd: [], sel: [], cur: null };
 }
 
 export function initialState(path = "/"): ExplorerState {
-  return { panes: [newPane(path), newPane(path)], active: 0 };
+  return { panes: [newPane(path), newPane(path)] };
 }
 
 export type ExplorerAction =
-  | { type: "focus"; pane: PaneIndex }
-  | { type: "switch" }
-  /** `null` unbinds — what a pane is left with when its host is deleted. */
-  | { type: "host"; pane: PaneIndex; hostId: string | null; path?: string }
-  | { type: "cd"; pane: PaneIndex; path: string; history?: boolean }
-  | { type: "up"; pane: PaneIndex }
-  | { type: "back"; pane: PaneIndex }
-  | { type: "forward"; pane: PaneIndex }
-  | { type: "open"; pane: PaneIndex; name: string; isDirectory: boolean }
-  | { type: "newTab"; pane: PaneIndex }
+  /** Every path change. `history: false` for a replay or a host switch. */
+  | { type: "navigate"; pane: PaneIndex; path: string; history?: boolean }
+  /** Back and forward, which rewrite both stacks and the path at once. */
+  | { type: "stacks"; pane: PaneIndex; path: string; hist: string[]; fwd: string[] }
+  | { type: "newTab"; pane: PaneIndex; path: string }
   | { type: "selectTab"; pane: PaneIndex; tab: number }
-  | { type: "sort"; pane: PaneIndex; key: SortKey }
   /** A click on a row, carrying the modifiers and the order they were seen in. */
   | { type: "click"; pane: PaneIndex; name: string; names: readonly string[]; extend: boolean; toggle: boolean }
   | { type: "move"; pane: PaneIndex; delta: number; names: readonly string[] }
   | { type: "cursor"; pane: PaneIndex; name: string | null };
 
 export function explorerReducer(state: ExplorerState, action: ExplorerAction): ExplorerState {
-  switch (action.type) {
-    case "focus":
-      return state.active === action.pane ? state : { ...state, active: action.pane };
-
-    case "switch":
-      return { ...state, active: state.active === 0 ? 1 : 0 };
-
-    // A host binding and a cursor landing on the first row of a listing are
-    // both data arriving, not the user acting: neither may steal the keyboard
-    // from the pane they are working in.
-    case "host":
-    case "cursor":
-      return { ...state, panes: withPane(state, action) };
-
-    default:
-      return { ...state, active: action.pane, panes: withPane(state, action) };
-  }
+  return {
+    ...state,
+    panes: state.panes.map((pane, index) => (index === action.pane ? paneReducer(pane, action) : pane)) as [
+      PaneMemory,
+      PaneMemory,
+    ],
+  };
 }
 
-function withPane(state: ExplorerState, action: ExplorerAction & { pane: PaneIndex }): [PaneState, PaneState] {
-  return state.panes.map((pane, index) => (index === action.pane ? paneReducer(pane, action) : pane)) as [
-    PaneState,
-    PaneState,
-  ];
-}
-
-function paneReducer(pane: PaneState, action: ExplorerAction): PaneState {
+function paneReducer(pane: PaneMemory, action: ExplorerAction): PaneMemory {
   switch (action.type) {
-    case "host": {
-      // The pane keeps its history across a host switch, as the ticket asks,
-      // but not its selection: those names belong to the other machine. The
-      // jump itself is not a history entry — going "back" to a path on a host
-      // the pane has left would restore neither.
-      const path = action.path ?? pathOf(pane);
-      return { ...navigate(pane, path, false), hostId: action.hostId };
-    }
-
-    case "cd":
+    case "navigate":
       return navigate(pane, action.path, action.history !== false);
 
-    case "up": {
-      const path = pathOf(pane);
-      return path === "/" ? pane : navigate(pane, parentPath(path), true);
+    case "stacks": {
+      const tabs = pane.tabs.slice();
+      tabs[pane.tab] = action.path;
+      return { ...pane, tabs, hist: action.hist, fwd: action.fwd, sel: [], cur: null };
     }
-
-    // History is the pane's while the path is the tab's, so switching tabs can
-    // leave the top of the stack equal to where we already are. Skipping those
-    // entries is what stops Back from spending one and going nowhere.
-    case "back": {
-      const hist = pane.hist.slice();
-      const current = pathOf(pane);
-      while (hist.length > 0 && hist[hist.length - 1] === current) hist.pop();
-      if (hist.length === 0) return { ...pane, hist };
-      const previous = hist.pop() as string;
-      return { ...navigate(pane, previous, false), hist, fwd: [current, ...pane.fwd] };
-    }
-
-    case "forward": {
-      const fwd = pane.fwd.slice();
-      const current = pathOf(pane);
-      while (fwd.length > 0 && fwd[0] === current) fwd.shift();
-      if (fwd.length === 0) return { ...pane, fwd };
-      const next = fwd.shift() as string;
-      return { ...navigate(pane, next, false), fwd, hist: [...pane.hist, current] };
-    }
-
-    case "open":
-      return action.isDirectory ? navigate(pane, joinPath(pathOf(pane), action.name), true) : pane;
 
     case "newTab":
-      return { ...pane, tabs: [...pane.tabs, pathOf(pane)], tab: pane.tabs.length, sel: [], cur: null };
+      return { ...pane, tabs: [...pane.tabs, action.path], tab: pane.tabs.length, sel: [], cur: null };
 
     case "selectTab":
       return action.tab === pane.tab || action.tab >= pane.tabs.length
         ? pane
         : { ...pane, tab: action.tab, sel: [], cur: null };
-
-    case "sort":
-      // Second click on the same column reverses it. A different column starts
-      // ascending — except size, where the question is always "what is eating
-      // the disk", so the first click puts the biggest at the top.
-      return pane.sort === action.key
-        ? { ...pane, dir: pane.dir === 1 ? -1 : 1 }
-        : { ...pane, sort: action.key, dir: action.key === "size" ? -1 : 1 };
 
     case "click": {
       if (action.extend && pane.cur) {
@@ -196,8 +142,8 @@ function paneReducer(pane: PaneState, action: ExplorerAction): PaneState {
  * (they named rows in a directory nobody is looking at any more), and history
  * records where we were unless we are replaying it.
  */
-function navigate(pane: PaneState, path: string, pushHistory: boolean): PaneState {
-  const current = pathOf(pane);
+function navigate(pane: PaneMemory, path: string, pushHistory: boolean): PaneMemory {
+  const current = pane.tabs[pane.tab] ?? "/";
   if (path === current) return pane;
 
   const tabs = pane.tabs.slice();
@@ -211,4 +157,42 @@ function navigate(pane: PaneState, path: string, pushHistory: boolean): PaneStat
     hist: pushHistory ? [...pane.hist, current] : pane.hist,
     fwd: pushHistory ? [] : pane.fwd,
   };
+}
+
+/**
+ * Where Back would go, or null when it would go nowhere.
+ *
+ * Pure and exported because the caller has to know the destination *before*
+ * dispatching: the URL is the source of truth for the path, so it is written
+ * with the same value the reducer is about to record, rather than read back
+ * out of the reducer afterwards.
+ *
+ * History is the pane's while the path is the tab's, so switching tabs can
+ * leave the top of the stack equal to where we already are. Skipping those
+ * entries is what stops Back from spending one and going nowhere.
+ */
+export function backTarget(pane: PaneView): { path: string; hist: string[]; fwd: string[] } | null {
+  const hist = pane.hist.slice();
+  while (hist.length > 0 && hist[hist.length - 1] === pane.path) hist.pop();
+  if (hist.length === 0) return null;
+  const path = hist.pop() as string;
+  return { path, hist, fwd: [pane.path, ...pane.fwd] };
+}
+
+export function forwardTarget(pane: PaneView): { path: string; hist: string[]; fwd: string[] } | null {
+  const fwd = pane.fwd.slice();
+  while (fwd.length > 0 && fwd[0] === pane.path) fwd.shift();
+  if (fwd.length === 0) return null;
+  const path = fwd.shift() as string;
+  return { path, hist: [...pane.hist, pane.path], fwd };
+}
+
+/** Where "up" goes, or null at the root. */
+export function upTarget(path: string): string | null {
+  return path === "/" ? null : parentPath(path);
+}
+
+/** Where opening a directory goes. */
+export function openTarget(path: string, name: string): string {
+  return joinPath(path, name);
 }

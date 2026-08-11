@@ -1,7 +1,14 @@
 "use client";
 
 import { Pane } from "@components/explorer/pane";
-import { explorerReducer, initialState, pathOf } from "@components/explorer/pane-state";
+import {
+  backTarget,
+  explorerReducer,
+  forwardTarget,
+  initialState,
+  openTarget,
+  upTarget,
+} from "@components/explorer/pane-state";
 import { HostManager } from "@components/hosts/host-manager";
 import { useToast } from "@components/ui/toast";
 import { globToRegExp, joinPath, resolveTarget, sortRows } from "@helpers/listing";
@@ -11,38 +18,62 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useState } from "react";
 
 import type { PaneCallbacks } from "@components/explorer/pane";
-import type { PaneIndex, PaneState } from "@components/explorer/pane-state";
+import type { PaneIndex, PaneView } from "@components/explorer/pane-state";
 import type { SplitMode } from "@components/shell/toolbar";
 import type { SortKey } from "@helpers/listing";
 import type { FileRow } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
 
 /**
- * The two panes and everything shared between them (TRE-16).
+ * The two panes and everything shared between them (TRE-16, rewired by TRE-18).
  *
- * Data, keyboard and layout live here; a pane draws what it is given. That
- * split is what lets `⇥` move the keyboard between two identical components
- * and lets a future transfer (TRE-23) read "the other pane" without either
- * pane knowing the other exists.
+ * Where a pane *is* — its host, path, sort key and direction — is no longer
+ * held here: it is in the URL, and arrives as a prop with a setter. What stays
+ * is the memory around it, the tabs, history stacks, selection and cursor that
+ * a link has no business carrying.
+ *
+ * The consequence worth knowing is that navigation is now two writes that must
+ * agree: the reducer records where we were, the URL records where we are. They
+ * are issued together from `go()` and from nowhere else, which is what keeps
+ * them from drifting — and why there is no effect syncing one back into the
+ * other, the loop this refactor exists to avoid.
  */
 
 /** Fresh enough that a chmod shows up, slow enough not to refetch on a glance. */
 const STALE_MS = 10_000;
 
+/** One pane's share of the URL. */
+export interface PaneUrl {
+  host: string | null;
+  path: string;
+  sort: SortKey;
+  dir: 1 | -1;
+}
+
 export function Explorer({
   hosts,
   hostsPending = false,
+  panes,
+  onPaneChange,
+  active,
+  onActiveChange,
   glob,
   onGlobChange,
   onMatchesChange,
   splitMode,
   heat,
   onSelectionChange,
+  manageHostsFor,
+  onManageHosts,
 }: {
   hosts: readonly HostView[];
   /** True while the hosts query is in flight, so an unbound pane waits rather
    * than announcing it has no host. */
   hostsPending?: boolean;
+  panes: readonly [PaneUrl, PaneUrl];
+  onPaneChange: (pane: PaneIndex, patch: Partial<PaneUrl>) => void;
+  active: PaneIndex;
+  onActiveChange: (pane: PaneIndex) => void;
   glob: string;
   onGlobChange: (glob: string) => void;
   /** Reported up so the toolbar's hit count can show it. */
@@ -50,67 +81,84 @@ export function Explorer({
   splitMode: SplitMode;
   heat: boolean;
   onSelectionChange: (selection: { row: FileRow; path: string } | null) => void;
+  /** Which pane opened the host manager, if any — owned by the page so the
+   * sidebar can open it too. */
+  manageHostsFor: PaneIndex | null;
+  onManageHosts: (pane: PaneIndex | null) => void;
 }) {
-  const [state, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
+  const [memory, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
   const { push } = useToast();
   const queryClient = useQueryClient();
+  /** Set once a host has been bound automatically, so it happens per pane once. */
+  const [seeded, setSeeded] = useState<[boolean, boolean]>([false, false]);
 
-  // Which pane opened the host manager (TRE-43) — it is also the pane a pick
-  // binds to, so "null" and "which one" are the same piece of state.
-  const [managerPane, setManagerPane] = useState<PaneIndex | null>(null);
+  const views: [PaneView, PaneView] = [
+    { ...memory.panes[0], hostId: panes[0].host, path: panes[0].path, sort: panes[0].sort, dir: panes[0].dir },
+    { ...memory.panes[1], hostId: panes[1].host, path: panes[1].path, sort: panes[1].sort, dir: panes[1].dir },
+  ];
 
-  // One host for both panes until the sidebar can choose (TRE-18). The panes
-  // are already independent; only the picker is missing.
   const defaultHost = hosts.find((host) => host.transport === "LOCAL") ?? hosts[0] ?? null;
 
+  /**
+   * Bind a pane that has no host, or one whose host no longer exists.
+   *
+   * The second case is what a URL makes possible: a link can name a host that
+   * was deleted, or that belongs to somebody else's account, and the parser
+   * cannot know — it only checks the shape. Reconciling here is the same path a
+   * deleted host already takes (TRE-43).
+   */
   useEffect(() => {
-    if (!defaultHost) return;
+    if (hostsPending) return;
     for (const index of [0, 1] as const) {
-      if (state.panes[index].hostId === null) {
-        dispatch({ type: "host", pane: index, hostId: defaultHost.id, path: defaultHost.homePath });
-      }
+      const bound = panes[index].host;
+      const known = bound !== null && hosts.some((host) => host.id === bound);
+      if (known || (bound === null && seeded[index])) continue;
+      if (!defaultHost) continue;
+      onPaneChange(index, { host: defaultHost.id, path: defaultHost.homePath });
+      setSeeded((current) => {
+        const next: [boolean, boolean] = [current[0], current[1]];
+        next[index] = true;
+        return next;
+      });
     }
-  }, [defaultHost, state.panes]);
+  }, [hosts, hostsPending, panes, defaultHost, onPaneChange, seeded]);
 
   // Solo mode shows one pane; that pane must be the one the keyboard, the glob
   // and every toolbar action are pointed at, or they all drive a pane nobody
   // can see.
   useEffect(() => {
-    if (splitMode === "left" && state.active !== 0) dispatch({ type: "focus", pane: 0 });
-    if (splitMode === "right" && state.active !== 1) dispatch({ type: "focus", pane: 1 });
-  }, [splitMode, state.active]);
+    if (splitMode === "left" && active !== 0) onActiveChange(0);
+    if (splitMode === "right" && active !== 1) onActiveChange(1);
+  }, [splitMode, active, onActiveChange]);
 
-  const listings = [useListing(state.panes[0]), useListing(state.panes[1])] as const;
+  const listings = [useListing(views[0]), useListing(views[1])] as const;
 
   // Every row in a paint ages against one instant, so two rows a millisecond
   // apart never render as "59min" and "1h".
   const now = Date.now();
 
-  const views = [0, 1].map((index) => {
-    const pane = state.panes[index];
+  const rendered = [0, 1].map((index) => {
     const listing = listings[index];
     const entries = listing.data?.entries ?? [];
     // The glob is the active pane's filter, exactly as the mockup has it.
-    const filtered = glob.trim() && index === state.active ? entries.filter(matcher(glob)) : entries;
+    const filtered = glob.trim() && index === active ? entries.filter(matcher(glob)) : entries;
     return {
-      rows: sortRows(filtered, pane.sort, pane.dir),
+      rows: sortRows(filtered, views[index].sort, views[index].dir),
       hiddenByGlob: entries.length - filtered.length,
       listing,
     };
   });
 
-  const activeView = views[state.active];
+  const activeView = rendered[active];
 
-  // The toolbar shows the hit count and the status bar the selected row; both
-  // belong to the active pane, and both are the shell's to draw.
   useEffect(() => {
     onMatchesChange(glob.trim() ? activeView.rows.length : null);
   }, [glob, activeView.rows.length, onMatchesChange]);
 
   // A directory that has just finished loading gets its cursor on the first
   // row, so ↓ moves to the second rather than re-selecting the first.
-  const firstNames = [views[0].rows[0]?.name ?? null, views[1].rows[0]?.name ?? null] as const;
-  const cursors = [state.panes[0].cur, state.panes[1].cur] as const;
+  const firstNames = [rendered[0].rows[0]?.name ?? null, rendered[1].rows[0]?.name ?? null] as const;
+  const cursors = [memory.panes[0].cur, memory.panes[1].cur] as const;
   useEffect(() => {
     for (const index of [0, 1] as const) {
       const first = firstNames[index];
@@ -120,19 +168,28 @@ export function Explorer({
     }
   }, [firstNames, cursors]);
 
-  const activePane = state.panes[state.active];
+  const activePane = views[active];
   const cursorRow = activeView.rows.find((row) => row.name === activePane.cur) ?? null;
-  const cursorPath = cursorRow ? joinPath(pathOf(activePane), cursorRow.name) : null;
+  const cursorPath = cursorRow ? joinPath(activePane.path, cursorRow.name) : null;
 
-  // Depends on the row object and its path, both stable between renders, so
-  // the parent storing what it receives cannot feed this effect back to itself.
   useEffect(() => {
     onSelectionChange(cursorRow && cursorPath ? { row: cursorRow, path: cursorPath } : null);
   }, [cursorRow, cursorPath, onSelectionChange]);
 
+  /**
+   * The one way a pane moves. Both writes are issued here — the reducer's
+   * memory of where we were, and the URL's record of where we are — so they
+   * cannot disagree.
+   */
+  const go = (index: PaneIndex, path: string, history = true) => {
+    if (path === views[index].path) return;
+    dispatch({ type: "navigate", pane: index, path, history });
+    onPaneChange(index, { path });
+  };
+
   const open = (index: PaneIndex, row: FileRow) => {
     if (row.type === "dir") {
-      dispatch({ type: "open", pane: index, name: row.name, isDirectory: true });
+      go(index, openTarget(views[index].path, row.name));
       return;
     }
     if (row.type === "link") {
@@ -147,7 +204,7 @@ export function Explorer({
       if (row.linkTarget) {
         // Resolved against the directory holding the link: readlink returns
         // the target as written, and most of them are written relative.
-        dispatch({ type: "cd", pane: index, path: resolveTarget(pathOf(state.panes[index]), row.linkTarget) });
+        go(index, resolveTarget(views[index].path, row.linkTarget));
         return;
       }
     }
@@ -156,14 +213,14 @@ export function Explorer({
 
   useKeyboard({
     // The manager is a modal: ↓ over it belongs to nothing behind it.
-    enabled: managerPane === null,
+    enabled: manageHostsFor === null,
     onKey: (event) => {
-      const index = state.active;
-      const names = views[index].rows.map((row) => row.name);
+      const index = active;
+      const names = rendered[index].rows.map((row) => row.name);
 
       switch (event.key) {
         case "Tab":
-          dispatch({ type: "switch" });
+          onActiveChange(index === 0 ? 1 : 0);
           return true;
         case "ArrowDown":
           dispatch({ type: "move", pane: index, delta: 1, names });
@@ -172,13 +229,15 @@ export function Explorer({
           dispatch({ type: "move", pane: index, delta: -1, names });
           return true;
         case "Enter": {
-          const row = views[index].rows.find((candidate) => candidate.name === state.panes[index].cur);
+          const row = rendered[index].rows.find((candidate) => candidate.name === views[index].cur);
           if (row) open(index, row);
           return true;
         }
-        case "Backspace":
-          dispatch({ type: "up", pane: index });
+        case "Backspace": {
+          const up = upTarget(views[index].path);
+          if (up) go(index, up);
           return true;
+        }
         case "F2":
         case "F5":
         case "F6":
@@ -192,37 +251,63 @@ export function Explorer({
   });
 
   const callbacksFor = (index: PaneIndex): PaneCallbacks => ({
-    onFocus: () => dispatch({ type: "focus", pane: index }),
-    onCd: (path) => dispatch({ type: "cd", pane: index, path }),
-    onUp: () => dispatch({ type: "up", pane: index }),
-    onBack: () => dispatch({ type: "back", pane: index }),
-    onForward: () => dispatch({ type: "forward", pane: index }),
+    onFocus: () => onActiveChange(index),
+    onCd: (path) => go(index, path),
+    onUp: () => {
+      const up = upTarget(views[index].path);
+      if (up) go(index, up);
+    },
+    onBack: () => {
+      const target = backTarget(views[index]);
+      if (!target) return;
+      dispatch({ type: "stacks", pane: index, ...target });
+      onPaneChange(index, { path: target.path });
+    },
+    onForward: () => {
+      const target = forwardTarget(views[index]);
+      if (!target) return;
+      dispatch({ type: "stacks", pane: index, ...target });
+      onPaneChange(index, { path: target.path });
+    },
     onOpen: (row) => open(index, row),
-    onNewTab: () => dispatch({ type: "newTab", pane: index }),
-    onSelectTab: (tab) => dispatch({ type: "selectTab", pane: index, tab }),
-    onSort: (key: SortKey) => dispatch({ type: "sort", pane: index, key }),
+    onNewTab: () => dispatch({ type: "newTab", pane: index, path: views[index].path }),
+    onSelectTab: (tab) => {
+      const path = memory.panes[index].tabs[tab];
+      if (path === undefined) return;
+      dispatch({ type: "selectTab", pane: index, tab });
+      onPaneChange(index, { path });
+    },
+    onSort: (key: SortKey) => {
+      // Second click on the same column reverses it. A different column starts
+      // ascending — except size, where the question is always "what is eating
+      // the disk", so the first click puts the biggest at the top.
+      const pane = views[index];
+      onPaneChange(
+        index,
+        pane.sort === key ? { dir: pane.dir === 1 ? -1 : 1 } : { sort: key, dir: key === "size" ? -1 : 1 },
+      );
+    },
     onRowClick: (name, modifiers) =>
       dispatch({
         type: "click",
         pane: index,
         name,
-        names: views[index].rows.map((row) => row.name),
+        names: rendered[index].rows.map((row) => row.name),
         extend: modifiers.extend,
         toggle: modifiers.toggle,
       }),
-    onHostMenu: () => setManagerPane(index),
+    onHostMenu: () => onManageHosts(index),
     onClearGlob: () => onGlobChange(""),
   });
 
   // Pointing at a directory is a reliable signal that it is about to be
   // opened, whether the pointer is a mouse or the keyboard cursor.
-  const prefetch = (pane: PaneState, row: FileRow) => {
-    const hostId = pane.hostId;
-    if (row.type !== "dir" || hostId === null) return;
-    const path = joinPath(pathOf(pane), row.name);
+  const prefetch = (pane: PaneView, row: FileRow) => {
+    if (row.type !== "dir" || pane.hostId === null) return;
+    const path = joinPath(pane.path, row.name);
     queryClient.prefetchQuery({
-      queryKey: [QUERY_KEYS.DIRECTORY, hostId, path],
-      queryFn: () => fetchListing(hostId, path),
+      queryKey: [QUERY_KEYS.DIRECTORY, pane.hostId, path],
+      queryFn: () => fetchListing(pane.hostId as string, path),
       staleTime: STALE_MS,
       // A guess that fails should cost one request, not four.
       retry: false,
@@ -242,7 +327,7 @@ export function Explorer({
     });
   }, [cursorDirectory, activeHostId, queryClient]);
 
-  const prefetchFromEvent = (pane: PaneState, rows: readonly FileRow[], target: EventTarget | null) => {
+  const prefetchFromEvent = (pane: PaneView, rows: readonly FileRow[], target: EventTarget | null) => {
     const name = (target as HTMLElement | null)?.closest?.<HTMLElement>("[data-row]")?.dataset.row;
     const row = name ? rows.find((candidate) => candidate.name === name) : undefined;
     if (row) prefetch(pane, row);
@@ -254,20 +339,15 @@ export function Explorer({
    * The list is refetched rather than patched — the server owns the slug, the
    * normalised roots and whether a credential is stored — and any pane left
    * pointing at a deleted host is unbound, which hands it back to the binding
-   * effect above: it rebinds to whatever host is left, or to none, and the
-   * pane says so instead of asking for a directory that has no machine.
+   * effect above.
    */
   const onHostsChanged = ({ host, deleted }: { host: HostView; deleted?: boolean }) => {
     void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.HOSTS] });
-    if (!deleted) {
-      void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, host.id] });
-      return;
-    }
-    for (const index of [0, 1] as const) {
-      if (state.panes[index].hostId === host.id) {
-        dispatch({ type: "host", pane: index, hostId: null });
-      }
-    }
+    if (!deleted) void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, host.id] });
+    // A deleted host needs no unbinding here. Once the list comes back without
+    // it, the pane's id matches nothing and the reconciling effect above binds
+    // it to whatever is left — the same path a URL naming a stale host takes,
+    // which is one behaviour instead of two.
   };
 
   return (
@@ -277,8 +357,8 @@ export function Explorer({
         const shown = splitMode === "split" || (splitMode === "left" ? index === 0 : index === 1);
         if (solo && !shown) return null;
 
-        const pane = state.panes[index];
-        const view = views[index];
+        const pane = views[index];
+        const view = rendered[index];
         return (
           // biome-ignore lint/a11y/noStaticElementInteractions: a cache warm-up on hover, with no behaviour of its own
           <div
@@ -289,7 +369,7 @@ export function Explorer({
           >
             <Pane
               pane={pane}
-              active={state.active === index}
+              active={active === index}
               host={hosts.find((host) => host.id === pane.hostId) ?? null}
               rows={view.rows}
               meta={view.listing.data?.meta ?? null}
@@ -297,8 +377,8 @@ export function Explorer({
               // would shimmer for ever if that alone drove the skeleton.
               loading={hostsPending || (pane.hostId !== null && view.listing.isPending)}
               error={view.listing.error}
-              glob={index === state.active ? glob.trim() : ""}
-              hiddenByGlob={index === state.active ? view.hiddenByGlob : 0}
+              glob={index === active ? glob.trim() : ""}
+              hiddenByGlob={index === active ? view.hiddenByGlob : 0}
               heat={heat}
               now={now}
               callbacks={callbacksFor(index)}
@@ -307,25 +387,24 @@ export function Explorer({
         );
       })}
 
-      {managerPane !== null && (
+      {manageHostsFor !== null && (
         <HostManager
           hosts={hosts}
-          boundHostId={state.panes[managerPane].hostId}
-          onPick={(host) => dispatch({ type: "host", pane: managerPane, hostId: host.id, path: host.homePath })}
+          boundHostId={panes[manageHostsFor].host}
+          onPick={(host) => onPaneChange(manageHostsFor, { host: host.id, path: host.homePath })}
           onChanged={onHostsChanged}
-          onClose={() => setManagerPane(null)}
+          onClose={() => onManageHosts(null)}
         />
       )}
     </div>
   );
 }
 
-function useListing(pane: PaneState) {
-  const path = pathOf(pane);
+function useListing(pane: PaneView) {
   return useQuery({
     // Two panes on the same directory of the same host share this entry.
-    queryKey: [QUERY_KEYS.DIRECTORY, pane.hostId, path],
-    queryFn: () => fetchListing(pane.hostId as string, path),
+    queryKey: [QUERY_KEYS.DIRECTORY, pane.hostId, pane.path],
+    queryFn: () => fetchListing(pane.hostId as string, pane.path),
     enabled: pane.hostId !== null,
     staleTime: STALE_MS,
     // A denial or a missing directory is an answer, not a blip: retrying just
