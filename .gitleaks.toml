@@ -58,7 +58,7 @@ tags = ["trekker", "infrastructure"]
 regexTarget = "match"
 regexes = [
   # The accounts a public repo is allowed to name: the placeholders TRE-5
-  # mandates, plus the ones CI and the base images actually create.
+  # mandates, plus the ones the common base images actually create.
   '''/(?:Users|home)/(?:example-user|user|deploy|debian|ubuntu|runner|node)(?:/|$)''',
 ]
 

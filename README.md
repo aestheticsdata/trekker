@@ -45,12 +45,15 @@ pnpm hooks:install
 ```
 
 That points `core.hooksPath` at `.githooks/`, which refuses both a diff and a **commit message**
-carrying any of the above. Hooks are not cloned, so it is one command per checkout; CI runs
-`gitleaks` over the full history on every push regardless, and that is the actual guarantee.
-`pnpm scan` runs the same check locally if you have gitleaks installed — it walks the working tree
-rather than the index, so it also reports your own `deploy.env` and `ecosystem.config.js`. That is
-the point of it and not a failure: those files hold real secrets, and the check that matters is
-that they are never tracked. `pnpm scan:history` is the one that mirrors CI.
+carrying any of the above. Hooks live in `.git/` and are never cloned, so it is one command per
+checkout — and since there is no CI here, it is the whole guard rather than a convenience in front
+of one. Run it before your first commit on a new machine.
+
+`pnpm scan` sweeps the working tree with `gitleaks` if you have it installed, and
+`pnpm scan:history` sweeps every commit — the one to run before a push, because a secret committed
+once and removed later is still published. `scan` walks the tree rather than the index, so it also
+reports your own `deploy.env` and `ecosystem.config.js`. That is the point of it and not a failure:
+those files hold real secrets, and the check that matters is that they are never tracked.
 
 The hooks exist because the leak this repo actually had was not a key. It was a real `user@host`
 pair sitting in a comment — inside a sentence explaining that publishing such a pair is free

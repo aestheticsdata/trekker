@@ -2,9 +2,10 @@
 # Refuses a commit that would publish infrastructure (TRE-5 §4).
 #
 # Install with `pnpm hooks:install`. Hooks are not cloned, so this is opt-in per
-# checkout and CI is the real guarantee — this only moves the failure from after
-# the push to before the commit, which is the difference between an edit and a
-# history rewrite.
+# checkout — and with no CI behind it, an uninstalled hook means no guard at all.
+# What it buys when it is installed is the whole point: it refuses before the
+# commit exists, which is the difference between an edit and the history rewrite
+# this repo has already had to perform once.
 #
 # Two layers, because they fail differently. gitleaks knows entropy and key
 # formats; the shapes in infra-patterns.sh know what actually went wrong here —
@@ -36,7 +37,7 @@ if command -v gitleaks >/dev/null 2>&1; then
   fi
 else
   printf '  gitleaks not installed — running the built-in checks only.\n' >&2
-  printf '  brew install gitleaks   (CI runs it regardless)\n' >&2
+  printf '  brew install gitleaks   (nothing else scans for you)\n' >&2
 fi
 
 # ---- layer 2: this repo's own shapes ---------------------------------------
@@ -44,10 +45,11 @@ fi
 # Checked against the staged content, not the working tree, so a `git add -p`
 # that stages only part of a file is judged on what it actually stages.
 #
-# The two guard files are excluded because they quote the shapes they match:
+# The guard files are excluded because they quote the shapes they match:
 # scanning them finds their own rules. That is a real blind spot rather than a
-# tidy one — a leak written into either is invisible here — so they get read by
-# eye, and CI's history scan still covers everything else.
+# tidy one — a leak written into one of them is invisible to this layer — so
+# they get read by eye, and `pnpm scan` covers them, since gitleaks allowlists
+# only .gitleaks.toml and still reads everything under .githooks/.
 
 # `grep -v '^+++ '` drops the diff's own file headers. They are added lines by
 # the letter of `^+`, and every path under src/users/ then reads as a home
