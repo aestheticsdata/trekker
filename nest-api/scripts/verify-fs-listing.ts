@@ -158,11 +158,19 @@ async function main(): Promise<void> {
     console.log(`  listed ${listed.length} entries over SFTP in ${tookMs}ms`);
     console.log(`  SFTP requests: ${JSON.stringify(counts)}`);
 
-    check("exactly one readdir", counts.readdir === 1, String(counts.readdir));
+    // The requirement is "no stat per entry", not a literal single request:
+    // SFTP returns a directory in batches, so ssh2's readdir(path) opens a
+    // handle and re-reads it until EOF. Around a hundred round trips for ten
+    // thousand entries is the protocol's floor; ten thousand would be the bug.
     check(
       `no lstat/stat per entry (${count} files)`,
       (counts.lstat ?? 0) === 0 && (counts.stat ?? 0) === 0,
       JSON.stringify(counts),
+    );
+    check(
+      `readdir is batched, not per entry (${counts.readdir} reads for ${listed.length} entries)`,
+      counts.readdir > 0 && counts.readdir < listed.length / 20,
+      String(counts.readdir),
     );
     check("one readlink per symlink (3)", counts.readlink === 3, String(counts.readlink));
     check(`a ${count}-entry listing is under 500ms`, tookMs < 500, `${tookMs}ms`);

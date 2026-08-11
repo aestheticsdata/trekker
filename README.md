@@ -158,14 +158,23 @@ looking at different machines and the comparison would mean nothing. See the fil
 
 ### Listing cost
 
-`GET /api/fs/list` costs **one `readdir`**, plus one `readlink` for each symlink and nothing for
-anything else — a stat per entry would turn ten thousand rows into ten thousand round trips.
-Measured on 10,003 entries: 4 SFTP requests. Owner and group names come from `/etc/passwd` and
-`/etc/group`, read once per host and cached, not once per row.
+`GET /api/fs/list` never stats an entry. It reads the directory and takes mode, size, owner and
+mtime from what that read already returned; the only extra round trip is one `readlink` per
+symlink. A stat per entry is what turns ten thousand rows into ten thousand round trips, and it
+is the thing this endpoint is built to avoid.
 
-A 10,000-entry directory lists in **86 ms** server-side on the local driver (`meta.tookMs`, a
-2026 laptop); the cap is 10,000 entries, above which the response sets `meta.truncated` and
-reports the real total rather than quietly ending short.
+Measured over SFTP on a 10,003-entry directory (`verify:fs`, on the deploy host against its own
+sshd): **258 ms**, 103 `readdir` requests and 3 `readlink`, and **zero** stats. The hundred-odd
+reads are the protocol, not the code — SFTP returns a directory in batches of about a hundred,
+so ssh2 re-reads the handle until EOF. On the local driver the same shape costs **86 ms**
+(`meta.tookMs`).
+
+Owner and group names come from `/etc/passwd` and `/etc/group`, read once per host and cached
+for five minutes, with concurrent first-callers sharing a single read — not one lookup per row.
+A host that will not surrender those files shows numeric ids, which is what `ls -n` does.
+
+The cap is 10,000 entries, above which the response sets `meta.truncated` and reports the real
+total rather than quietly ending short.
 
 ## Tracking
 
