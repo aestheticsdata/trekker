@@ -146,10 +146,26 @@ deliberately no `@prisma/…` alias — it would shadow the npm scope the Prisma
 | `pnpm --filter ./nest-api migrate` | new migration from a schema change |
 | `pnpm --filter ./nest-api seed` | rebuild the demo account |
 | `pnpm --filter ./nest-api test:db` | schema tests — needs a real MySQL |
+| `pnpm --filter ./nest-api verify:fs` | listing cost and driver parity — run on the deploy host |
 
 `test:db` is separate from `pnpm test` because it asserts on constraints the database enforces,
 not on anything Prisma could fake. It makes and removes its own rows, so it is safe against a
 seeded dev database.
+
+`verify:fs` belongs on the deploy host, pointed at that host's own sshd, because its point is to
+read one directory through both drivers and compare: run from a workstation the two would be
+looking at different machines and the comparison would mean nothing. See the file's header.
+
+### Listing cost
+
+`GET /api/fs/list` costs **one `readdir`**, plus one `readlink` for each symlink and nothing for
+anything else — a stat per entry would turn ten thousand rows into ten thousand round trips.
+Measured on 10,003 entries: 4 SFTP requests. Owner and group names come from `/etc/passwd` and
+`/etc/group`, read once per host and cached, not once per row.
+
+A 10,000-entry directory lists in **86 ms** server-side on the local driver (`meta.tookMs`, a
+2026 laptop); the cap is 10,000 entries, above which the response sets `meta.truncated` and
+reports the real total rather than quietly ending short.
 
 ## Tracking
 

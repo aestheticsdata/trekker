@@ -138,6 +138,10 @@ export class SshDriver implements HostDriver {
         uid: attrs.uid,
         gid: attrs.gid,
         mtimeMs: attrs.mtime * 1000,
+        // atime is the only one of the four extras SFTP v3 carries; inode and
+        // nlink have no attribute in the protocol, and ctime is not sent
+        // either. Left undefined rather than guessed.
+        atimeMs: attrs.atime * 1000,
       };
       if (result.kind === "symlink") {
         result.linkTarget = await readlinkOrUndefined(lease, path);

@@ -31,6 +31,17 @@ export interface FileEntry {
 export interface FileStat extends FileEntry {
   /** Absolute path this stat describes. */
   path: string;
+
+  /**
+   * The inspector's extra fields (TRE-13 §4). Optional because SFTP v3 has no
+   * attribute for an inode or a link count — a remote host simply does not
+   * report them, and the panel shows what it has rather than inventing a zero.
+   */
+  inode?: number;
+  nlink?: number;
+  atimeMs?: number;
+  /** Inode change time. Not a creation time — nothing POSIX gives us is. */
+  ctimeMs?: number;
 }
 
 export interface ExecResult {

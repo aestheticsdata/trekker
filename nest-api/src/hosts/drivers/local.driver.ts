@@ -95,6 +95,10 @@ export class LocalDriver implements HostDriver {
         uid: info.uid,
         gid: info.gid,
         mtimeMs: info.mtimeMs,
+        inode: Number(info.ino),
+        nlink: info.nlink,
+        atimeMs: info.atimeMs,
+        ctimeMs: info.ctimeMs,
       };
       if (result.kind === "symlink") {
         result.linkTarget = await readlink(path).catch(() => undefined);

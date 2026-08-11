@@ -19,6 +19,7 @@
       "@infrastructure/*": ["./src/infrastructure/*"],
       "@redis/*": ["./src/redis/*"],
       "@database/*": ["./src/database/*"],
+      "@fs/*": ["./src/fs/*"],
       "@health/*": ["./src/health/*"],
       "@hosts/*": ["./src/hosts/*"],
       "@secrets/*": ["./src/secrets/*"],
