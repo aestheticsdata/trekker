@@ -47,9 +47,11 @@ authorized_keys*
 *.gpg
 *.asc
 
-# credentials by any other name, at the root where they get dropped
-/credentials.*
-/secrets.*
+# credentials by any other name. Unanchored: the root is where they usually get
+# dropped, but front/ and nest-api/ are where you are standing when you drop
+# one, and the root-anchored rule ignored both.
+credentials.*
+secrets.*
 .npmrc
 .pgpass
 .netrc
@@ -88,5 +90,8 @@ generated/
 .idea/
 .vscode/
 .claude/worktrees/
-
-credentials.txt
+*.swp
+*.swo
+*~
+Thumbs.db
+Desktop.ini

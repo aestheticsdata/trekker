@@ -32,18 +32,21 @@ tags = ["trekker", "infrastructure", "reconnaissance"]
 [rules.allowlist]
 regexTarget = "match"
 regexes = [
-  # The placeholders TRE-5 requires, plus package/email shapes that are not targets.
-  '''@(?:[a-z0-9-]+\.)?example\.(?:com|org|net)''',
-  '''@localhost''',
-  '''@127\.0\.0\.1''',
+  # The placeholders TRE-5 requires, plus package/email shapes that are not
+  # targets. Anchored with `$`, without exception: an unanchored `@localhost`
+  # excuses `deploy@localhost.a-real-domain` on the strength of its first label,
+  # which is the same hole `@host` had.
+  '''@(?:[a-z0-9-]+\.)?example\.(?:com|org|net)$''',
+  '''@localhost$''',
+  '''@127\.0\.0\.1$''',
   # Bare `deploy@host`, and nothing else. `@host\b` ended at the word boundary
   # before the dot, so any real domain whose first label happened to be `host`
   # was waved through on the strength of that label alone.
   '''@host$''',
   '''@\$\{?[A-Z_]''',        # @$HOST, @${TREKKER_DEPLOY_HOST}
-  '''@[a-z0-9-]+\.(?:local|test|invalid|internal)\b''',
-  # `uses: actions/checkout@v5` and every other pinned action or package ref.
-  '''@(?:v?[0-9]|main|master|latest|sha256)''',
+  '''@[a-z0-9-]+\.(?:local|test|invalid|internal)$''',
+  # `uses: actions/checkout@v5`, `pnpm@11.9.0`, and every other pinned ref.
+  '''@(?:v?[0-9][0-9a-z.^~*+-]*|main|master|latest|sha256)$''',
 ]
 
 [[rules]]

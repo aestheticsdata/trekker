@@ -23,10 +23,12 @@ follow from that:
   access to every host it knows.
 
 The master key is yours to generate and is never derived from anything in this repo — 32 bytes of
-randomness, into `TREKKER_MASTER_KEY`, kept outside every root a host is allowed to browse:
+randomness, into `TREKKER_MASTER_KEY`, kept outside every root a host is allowed to browse. The
+version travels with the key as `<version>:<base64>`, so the two cannot be set inconsistently,
+which is the commonest way a rotation goes wrong:
 
 ```bash
-openssl rand -base64 32
+node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"
 ```
 
 Losing it makes every stored credential unrecoverable, which is the intended failure mode.
@@ -45,7 +47,10 @@ pnpm hooks:install
 That points `core.hooksPath` at `.githooks/`, which refuses both a diff and a **commit message**
 carrying any of the above. Hooks are not cloned, so it is one command per checkout; CI runs
 `gitleaks` over the full history on every push regardless, and that is the actual guarantee.
-`pnpm scan` runs the same check locally if you have gitleaks installed.
+`pnpm scan` runs the same check locally if you have gitleaks installed — it walks the working tree
+rather than the index, so it also reports your own `deploy.env` and `ecosystem.config.js`. That is
+the point of it and not a failure: those files hold real secrets, and the check that matters is
+that they are never tracked. `pnpm scan:history` is the one that mirrors CI.
 
 The hooks exist because the leak this repo actually had was not a key. It was a real `user@host`
 pair sitting in a comment — inside a sentence explaining that publishing such a pair is free

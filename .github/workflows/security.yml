@@ -16,7 +16,10 @@ on:
   push:
     branches: ["**"]
   pull_request:
-  # A finding can appear without a push: gitleaks ships new rules.
+  # A finding can appear without a push — but only when the pin below moves, so
+  # this run is a liveness check on the job itself rather than on the rules:
+  # it fails the week the release URL, the asset name or the CLI changes under
+  # us, instead of on the next push after that.
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
@@ -33,6 +36,10 @@ jobs:
         with:
           # Every commit, so the scan can see history rather than one diff.
           fetch-depth: 0
+          # Otherwise checkout leaves GITHUB_TOKEN in .git/config, where the
+          # scanner binary this job downloads at run time could read it. This
+          # job only reads the tree it already has.
+          persist-credentials: false
 
       - name: Install gitleaks
         env:
@@ -53,7 +60,16 @@ jobs:
           gitleaks version
 
       - name: Scan history
-        run: gitleaks git --config .gitleaks.toml --redact --verbose --exit-code 1 .
+        run: |
+          set -euo pipefail
+          # `gitleaks git` shells out to git and reports "no leaks found" when
+          # git itself returns nothing — a shallow clone, a detached checkout or
+          # a wrong working directory all read as a clean repository. Assert
+          # there is history to scan before believing the result.
+          commits=$(git rev-list --count --all)
+          echo "history: ${commits} commits"
+          [ "${commits}" -gt 1 ] || { echo "::error::refusing to pass on a ${commits}-commit history — checkout is shallow or wrong"; exit 1; }
+          gitleaks git --config .gitleaks.toml --redact --verbose --exit-code 1 .
 
       - name: Scan the working tree
         # Catches anything present but never committed — and, on a pull request,

@@ -49,7 +49,10 @@ fi
 # tidy one — a leak written into either is invisible here — so they get read by
 # eye, and CI's history scan still covers everything else.
 
-diff=$(git diff --cached --unified=0 --diff-filter=ACMR -- . ':!pnpm-lock.yaml' ':!.gitleaks.toml' ':!.githooks/pre-commit' ':!.githooks/commit-msg' ':!.githooks/infra-patterns.sh' | grep '^+' || true)
+# `grep -v '^+++ '` drops the diff's own file headers. They are added lines by
+# the letter of `^+`, and every path under src/users/ then reads as a home
+# directory or a hostname.
+diff=$(git diff --cached --unified=0 --diff-filter=ACMR -- . ':!pnpm-lock.yaml' ':!.gitleaks.toml' ':!.githooks/pre-commit' ':!.githooks/commit-msg' ':!.githooks/infra-patterns.sh' | grep '^+' | grep -v '^+++ ' || true)
 
 scan_infra "$diff" || fail=1
 
