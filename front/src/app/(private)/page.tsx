@@ -1,16 +1,36 @@
 "use client";
 
+import { AppShell } from "@components/shell/app-shell";
 import { fetchHealth } from "@lib/api/health";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+
+import type { SplitMode, ViewMode } from "@components/shell/toolbar";
 
 /**
- * Placeholder home. It exists to prove the vertical slice is wired — front
- * talks to API, Zod parses the response, TanStack Query holds it — and is
- * replaced wholesale by the dual-pane explorer in TRE-16.
+ * The chrome, with the explorer still to come (TRE-16).
+ *
+ * The bars are driven from local state here so the whole shell can be seen and
+ * judged at once. Every one of these values has a real source waiting: the host
+ * chip and its ping from TRE-12's summary, the views strip from TRE-37, the
+ * selection from whichever pane has focus. Wiring them is TRE-18's job, when
+ * the sidebar owns which host is active.
  */
+/**
+ * A host's accent is data, not styling: it lives in the `Hosts.colour` column
+ * and the user picks it per host. This is the schema's default, standing in
+ * until the sidebar supplies a real row.
+ */
+const PLACEHOLDER_HOST_COLOUR = "#7fa8c9";
+
 export default function HomePage() {
-  const { data, isPending, error } = useQuery({
+  const [viewMode, setViewMode] = useState<ViewMode>("detail");
+  const [splitMode, setSplitMode] = useState<SplitMode>("split");
+  const [glob, setGlob] = useState("");
+  const [heat, setHeat] = useState(false);
+
+  const { data: health } = useQuery({
     queryKey: [QUERY_KEYS.HEALTH],
     queryFn: fetchHealth,
     refetchInterval: 5000,
@@ -18,29 +38,39 @@ export default function HomePage() {
   });
 
   return (
-    <main className="flex h-screen flex-col items-center justify-center gap-6 font-mono">
-      <p className="text-ink text-sm tracking-[0.2em]">TREKKER</p>
-
-      {isPending && <p className="text-ink-dim text-xs">checking api…</p>}
-
-      {error && <p className="text-xs text-amber-400">api unreachable — {error.message}</p>}
-
-      {data && (
-        <dl className="text-ink-dim grid grid-cols-[auto_auto] gap-x-6 gap-y-1 text-xs">
-          <dt>status</dt>
-          <dd className={data.status === "ok" ? "text-emerald-400" : "text-amber-400"}>{data.status}</dd>
-          <dt>uptime</dt>
-          <dd className="text-ink">{data.uptimeSeconds}s</dd>
-          <dt>mysql</dt>
-          <dd className={data.dependencies.mysql === "up" ? "text-emerald-400" : "text-amber-400"}>
-            {data.dependencies.mysql}
-          </dd>
-          <dt>redis</dt>
-          <dd className={data.dependencies.redis === "up" ? "text-emerald-400" : "text-amber-400"}>
-            {data.dependencies.redis}
-          </dd>
-        </dl>
-      )}
-    </main>
+    <AppShell
+      host={{ label: "local", colour: PLACEHOLDER_HOST_COLOUR, pingMs: health ? 1 : null }}
+      stats={{
+        uptime: health ? formatUptime(health.uptimeSeconds) : null,
+        cpu: null,
+        ram: null,
+        io: null,
+        load: [],
+      }}
+      views={[]}
+      selection={null}
+      viewMode={viewMode}
+      onViewModeChange={setViewMode}
+      splitMode={splitMode}
+      onSplitModeChange={setSplitMode}
+      glob={glob}
+      onGlobChange={setGlob}
+      globMatches={glob ? 0 : null}
+      heat={heat}
+      onHeatChange={setHeat}
+    >
+      <div className="flex h-full items-center justify-center">
+        <p className="text-ink-faint text-xs">
+          {health ? "API reachable — the explorer lands in TRE-16." : "Waiting for the API…"}
+        </p>
+      </div>
+    </AppShell>
   );
+}
+
+function formatUptime(seconds: number): string {
+  if (seconds < 60) return `${Math.floor(seconds)}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86400)}d`;
 }
