@@ -3,7 +3,7 @@ import Providers from "@app/providers";
 import { getServerSession } from "@auth/server/getServerSession";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 // next/font downloads these at build time and serves them from our own origin —
 // no runtime request to Google. That is what TRE-14 means by "self-hosted".
@@ -24,6 +24,18 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Trekker",
   description: "A file explorer for the servers you actually run.",
+  icons: {
+    icon: [
+      { url: "/favicon/trekker.svg", type: "image/svg+xml" },
+      { url: "/favicon/trekker-32.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: [{ url: "/favicon/trekker-180.png" }],
+  },
+  manifest: "/favicon/site.webmanifest",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0c2a44",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
