@@ -5,21 +5,29 @@
  * stat per entry.
  *
  * Meant to be run ON the deploy host, against its own sshd, so both drivers
- * read the *same* directory and deep equality means something:
+ * read the *same* directory and deep equality means something.
  *
- *   TREKKER_TEST_SSH_HOST=127.0.0.1 \
- *   TREKKER_TEST_SSH_USER=$USER \
- *   pnpm --filter ./nest-api verify:fs
+ * It needs to authenticate to that host as that user, and the tidiest way is
+ * the agent you already connected with — no keypair has to exist on the server,
+ * and nothing is added to its `authorized_keys`:
  *
- * Optional: TREKKER_TEST_SSH_PORT (22), TREKKER_TEST_SSH_KEY (~/.ssh/id_ed25519),
- * TREKKER_TEST_SSH_ROOT (a writable directory; defaults to /tmp),
- * TREKKER_TEST_ENTRIES (how many files to create; defaults to 10000).
+ *   ssh -A <the host>
+ *   cd /var/www/trekker/api
+ *   TREKKER_TEST_SSH_HOST=127.0.0.1 TREKKER_TEST_SSH_USER=$USER \
+ *     pnpm --filter ./nest-api verify:fs
+ *
+ * With `-A`, SSH_AUTH_SOCK points at your forwarded agent and this uses it.
+ * Set TREKKER_TEST_SSH_KEY instead to authenticate with a key file on the box.
+ *
+ * Optional: TREKKER_TEST_SSH_PORT (22), TREKKER_TEST_SSH_ROOT (a writable
+ * directory; defaults to /tmp), TREKKER_TEST_ENTRIES (files to create;
+ * defaults to 10000).
  *
  * Everything it creates lives in one temp directory under that root and is
  * removed at the end. It never writes outside it.
  */
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { LocalDriver } from "../src/hosts/drivers/local.driver";
@@ -27,6 +35,7 @@ import type { FileEntry } from "../src/hosts/drivers/host-driver";
 import {
   DEFAULT_POOL_SETTINGS,
   type HostConnectionSpec,
+  type SshAuth,
   SshConnectionPool,
 } from "../src/hosts/drivers/ssh-connection.pool";
 import { SshDriver } from "../src/hosts/drivers/ssh.driver";
@@ -54,6 +63,26 @@ function required(name: string): string {
   return value;
 }
 
+/**
+ * A key file if one is named, otherwise the forwarded agent. Preferring the
+ * agent is what lets this run without a keypair on the server: `ssh -A` already
+ * carries a key the host trusts, so nothing has to be created or authorised
+ * there just to measure a listing.
+ */
+function resolveAuth(): SshAuth {
+  const keyPath = process.env.TREKKER_TEST_SSH_KEY;
+  if (keyPath) return { kind: "PRIVATE_KEY", privateKey: readFileSync(keyPath) };
+
+  const agentSocket = process.env.SSH_AUTH_SOCK;
+  if (agentSocket) return { kind: "AGENT", agentSocket };
+
+  console.error(
+    "No way to authenticate. Either reconnect with `ssh -A` so SSH_AUTH_SOCK is set,\n" +
+      "or point TREKKER_TEST_SSH_KEY at a private key this host accepts for this user.",
+  );
+  process.exit(1);
+}
+
 /** Rows, minus what legitimately differs between two readings of one tree. */
 function comparable(entries: FileEntry[]): unknown[] {
   return entries
@@ -65,7 +94,6 @@ async function main(): Promise<void> {
   const host = required("TREKKER_TEST_SSH_HOST");
   const username = required("TREKKER_TEST_SSH_USER");
   const port = Number(process.env.TREKKER_TEST_SSH_PORT ?? 22);
-  const keyPath = process.env.TREKKER_TEST_SSH_KEY ?? join(homedir(), ".ssh", "id_ed25519");
   const root = process.env.TREKKER_TEST_SSH_ROOT ?? tmpdir();
   const count = Number(process.env.TREKKER_TEST_ENTRIES ?? 10_000);
 
@@ -76,7 +104,7 @@ async function main(): Promise<void> {
     address: host,
     port,
     username,
-    auth: { kind: "PRIVATE_KEY", privateKey: readFileSync(keyPath) },
+    auth: resolveAuth(),
   };
   const ssh = new SshDriver(spec, pool, DEFAULT_POOL_SETTINGS);
   const local = new LocalDriver("verify-fs-local");
