@@ -25,9 +25,22 @@
   /* The panes invert to light while everything around them stays dark. It is
    * the single most distinctive thing about this design, so it gets its own
    * family rather than a one-off value at each use.
+   *
+   * Inside a pane the depth runs the other way round: `bar` is the furniture
+   * (path row, column header, footer), `sel`/`hover` the row states, `chip`
+   * the small filled badges. The `-active` variants are what tells the eye
+   * which of the two panes has the keyboard (TRE-16 §2).
    */
   --color-pane: #9bbcd7;
   --color-pane-active: #a5c4dd;
+  --color-pane-bar: #7fa3c2;
+  --color-pane-bar-active: #8badc9;
+  --color-pane-line: #6d92b3;
+  --color-pane-hover: #b6d0e4;
+  --color-pane-sel: #cfe6f1;
+  --color-pane-sel-idle: #b9d3e6;
+  --color-pane-chip: #c2d7e2;
+  --color-pane-dash: #5c81a3;
 
   /* ---- ink -------------------------------------------------------------
    * On dark, brightest first. `ink` is body text, `ink-muted` labels,
@@ -40,10 +53,19 @@
   --color-ink-faint: #4d7f99;
   --color-ink-link: #3e8fae;
 
-  /* On the light panes, where the same hierarchy runs the other way. */
+  /* On the light panes, where the same hierarchy runs the other way.
+   * `strong` is a directory name, `data` a size, `dim` a mode or an owner,
+   * `label` the small caps of the column header, `faint` the explanatory
+   * second line of an empty state.
+   */
   --color-on-pane: #0c2a44;
   --color-on-pane-strong: #0f4d74;
   --color-on-pane-muted: #1c4a68;
+  --color-on-pane-data: #08304d;
+  --color-on-pane-dim: #1f4d69;
+  --color-on-pane-label: #123e59;
+  --color-on-pane-faint: #31607f;
+  --color-on-pane-bright: #f2f8fb;
 
   /* The wordmark, the logo's light pane, the glob caret and the column names
    * share one light cyan that belongs to none of the ink steps: the brand
@@ -65,17 +87,21 @@
   --color-success: #7fd6a8;
 
   /* ---- age ramp ---------------------------------------------------------
-   * Seven steps, fresh to ancient, for the heat map. A named group rather
-   * than a gradient because M3 (TRE-33) indexes into it by bucket and needs
-   * the steps to be stable and addressable.
+   * Seven steps, fresh to ancient, for the share bars and age chips. Dark and
+   * saturated for a file touched seconds ago, pale for one nobody has opened
+   * in years — the mockup's own ramp, which reads as depth rather than as a
+   * traffic light. A named group rather than a gradient because both TRE-16
+   * and TRE-33 index into it by bucket and need the steps addressable.
    */
-  --color-age-0: #7fd6a8;
-  --color-age-1: #9fd39a;
-  --color-age-2: #c3cf8c;
-  --color-age-3: #d8bd76;
-  --color-age-4: #cf9a5c;
-  --color-age-5: #bd6f4b;
-  --color-age-6: #a34a44;
+  --color-age-0: #0c2a44;
+  --color-age-1: #0f4d74;
+  --color-age-2: #2b6c8e;
+  --color-age-3: #3e8fae;
+  --color-age-4: #6fb2c9;
+  --color-age-5: #97c9dc;
+  --color-age-6: #b9dcea;
+  /* The share bar when the heat map is off: present, but saying nothing. */
+  --color-share-idle: #6b8ea3;
 
   /* ---- type -------------------------------------------------------------
    * The UI is IBM Plex Sans; anything that is *data* — paths, sizes, modes,
@@ -108,6 +134,13 @@
   --tracking-label: 0.08em;
   --tracking-caps: 0.14em;
 
+  /* ---- motion -----------------------------------------------------------
+   * Skeleton rows pulse rather than sweep: a listing is a column of bars, and
+   * a travelling highlight across eleven of them reads as a progress bar for
+   * something that has no progress to report.
+   */
+  --animate-shimmer: shimmer 1.1s ease-in-out infinite;
+
   /* ---- radius ----------------------------------------------------------
    * Two values. This UI is nearly square and that is deliberate.
    */
@@ -124,6 +157,10 @@
   --spacing-row: 22px;
   --spacing-row-tight: 19px;
   --spacing-row-loose: 24px;
+  /* A pane's own furniture (TRE-16 §1), tightest at the top. */
+  --spacing-tabstrip: 24px;
+  --spacing-pathrow: 26px;
+  --spacing-panefoot: 20px;
 }
 
 /*
@@ -152,4 +189,30 @@ body {
 :focus-visible {
   outline: 1px solid var(--color-accent-soft);
   outline-offset: 1px;
+}
+
+@keyframes shimmer {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* The panes are the only scrolling surface, and the default macOS overlay bar
+ * disappears over a light pane exactly when a long listing needs it.
+ */
+@supports selector(::-webkit-scrollbar) {
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-pane-line);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }

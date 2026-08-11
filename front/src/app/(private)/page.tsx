@@ -1,34 +1,34 @@
 "use client";
 
+import { Explorer } from "@components/explorer/explorer";
 import { AppShell } from "@components/shell/app-shell";
+import { formatSize } from "@helpers/listing";
 import { fetchHealth } from "@lib/api/health";
+import { fetchHosts } from "@lib/api/hosts";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
+import type { SelectionSummary } from "@components/shell/status-bar";
 import type { SplitMode, ViewMode } from "@components/shell/toolbar";
+import type { FileRow } from "@lib/api/fs";
 
 /**
- * The chrome, with the explorer still to come (TRE-16).
+ * The explorer, in the chrome (TRE-16).
  *
- * The bars are driven from local state here so the whole shell can be seen and
- * judged at once. Every one of these values has a real source waiting: the host
- * chip and its ping from TRE-12's summary, the views strip from TRE-37, the
- * selection from whichever pane has focus. Wiring them is TRE-18's job, when
- * the sidebar owns which host is active.
+ * This page owns what the bars and the panes share — the glob, the split mode,
+ * the heat toggle and whatever is selected — because the toolbar draws some of
+ * it and the panes act on it. TRE-18 moves all of it into the URL through
+ * nuqs, at which point this becomes a much shorter file.
  */
-/**
- * A host's accent is data, not styling: it lives in the `Hosts.colour` column
- * and the user picks it per host. This is the schema's default, standing in
- * until the sidebar supplies a real row.
- */
-const PLACEHOLDER_HOST_COLOUR = "#7fa8c9";
 
 export default function HomePage() {
   const [viewMode, setViewMode] = useState<ViewMode>("detail");
   const [splitMode, setSplitMode] = useState<SplitMode>("split");
   const [glob, setGlob] = useState("");
+  const [globMatches, setGlobMatches] = useState<number | null>(null);
   const [heat, setHeat] = useState(false);
+  const [selection, setSelection] = useState<{ row: FileRow; path: string } | null>(null);
 
   const { data: health } = useQuery({
     queryKey: [QUERY_KEYS.HEALTH],
@@ -37,9 +37,29 @@ export default function HomePage() {
     throwOnError: false,
   });
 
+  const { data: hosts, isPending: hostsPending } = useQuery({
+    queryKey: [QUERY_KEYS.HOSTS],
+    queryFn: fetchHosts,
+    staleTime: 60_000,
+    throwOnError: false,
+  });
+
+  // Until the sidebar owns which host is active (TRE-18), the chip describes
+  // the one the panes opened on.
+  const host = hosts?.find((candidate) => candidate.transport === "LOCAL") ?? hosts?.[0] ?? null;
+
   return (
     <AppShell
-      host={{ label: "local", colour: PLACEHOLDER_HOST_COLOUR, transport: "local", pingMs: health ? 1 : null }}
+      host={
+        host
+          ? {
+              label: host.label,
+              colour: host.colour,
+              transport: host.transport === "LOCAL" ? "local" : "ssh",
+              pingMs: health ? 1 : null,
+            }
+          : null
+      }
       stats={{
         uptime: health ? formatUptime(health.uptimeSeconds) : null,
         cpu: null,
@@ -48,24 +68,39 @@ export default function HomePage() {
         load: [],
       }}
       views={[]}
-      selection={null}
+      selection={selection ? summarise(selection) : null}
       viewMode={viewMode}
       onViewModeChange={setViewMode}
       splitMode={splitMode}
       onSplitModeChange={setSplitMode}
       glob={glob}
       onGlobChange={setGlob}
-      globMatches={glob ? 0 : null}
+      globMatches={globMatches}
       heat={heat}
       onHeatChange={setHeat}
     >
-      <div className="flex h-full items-center justify-center">
-        <p className="text-ink-faint text-xs">
-          {health ? "API reachable — the explorer lands in TRE-16." : "Waiting for the API…"}
-        </p>
-      </div>
+      <Explorer
+        hosts={hosts ?? []}
+        hostsPending={hostsPending}
+        glob={glob}
+        onGlobChange={setGlob}
+        onMatchesChange={setGlobMatches}
+        splitMode={splitMode}
+        heat={heat}
+        onSelectionChange={setSelection}
+      />
     </AppShell>
   );
+}
+
+function summarise({ row, path }: { row: FileRow; path: string }): SelectionSummary {
+  return {
+    path,
+    size: formatSize(row.size, row.type),
+    mode: `${row.mode} ${row.modeText}`,
+    owner: `${row.owner}:${row.group}`,
+    modified: row.mtime.replace("T", " ").replace("Z", ""),
+  };
 }
 
 function formatUptime(seconds: number): string {
