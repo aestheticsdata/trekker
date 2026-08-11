@@ -90,6 +90,20 @@ export interface OwnerNames {
   group: string | null;
 }
 
+/**
+ * Whole seconds, because that is the precision every transport can carry.
+ *
+ * `node:fs` reports milliseconds and SFTP v3 has only a seconds field, so the
+ * same file read locally and over SSH would otherwise differ in its last three
+ * digits — enough to fail a driver-parity comparison, and enough to make the
+ * pane diff (TRE-28) invent changes between two copies that are identical.
+ * Presenting the lower precision everywhere is what makes a timestamp mean the
+ * same thing regardless of how the host was reached.
+ */
+function isoSeconds(ms: number): string {
+  return new Date(Math.floor(ms / 1000) * 1000).toISOString();
+}
+
 export function toRow(entry: FileEntry, names: OwnerNames): FileRow {
   const row: FileRow = {
     name: entry.name,
@@ -103,7 +117,7 @@ export function toRow(entry: FileEntry, names: OwnerNames): FileRow {
     groupResolved: names.group !== null,
     uid: entry.uid,
     gid: entry.gid,
-    mtime: new Date(entry.mtimeMs).toISOString(),
+    mtime: isoSeconds(entry.mtimeMs),
     extension: entry.kind === "directory" ? "" : extensionOf(entry.name),
   };
   if (entry.linkTarget !== undefined) row.linkTarget = entry.linkTarget;
@@ -117,7 +131,7 @@ export function toDetail(stat: FileStat, names: OwnerNames, realPath: string): F
     realPath,
     inode: stat.inode ?? null,
     nlink: stat.nlink ?? null,
-    atime: stat.atimeMs === undefined ? null : new Date(stat.atimeMs).toISOString(),
-    ctime: stat.ctimeMs === undefined ? null : new Date(stat.ctimeMs).toISOString(),
+    atime: stat.atimeMs === undefined ? null : isoSeconds(stat.atimeMs),
+    ctime: stat.ctimeMs === undefined ? null : isoSeconds(stat.ctimeMs),
   };
 }
