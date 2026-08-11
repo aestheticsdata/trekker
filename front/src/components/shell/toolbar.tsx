@@ -214,7 +214,7 @@ function SplitControl({ value, onChange }: { value: SplitMode; onChange: (mode: 
   return (
     <fieldset
       aria-label="Split"
-      className="flex gap-[3px]"
+      className="flex gap-0.75"
     >
       {options.map((option) => {
         const active = option.value === value;
@@ -226,7 +226,7 @@ function SplitControl({ value, onChange }: { value: SplitMode; onChange: (mode: 
             aria-label={option.label}
             title={option.label}
             onClick={() => onChange(option.value)}
-            className={`flex h-[18px] w-6 border ${
+            className={`flex h-4.5 w-6 border ${
               active ? "border-accent bg-line text-ink-soft" : "border-line-strong text-ink-faint hover:text-ink-muted"
             }`}
           >

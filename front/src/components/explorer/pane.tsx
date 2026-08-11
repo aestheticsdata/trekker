@@ -18,8 +18,16 @@ import type { HostView } from "@lib/api/hosts";
  * drive either of them without reaching inside.
  */
 
-/** The eight columns, shared by the header, the rows and the skeleton. */
-const GRID = "grid-cols-[14px_minmax(104px,1fr)_13px_26px_62px_30px_88px_38px] gap-[5px] min-w-[404px] px-[9px]";
+/**
+ * The eight columns, shared by the header, the rows and the skeleton.
+ *
+ * In `rem` rather than the mockup's px so the whole listing follows
+ * `--ui-base` (TRE-44); the px it was drawn at is in the comment. Tailwind's
+ * numeric scale is 4px a unit, which is where `gap-1.25` (5px) comes from.
+ */
+const GRID =
+  // 14  104   13  26  62  30  88  38
+  "grid-cols-[0.875rem_minmax(6.5rem,1fr)_0.8125rem_1.625rem_3.875rem_1.875rem_5.5rem_2.375rem] gap-1.25 min-w-101 px-2.25";
 
 /**
  * The age ramp as classes, one per bucket.
@@ -130,7 +138,7 @@ export function Pane({
 
       <div
         ref={listRef}
-        className="min-h-[66px] flex-auto overflow-x-hidden overflow-y-auto"
+        className="min-h-16.5 flex-auto overflow-x-hidden overflow-y-auto"
       >
         {loading ? (
           <Skeleton />
@@ -159,7 +167,7 @@ export function Pane({
               <button
                 type="button"
                 onClick={callbacks.onUp}
-                className="text-on-pane-muted hover:bg-pane-hover grid h-row w-full grid-cols-[14px_1fr] items-center gap-[5px] px-[9px] text-left font-mono text-xs"
+                className="text-on-pane-muted hover:bg-pane-hover grid h-row w-full grid-cols-[0.875rem_1fr] items-center gap-1.25 px-2.25 text-left font-mono text-xs"
               >
                 <span className="text-center">↰</span>
                 <span>..</span>
@@ -183,7 +191,7 @@ export function Pane({
         )}
       </div>
 
-      <footer className="bg-pane-bar border-pane-line text-on-pane-dim flex h-panefoot flex-none items-center gap-2.5 border-t px-[9px] font-mono text-2xs">
+      <footer className="bg-pane-bar border-pane-line text-on-pane-dim flex h-panefoot flex-none items-center gap-2.5 border-t px-2.25 font-mono text-2xs">
         {meta && !loading && !error && host && (
           <>
             <span className="whitespace-nowrap">
@@ -241,7 +249,7 @@ function TabStrip({
           >
             <span
               aria-hidden
-              className="size-[5px] rounded-full"
+              className="size-1.25 rounded-full"
               style={{ backgroundColor: current && host ? host.colour : "var(--color-ink-faint)" }}
             />
             {label}
@@ -253,7 +261,7 @@ function TabStrip({
         type="button"
         onClick={callbacks.onNewTab}
         aria-label="New tab"
-        className="text-ink-faint hover:text-ink-muted flex items-center px-[9px] font-mono text-sm"
+        className="text-ink-faint hover:text-ink-muted flex items-center px-2.25 font-mono text-sm"
       >
         +
       </button>
@@ -261,7 +269,7 @@ function TabStrip({
       <div className="flex-1" />
 
       {active && (
-        <span className="text-brand hidden items-center px-2.5 font-mono text-2xs whitespace-nowrap @[520px]:flex">
+        <span className="text-brand hidden items-center px-2.5 font-mono text-2xs whitespace-nowrap @[32.5rem]:flex">
           ACTIVE PANE · ⇥ to switch
         </span>
       )}
@@ -288,21 +296,21 @@ function PathRow({
 }) {
   return (
     <div
-      className={`border-pane-line text-on-pane-data flex h-pathrow flex-none items-center gap-1.5 overflow-hidden border-b px-[7px] font-mono text-xs @container ${
+      className={`border-pane-line text-on-pane-data flex h-pathrow flex-none items-center gap-1.5 overflow-hidden border-b px-1.75 font-mono text-xs @container ${
         active ? "bg-pane-bar-active" : "bg-pane-bar"
       }`}
     >
       <button
         type="button"
         onClick={callbacks.onHostMenu}
-        className={`flex flex-none items-center gap-[5px] rounded-xs border px-1.5 py-0.5 font-mono text-2xs font-medium whitespace-nowrap ${
+        className={`flex flex-none items-center gap-1.25 rounded-xs border px-1.5 py-0.5 font-mono text-2xs font-medium whitespace-nowrap ${
           active ? "bg-pane-chip text-on-pane" : "text-on-pane-muted border-pane-line"
         }`}
         style={active && host ? { borderColor: host.colour } : undefined}
       >
         <span
           aria-hidden
-          className="size-[5px] rounded-full"
+          className="size-1.25 rounded-full"
           style={{ backgroundColor: host?.colour ?? "var(--color-ink-faint)" }}
         />
         {host?.label ?? "no host"}
@@ -357,7 +365,7 @@ function PathRow({
 
       {meta && (
         <span
-          className={`hidden flex-none rounded-xs px-1.5 py-0.5 text-2xs whitespace-nowrap @[400px]:inline ${
+          className={`hidden flex-none rounded-xs px-1.5 py-0.5 text-2xs whitespace-nowrap @[25rem]:inline ${
             meta.truncated ? "bg-on-pane-muted text-ink" : "bg-pane-chip text-on-pane"
           }`}
         >
@@ -489,7 +497,7 @@ function Row({
       } ${cursor ? "outline-on-pane-strong -outline-offset-1 outline-1 outline-dotted" : ""}`}
     >
       <span
-        className={`text-on-pane-bright rounded-[1.5px] py-0.5 text-center font-mono text-[5.8px] font-bold tracking-normal ${tag.className}`}
+        className={`text-on-pane-bright rounded-[1.5px] py-0.5 text-center font-mono text-tag font-bold tracking-normal ${tag.className}`}
       >
         {tag.label}
       </span>
@@ -579,21 +587,21 @@ function Placeholder({
   onUp: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-[9px] p-7">
+    <div className="flex h-full flex-col items-center justify-center gap-2.25 p-7">
       <div
         aria-hidden
-        className="border-pane-dash relative h-10 w-[52px] border border-dashed"
+        className="border-pane-dash relative h-10 w-13 border border-dashed"
       >
-        <span className="border-pane-dash absolute -top-[7px] left-0 h-[7px] w-5 border border-b-0 border-dashed" />
+        <span className="border-pane-dash absolute -top-1.75 left-0 h-1.75 w-5 border border-b-0 border-dashed" />
       </div>
       <p className="text-on-pane-label font-mono text-sm font-medium">{title}</p>
-      <p className="text-on-pane-faint max-w-[280px] text-center font-mono text-xs/relaxed">{detail}</p>
+      <p className="text-on-pane-faint max-w-70 text-center font-mono text-xs/relaxed">{detail}</p>
       <div className="mt-0.5 flex gap-1.5">
         {action && (
           <button
             type="button"
             onClick={action.onSelect}
-            className="bg-accent text-on-accent px-2.5 py-[5px] font-mono text-xs font-medium"
+            className="bg-accent text-on-accent px-2.5 py-1.25 font-mono text-xs font-medium"
           >
             {action.label}
           </button>
@@ -601,7 +609,7 @@ function Placeholder({
         <button
           type="button"
           onClick={onUp}
-          className="border-pane-dash text-on-pane-label border px-2.5 py-[5px] font-mono text-xs"
+          className="border-pane-dash text-on-pane-label border px-2.5 py-1.25 font-mono text-xs"
         >
           go up ↰
         </button>

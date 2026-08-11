@@ -1,6 +1,7 @@
 import "@styles/globals.css";
 import Providers from "@app/providers";
 import { getServerSession } from "@auth/server/getServerSession";
+import { UI_BASE_SCRIPT } from "@helpers/ui-scale";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 
 import type { Metadata, Viewport } from "next";
@@ -52,6 +53,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       suppressHydrationWarning
     >
       <body className="bg-app text-ink font-sans antialiased">
+        {/* Applies the stored interface size before the first paint, so the app
+            never renders at one size and jumps to another (TRE-44 §5). */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: a literal string built in our own module from two integer constants, with no input from anywhere */}
+        <script dangerouslySetInnerHTML={{ __html: UI_BASE_SCRIPT }} />
+
         <Providers
           initialUser={session?.user ?? null}
           initialCsrfToken={session?.csrfToken ?? null}

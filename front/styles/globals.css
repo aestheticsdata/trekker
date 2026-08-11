@@ -114,7 +114,15 @@
 
   /* Sub-12px is where most of this UI lives, so the scale extends below
    * Tailwind's floor instead of every label reaching for an arbitrary value.
+   *
+   * Every step is `rem`, which is what makes `--ui-base` below work: change
+   * the root font size and the whole scale moves with it, in proportion.
+   *
+   * `tag` is the type badge and nothing else, and deliberately has no
+   * line-height of its own: the badge is a filled chip whose height comes from
+   * the row it sits in, and giving it one shrinks it to the glyph.
    */
+  --text-tag: 0.3625rem; /* 5.8px */
   --text-3xs: 0.53125rem; /* 8.5px */
   --text-3xs--line-height: 1rem;
   --text-2xs: 0.625rem; /* 10px */
@@ -143,6 +151,9 @@
 
   /* ---- radius ----------------------------------------------------------
    * Two values. This UI is nearly square and that is deliberate.
+   *
+   * These stay in px while everything else scales: a 2px corner is a corner
+   * at any size, and multiplied by 1.2 it just reads as a blurred one.
    */
   --radius-xs: 2px;
   --radius-sm: 3px;
@@ -150,29 +161,58 @@
   /* ---- density ----------------------------------------------------------
    * The identity of this UI is how tight it is, so the bar heights and row
    * heights are tokens rather than a number retyped in each component.
+   *
+   * In `rem`, with the mockup's pixel value in the comment beside it — the
+   * px is still the reference, it is just no longer what ships.
    */
-  --spacing-topbar: 34px;
-  --spacing-toolbar: 30px;
-  --spacing-statusbar: 24px;
-  --spacing-row: 22px;
-  --spacing-row-tight: 19px;
-  --spacing-row-loose: 24px;
+  --spacing-topbar: 2.125rem; /* 34px */
+  --spacing-toolbar: 1.875rem; /* 30px */
+  --spacing-statusbar: 1.5rem; /* 24px */
+  --spacing-row: 1.375rem; /* 22px */
+  --spacing-row-tight: 1.1875rem; /* 19px */
+  --spacing-row-loose: 1.5rem; /* 24px */
   /* A pane's own furniture (TRE-16 §1), tightest at the top. */
-  --spacing-tabstrip: 24px;
-  --spacing-pathrow: 26px;
-  --spacing-panefoot: 20px;
+  --spacing-tabstrip: 1.5rem; /* 24px */
+  --spacing-pathrow: 1.625rem; /* 26px */
+  --spacing-panefoot: 1.25rem; /* 20px */
 }
 
 /*
  * Breakpoints for the degradation ladder (TRE-14 §5). Named, because "below
  * which the stats go" is a design decision and should read as one at every
  * use site rather than as a bare pixel count.
+ *
+ * These stay in px and do not follow `--ui-base`. Inside a media query `rem`
+ * means the browser's default font size, never the root element's — the one
+ * place a font-relative unit deliberately ignores `html { font-size }`. So a
+ * scaled-up UI meets the same thresholds with wider content. The pane's own
+ * thresholds are container queries, which do follow the root, and that is
+ * where the tightest decisions live.
  */
 @theme {
   --breakpoint-stats: 1180px;
   --breakpoint-inspector: 1100px;
   --breakpoint-panes: 900px;
   --breakpoint-usable: 720px;
+}
+
+/*
+ * The one number that sizes the app (TRE-44): the pixel size its body text
+ * renders at. 11 is the mockup, exactly. Raise it and every font size, bar
+ * height, row height, gap and column width follows in proportion, because
+ * every one of them is `rem` or a Tailwind utility built on `rem`.
+ *
+ * `100%` rather than a px literal so the browser's own default font size —
+ * which anyone who finds 11px small has likely already raised — is multiplied
+ * rather than overwritten. The status bar's stepper sets this property on the
+ * root element at runtime; nothing else in the app knows the number exists.
+ */
+:root {
+  --ui-base: 11;
+}
+
+html {
+  font-size: calc(var(--ui-base) / 11 * 100%);
 }
 
 html,
@@ -206,8 +246,8 @@ body {
  */
 @supports selector(::-webkit-scrollbar) {
   ::-webkit-scrollbar {
-    width: 9px;
-    height: 9px;
+    width: 0.5625rem; /* 9px */
+    height: 0.5625rem;
   }
   ::-webkit-scrollbar-thumb {
     background: var(--color-pane-line);

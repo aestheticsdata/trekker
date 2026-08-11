@@ -60,7 +60,7 @@ export function TopBar({
         <svg
           viewBox="0 0 32 32"
           aria-hidden="true"
-          className="size-[15px] shrink-0"
+          className="size-3.75 shrink-0"
         >
           <rect
             width="32"

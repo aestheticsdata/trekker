@@ -1,9 +1,15 @@
+import { UiScale } from "@components/shell/ui-scale";
+
 /**
  * The 24px status bar (TRE-14 §4): everything about the selected row that the
  * table does not have room to show.
  *
  * Mono throughout — these are all data, and a path that shifts by a pixel as
  * the selection moves reads as flicker.
+ *
+ * The size stepper (TRE-44) rides in the right corner: it is the one control
+ * that is about the app rather than about a file, and the status bar is the
+ * only bar with room to spare at every width.
  */
 
 export interface SelectionSummary {
@@ -40,8 +46,10 @@ export function StatusBar({ selection, hint }: { selection: SelectionSummary | n
           />
         </>
       ) : (
-        <span className="text-ink-faint">{hint ?? "No selection"}</span>
+        <span className="text-ink-faint min-w-0 flex-1 truncate">{hint ?? "No selection"}</span>
       )}
+
+      <UiScale />
     </footer>
   );
 }
