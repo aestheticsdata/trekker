@@ -80,7 +80,10 @@ export class UsersService {
       throw new ConflictException("Email already exists");
     }
 
-    const recoveryPassphrase = generateRecoveryPassphrase();
+    // Chosen when the registration screen sends one, generated otherwise —
+    // a caller with no human in front of it must still get a real passphrase
+    // rather than an empty column.
+    const recoveryPassphrase = dto.passphrase ?? generateRecoveryPassphrase();
     const user = await this.prisma.users.create({
       data: {
         email: dto.email,

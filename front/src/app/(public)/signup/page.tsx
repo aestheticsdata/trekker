@@ -11,7 +11,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 
-import type { RegisterResponse } from "@auth/interfaces/authTypes";
 import type { AuthStatus } from "@components/auth/auth-card";
 import type { RegisterValues } from "@schemas/auth";
 
@@ -19,8 +18,6 @@ export default function SignupPage() {
   const { setCredentials } = useCredentials();
   const [status, setStatus] = useState<AuthStatus>("IDLE");
   const [failure, setFailure] = useState<string | null>(null);
-  // Held only long enough to be written down. Never stored, never re-fetchable.
-  const [issued, setIssued] = useState<RegisterResponse | null>(null);
 
   // Asked rather than assumed: the guard is server-side, and a form that will
   // be refused is worse than a sentence explaining why (TRE-15 §5).
@@ -41,8 +38,10 @@ export default function SignupPage() {
     setStatus("WORKING");
     setFailure(null);
     try {
-      setIssued(await registerAccount(values.email, values.password));
+      const auth = await registerAccount(values.email, values.password, values.passphrase);
       setStatus("AUTHENTICATED");
+      // Chosen, not generated — there is nothing to hand over and read out.
+      setCredentials(auth);
     } catch (error) {
       setStatus("REJECTED");
       setFailure(error instanceof ApiError ? error.message : "The API could not be reached.");
@@ -57,16 +56,6 @@ export default function SignupPage() {
       ]}
     />
   );
-
-  if (issued) {
-    return (
-      <PassphraseHandover
-        issued={issued}
-        onAcknowledge={() => setCredentials(issued)}
-        footer={links}
-      />
-    );
-  }
 
   if (isPending) {
     return (
@@ -166,63 +155,6 @@ export default function SignupPage() {
           {isSubmitting ? "CREATING…" : "CREATE ACCOUNT"}
         </button>
       </form>
-    </AuthCard>
-  );
-}
-
-/**
- * The passphrase, shown exactly once (TRE-15 security).
- *
- * The account already exists at this point, so the only thing standing between
- * the user and losing it forever is this screen. It refuses to move on until
- * they say they have written it down.
- */
-function PassphraseHandover({
-  issued,
-  onAcknowledge,
-  footer,
-}: {
-  issued: RegisterResponse;
-  onAcknowledge: () => void;
-  footer: React.ReactNode;
-}) {
-  const [acknowledged, setAcknowledged] = useState(false);
-
-  return (
-    <AuthCard
-      title="TREKKER"
-      subtitle="Write this down"
-      status="AUTHENTICATED"
-      footer={footer}
-      notice={
-        <AuthNotice tone="warning">
-          This is the only time this passphrase is shown. It cannot be retrieved, reset or emailed.
-        </AuthNotice>
-      }
-    >
-      <p className="text-ink-muted text-xs tracking-label">Recovery passphrase</p>
-      <p className="border-line-strong bg-chrome text-ink rounded-xs border px-3 py-2.5 font-mono text-base leading-relaxed break-words select-all">
-        {issued.recoveryPassphrase}
-      </p>
-
-      <label className="text-ink-muted flex items-start gap-2 text-sm leading-relaxed">
-        <input
-          type="checkbox"
-          checked={acknowledged}
-          onChange={(event) => setAcknowledged(event.target.checked)}
-          className="mt-0.5"
-        />
-        I have written down this passphrase somewhere safe.
-      </label>
-
-      <button
-        type="button"
-        disabled={!acknowledged}
-        onClick={onAcknowledge}
-        className="border-accent text-ink hover:bg-accent/20 mt-1 rounded-xs border py-1.5 text-sm tracking-caps disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        CONTINUE
-      </button>
     </AuthCard>
   );
 }

@@ -9,9 +9,10 @@ export async function signIn(email: string, password: string): Promise<AuthRespo
   return AuthResponseSchema.parse(await apiRequest("/users", { method: "POST", body: { email, password } }));
 }
 
-export async function register(email: string, password: string): Promise<RegisterResponse> {
-  // The recovery passphrase is in this response and in no other, ever.
-  return RegisterResponseSchema.parse(await apiRequest("/users/add", { method: "POST", body: { email, password } }));
+export async function register(email: string, password: string, passphrase: string): Promise<RegisterResponse> {
+  return RegisterResponseSchema.parse(
+    await apiRequest("/users/add", { method: "POST", body: { email, password, passphrase } }),
+  );
 }
 
 export async function recover(email: string, passphrase: string, newPassword: string): Promise<void> {

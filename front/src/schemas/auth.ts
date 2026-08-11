@@ -40,7 +40,9 @@ const EMAIL = z.email({ message: "That does not look like an email address." });
 
 export const MIN_KEY_SIGN_IN = 8;
 export const MIN_KEY_REGISTER = 12;
-export const MIN_PASSPHRASE = 20;
+// Length and nothing else — composition rules only push people toward the
+// same few predictable shapes, and this is written down, not typed daily.
+export const MIN_PASSPHRASE = 10;
 
 export const signInSchema = z.object({
   email: EMAIL,
