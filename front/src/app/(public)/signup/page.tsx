@@ -48,6 +48,12 @@ export default function SignupPage() {
     }
   };
 
+  // Closed, or not yet known: the form still renders, just inert. Removing it
+  // would move every control on the screen and leave someone wondering whether
+  // they are in the right place; disabling it says "not here, not now" while
+  // keeping the way back to sign in exactly where it was (bkmk does the same).
+  const locked = isPending || open === false;
+
   const links = (
     <AuthLinks
       links={[
@@ -57,34 +63,6 @@ export default function SignupPage() {
     />
   );
 
-  if (isPending) {
-    return (
-      <AuthCard
-        title="TREKKER"
-        subtitle="Register"
-        footer={links}
-      >
-        <p className="text-ink-faint text-sm">Checking whether registration is open…</p>
-      </AuthCard>
-    );
-  }
-
-  if (open === false) {
-    return (
-      <AuthCard
-        title="TREKKER"
-        subtitle="Register"
-        footer={links}
-        notice={<AuthNotice tone="warning">Registration is closed on this instance.</AuthNotice>}
-      >
-        <p className="text-ink-muted text-sm leading-relaxed">
-          An open sign-up on an app that stores SSH keys is not a feature. Whoever runs this instance opens registration
-          deliberately — the README explains how.
-        </p>
-      </AuthCard>
-    );
-  }
-
   return (
     <AuthCard
       title="TREKKER"
@@ -92,6 +70,14 @@ export default function SignupPage() {
       status={status}
       failure={failure}
       footer={links}
+      notice={
+        open === false ? (
+          <AuthNotice tone="warning">
+            Registration is closed on this instance. An open sign-up on an app that stores SSH keys is not a feature —
+            whoever runs it opens registration deliberately.
+          </AuthNotice>
+        ) : undefined
+      }
     >
       <form
         onSubmit={handleSubmit(onSubmit)}
@@ -105,6 +91,7 @@ export default function SignupPage() {
           autoFocus
           registration={register("email")}
           error={errors.email?.message}
+          disabled={locked}
         />
 
         <div className="flex flex-col gap-1.5">
@@ -114,6 +101,7 @@ export default function SignupPage() {
             autoComplete="new-password"
             registration={register("password")}
             error={errors.password?.message}
+            disabled={locked}
           />
           <StrengthMeter value={watch("password") ?? ""} />
         </div>
@@ -124,6 +112,7 @@ export default function SignupPage() {
           autoComplete="new-password"
           registration={register("passwordConfirm")}
           error={errors.passwordConfirm?.message}
+          disabled={locked}
         />
 
         <AuthNotice tone="warning">
@@ -137,6 +126,7 @@ export default function SignupPage() {
           autoComplete="new-password"
           registration={register("passphrase")}
           error={errors.passphrase?.message}
+          disabled={locked}
           hint={`At least ${MIN_PASSPHRASE} characters. A sentence works better than a word.`}
         />
         <AuthField
@@ -145,14 +135,15 @@ export default function SignupPage() {
           autoComplete="new-password"
           registration={register("passphraseConfirm")}
           error={errors.passphraseConfirm?.message}
+          disabled={locked}
         />
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || locked}
           className="border-accent text-ink hover:bg-accent/20 mt-1 rounded-xs border py-1.5 text-sm tracking-caps disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isSubmitting ? "CREATING…" : "CREATE ACCOUNT"}
+          {isSubmitting ? "CREATING…" : open === false ? "REGISTRATION CLOSED" : "CREATE ACCOUNT"}
         </button>
       </form>
     </AuthCard>

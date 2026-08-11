@@ -27,6 +27,7 @@ export function AuthField({
   secret = false,
   autoFocus = false,
   hint,
+  disabled = false,
 }: {
   label: string;
   type?: "text" | "email" | "password";
@@ -37,6 +38,8 @@ export function AuthField({
   secret?: boolean;
   autoFocus?: boolean;
   hint?: string;
+  /** Renders the field inert without removing it — see the signup screen. */
+  disabled?: boolean;
 }) {
   const id = useId();
   const [revealed, setRevealed] = useState(false);
@@ -72,9 +75,10 @@ export function AuthField({
           autoComplete={autoComplete}
           // biome-ignore lint/a11y/noAutofocus: focus belongs on the first field of a sign-in form, and TRE-15 asks for it
           autoFocus={autoFocus}
+          disabled={disabled}
           aria-invalid={error !== undefined}
           aria-describedby={error ? `${id}-error` : undefined}
-          className={`bg-chrome text-ink placeholder:text-ink-faint focus:border-accent-soft w-full rounded-xs border px-2.5 py-1.5 font-mono text-base outline-none ${
+          className={`bg-chrome text-ink placeholder:text-ink-faint focus:border-accent-soft w-full rounded-xs border px-2.5 py-1.5 font-mono text-base outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
             error ? "border-danger-mid" : "border-line-strong"
           } ${secret ? "pr-14" : ""}`}
         />
@@ -83,7 +87,8 @@ export function AuthField({
             type="button"
             onClick={() => setRevealed((current) => !current)}
             aria-pressed={revealed}
-            className="text-ink-faint hover:text-ink-muted absolute top-1/2 right-2 -translate-y-1/2 text-xs tracking-label"
+            disabled={disabled}
+            className="text-ink-faint hover:text-ink-muted absolute top-1/2 right-2 -translate-y-1/2 text-xs tracking-label disabled:cursor-not-allowed disabled:opacity-50"
           >
             {revealed ? "hide" : "show"}
           </button>
