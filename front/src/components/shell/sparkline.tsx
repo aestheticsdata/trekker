@@ -1,9 +1,25 @@
 /**
- * The load sparkline in the top bar (TRE-14 §2).
+ * The load sparkline in the top bar (TRE-14 §2, restyled by TRE-42).
  *
- * Inline SVG with no library: it is a polyline over a fixed viewBox, and a
- * charting dependency for twenty points in a 34px bar would be absurd.
+ * Discrete 2px bars, per the mockup — not a line. Each bar's colour follows
+ * its drawn height, so a spike is brighter as well as taller and the ramp
+ * reads at sparkline size where a line would not.
  */
+
+/** Bar heights in px inside the 11px strip the mockup gives the sparkline. */
+const STRIP_HEIGHT = 11;
+const MIN_BAR = 2;
+
+/** Bars cost width; the strip shows the newest samples and stays chrome-sized. */
+const MAX_BARS = 20;
+
+/** Thresholds taken from the mockup's own bars: 3-4px dim, 5-7px soft, 9px bright. */
+function barClass(height: number): string {
+  if (height >= 9) return "bg-ink-dim";
+  if (height >= 5) return "bg-accent-soft";
+  return "bg-accent-dim";
+}
+
 export function Sparkline({
   values,
   label,
@@ -16,33 +32,26 @@ export function Sparkline({
 }) {
   if (values.length < 2) return null;
 
-  const max = Math.max(...values, 1);
-  const points = values
-    .map((value, index) => {
-      const x = (index / (values.length - 1)) * 100;
-      // Inverted: SVG's y grows downward and a load spike should go up.
-      const y = 100 - (value / max) * 100;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+  const shown = values.slice(-MAX_BARS);
+  const max = Math.max(...shown, 1);
 
   return (
-    <svg
-      viewBox="0 0 100 100"
-      preserveAspectRatio="none"
+    <span
       role="img"
       aria-label={label}
-      className={`h-3 w-10 ${className}`}
+      className={`flex h-[11px] items-end gap-[1.5px] ${className}`}
     >
-      <polyline
-        points={points}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={6}
-        vectorEffect="non-scaling-stroke"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
+      {shown.map((value, index) => {
+        const height = Math.max(MIN_BAR, Math.round((value / max) * STRIP_HEIGHT));
+        return (
+          <span
+            // biome-ignore lint/suspicious/noArrayIndexKey: ordered samples, never reordered
+            key={index}
+            className={`w-[2px] ${barClass(height)}`}
+            style={{ height: `${height}px` }}
+          />
+        );
+      })}
+    </span>
   );
 }

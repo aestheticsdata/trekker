@@ -39,7 +39,7 @@ export default function HomePage() {
 
   return (
     <AppShell
-      host={{ label: "local", colour: PLACEHOLDER_HOST_COLOUR, pingMs: health ? 1 : null }}
+      host={{ label: "local", colour: PLACEHOLDER_HOST_COLOUR, transport: "local", pingMs: health ? 1 : null }}
       stats={{
         uptime: health ? formatUptime(health.uptimeSeconds) : null,
         cpu: null,

@@ -45,9 +45,19 @@
   --color-on-pane-strong: #0f4d74;
   --color-on-pane-muted: #1c4a68;
 
+  /* The wordmark, the logo's light pane, the glob caret and the column names
+   * share one light cyan that belongs to none of the ink steps: the brand
+   * colour, used sparingly enough that it stays recognisable as one.
+   */
+  --color-brand: #b9dcea;
+
   /* ---- meaning ---------------------------------------------------------- */
   --color-accent: #1f7cab;
   --color-accent-soft: #3e8fae;
+  /* The low step of the load-bar ramp (dim → soft → ink-dim as load rises). */
+  --color-accent-dim: #2b6c8e;
+  /* Text on an accent fill — the ⌘K chip and the active segmented cell. */
+  --color-on-accent: #04202f;
   --color-warning: #c98a3e;
   --color-danger: #7f2f2f;
   --color-danger-mid: #aa3333;

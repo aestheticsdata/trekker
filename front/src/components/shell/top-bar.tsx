@@ -3,8 +3,8 @@
 import { Sparkline } from "@components/shell/sparkline";
 
 /**
- * The 34px top bar (TRE-14 §2): who you are looking at, what is saved, and how
- * the machine is doing.
+ * The 34px top bar (TRE-14 §2, trued up against mockup 2a by TRE-42): who you
+ * are looking at, what is saved, and how the machine is doing.
  *
  * Presentational on purpose. The host and its stats arrive from TRE-12's
  * endpoints once the sidebar owns selection (TRE-18); until then the shell
@@ -15,6 +15,8 @@ export interface HostChip {
   label: string;
   /** The host's accent, straight from the Hosts row. */
   colour: string;
+  /** "local" or "ssh" — shown beside the latency, as the mockup does. */
+  transport?: string | null;
   /** Round-trip in ms, or null when it has not answered yet. */
   pingMs: number | null;
 }
@@ -52,18 +54,53 @@ export function TopBar({
   const overflow = views.length - shown.length;
 
   return (
-    <header className="bg-chrome border-line flex h-topbar shrink-0 items-center gap-3 border-b px-2">
-      <span className="text-ink text-sm font-semibold tracking-caps select-none">TREKKER</span>
+    <header className="bg-chrome border-line flex h-topbar shrink-0 items-center gap-2.5 border-b px-2.5">
+      <span className="flex items-center gap-2.25 pr-1.5 select-none">
+        {/* The favicon's dual-pane mark, at chrome size. */}
+        <svg
+          viewBox="0 0 32 32"
+          aria-hidden="true"
+          className="size-[15px] shrink-0"
+        >
+          <rect
+            width="32"
+            height="32"
+            rx="7"
+            className="fill-line"
+          />
+          <rect
+            x="6"
+            y="7"
+            width="8.4"
+            height="18"
+            rx="1.4"
+            className="fill-brand"
+          />
+          <rect
+            x="17.6"
+            y="7"
+            width="8.4"
+            height="18"
+            rx="1.4"
+            className="fill-accent"
+          />
+        </svg>
+        <span className="text-brand text-sm font-bold tracking-caps">TREKKER</span>
+      </span>
 
       {host && (
-        <span className="border-line-strong bg-raised flex items-center gap-1.5 rounded-xs border px-1.5 py-0.5">
+        <span className="bg-line border-line-strong flex h-5.5 items-center gap-1.75 rounded-sm border px-2.5">
           <span
             aria-hidden
             className="size-1.5 rounded-full"
             style={{ backgroundColor: host.colour }}
           />
-          <span className="text-ink-soft text-xs">{host.label}</span>
-          <span className="text-ink-faint font-mono text-2xs">{host.pingMs === null ? "—" : `${host.pingMs}ms`}</span>
+          <span className="text-ink-soft font-mono text-xs font-medium">{host.label}</span>
+          {/* Transport is configuration, not a measurement: only the number degrades. */}
+          <span className="text-ink-dim font-mono text-2xs">
+            {host.transport ? `${host.transport} · ` : ""}
+            {host.pingMs === null ? "—" : `${host.pingMs} ms`}
+          </span>
         </span>
       )}
 
@@ -100,7 +137,7 @@ export function TopBar({
 
       {/* First thing to go when the viewport narrows — the ladder in §5. */}
       {stats && (
-        <dl className="text-ink-faint hidden items-center gap-3 font-mono text-2xs stats:flex">
+        <dl className="text-ink-muted divide-line hidden items-center divide-x font-mono text-xs stats:flex">
           <Stat
             term="up"
             value={stats.uptime}
@@ -117,10 +154,11 @@ export function TopBar({
             term="io"
             value={stats.io}
           />
-          {stats.load.length > 1 && (
-            <div className="flex items-center gap-1">
+          {stats.load.length > 0 && (
+            <div className="flex items-center gap-1.5 px-2.5">
               <dt>load</dt>
-              <dd className="text-ink-dim">
+              <dd className="text-ink font-medium">{stats.load[stats.load.length - 1]?.toFixed(2)}</dd>
+              <dd>
                 <Sparkline
                   values={stats.load}
                   label={`Load average over the last ${stats.load.length} samples`}
@@ -134,7 +172,7 @@ export function TopBar({
       <button
         type="button"
         onClick={onOpenPalette}
-        className="border-line-strong text-ink-muted hover:text-ink hover:border-accent-soft flex items-center gap-1 rounded-xs border px-1.5 py-0.5 font-mono text-2xs"
+        className="bg-accent text-on-accent hover:bg-accent-soft flex h-5 items-center rounded-sm px-2 font-mono text-xs font-medium"
       >
         ⌘K
       </button>
@@ -145,9 +183,9 @@ export function TopBar({
 /** A stat renders its dash rather than vanishing: a missing value is a fact. */
 function Stat({ term, value }: { term: string; value: string | null }) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1 px-2.5">
       <dt>{term}</dt>
-      <dd className="text-ink-dim">{value ?? "—"}</dd>
+      <dd className="text-ink font-medium">{value ?? "—"}</dd>
     </div>
   );
 }
