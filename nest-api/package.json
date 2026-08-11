@@ -86,6 +86,7 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "moduleNameMapper": {
+      "^@bookmarks/(.*)$": "<rootDir>/bookmarks/$1",
       "^@config/(.*)$": "<rootDir>/config/$1",
       "^@infrastructure/(.*)$": "<rootDir>/infrastructure/$1",
       "^@redis/(.*)$": "<rootDir>/redis/$1",

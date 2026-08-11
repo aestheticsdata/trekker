@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { BookmarksModule } from "@bookmarks/bookmarks.module";
 import appConfig from "@config/app.config";
 import { validate } from "@config/env.validation";
 import { DatabaseModule } from "@database/database.module";
@@ -32,6 +33,7 @@ loadEnv();
     RedisModule,
     SecretStoreModule,
     HostsModule,
+    BookmarksModule,
     FsModule,
     HealthModule,
     UsersModule,

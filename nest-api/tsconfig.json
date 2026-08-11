@@ -15,6 +15,7 @@
     "outDir": "./dist",
     "baseUrl": "./",
     "paths": {
+      "@bookmarks/*": ["./src/bookmarks/*"],
       "@config/*": ["./src/config/*"],
       "@infrastructure/*": ["./src/infrastructure/*"],
       "@redis/*": ["./src/redis/*"],
