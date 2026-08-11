@@ -64,6 +64,22 @@ export interface Lease {
   release(): void;
 }
 
+/** The result of a pre-persist connectivity test (TRE-12). Never carries the credential. */
+export interface HostProbeResult {
+  /** TCP connect and SSH handshake completed. */
+  reachable: boolean;
+  /** The credential authenticated. */
+  authenticated: boolean;
+  /** "SHA256:...", captured during the handshake — present even on auth failure. */
+  fingerprint: string | null;
+  /** The login directory, resolved once authenticated. */
+  homeDir: string | null;
+  /** The user the connection authenticated as. */
+  remoteUser: string | null;
+  /** A short human message with no credential in it. */
+  detail: string;
+}
+
 /**
  * One ssh2 client per (host, user), reused across requests (TRE-9 §4).
  *
@@ -76,6 +92,16 @@ export interface Lease {
 export class SshConnectionPool implements OnModuleDestroy {
   private readonly logger = new Logger(SshConnectionPool.name);
   private readonly entries = new Map<string, PooledEntry>();
+  /**
+   * Keys evicted while their handshake was still in flight.
+   *
+   * Eviction exists to guarantee that nothing keeps authenticating with a
+   * credential the operator just replaced or deleted. A connection being
+   * established at that moment has no client to close yet, so without this the
+   * handshake would finish *after* the eviction and re-pool a connection built
+   * from the revoked credential — the one outcome revocation must prevent.
+   */
+  private readonly evictedWhileConnecting = new Set<string>();
 
   constructor(private readonly settings: PoolSettings = DEFAULT_POOL_SETTINGS) {}
 
@@ -143,6 +169,9 @@ export class SshConnectionPool implements OnModuleDestroy {
         if (settled) return;
         settled = true;
         this.entries.delete(key);
+        // The mark only matters while this handshake is alive; leaving it
+        // behind would make the *next* connection on this key discard itself.
+        this.evictedWhileConnecting.delete(key);
         client.destroy();
         reject(error);
       };
@@ -169,6 +198,18 @@ export class SshConnectionPool implements OnModuleDestroy {
             sftp.end();
             return;
           }
+
+          // Revoked mid-handshake: this connection authenticated with a
+          // credential that is no longer valid, so it must die here rather
+          // than be pooled for the next request. Checked before `settled` is
+          // set, so fail() still runs its cleanup and rejects the caller.
+          if (this.evictedWhileConnecting.delete(key)) {
+            sftp.end();
+            this.logger.log(`SSH connection discarded on arrival (evicted while connecting): ${key}`);
+            fail(new DriverError("EAUTH", "The credential changed while connecting. Retry."));
+            return;
+          }
+
           settled = true;
 
           const entry: PooledEntry = { client, sftp, inFlight: 0, waiting: [], idleTimer: null, connecting: null };
@@ -233,6 +274,128 @@ export class SshConnectionPool implements OnModuleDestroy {
     return pins.some((pin) => secretsEqual(seen, Buffer.from(pin, "utf8")));
   }
 
+  /**
+   * A throwaway connection for the "test before you save" flow (TRE-12). Unlike
+   * `acquire`, it never touches the pool map: a candidate host has no id to key
+   * on, and a connection made from a credential typed into a form must not
+   * outlive the request that tested it.
+   *
+   * The fingerprint is captured in the host verifier, which ssh2 runs during
+   * the handshake — *before* authentication — so a wrong credential still comes
+   * back with the fingerprint the user needs to confirm. Nothing here is logged:
+   * the spec carries a live credential.
+   */
+  async probe(spec: HostConnectionSpec): Promise<HostProbeResult> {
+    return new Promise<HostProbeResult>((resolve) => {
+      const client = new Client();
+      let fingerprint: string | null = null;
+      let settled = false;
+
+      const done = (result: HostProbeResult): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        client.destroy();
+        resolve(result);
+      };
+
+      const timer = setTimeout(
+        () =>
+          done({
+            reachable: false,
+            authenticated: false,
+            fingerprint,
+            homeDir: null,
+            remoteUser: null,
+            detail: "Timed out",
+          }),
+        this.settings.connectTimeoutMs,
+      );
+      timer.unref();
+
+      client.on("error", (error: Error & { level?: string; code?: string }) => {
+        const classified = classifyConnectError(error, spec);
+        // EAUTH means the handshake completed and the fingerprint was captured;
+        // the host is reachable, the credential simply did not authenticate.
+        if (classified.code === "EAUTH") {
+          done({
+            reachable: true,
+            authenticated: false,
+            fingerprint,
+            homeDir: null,
+            remoteUser: null,
+            detail: "Authentication refused",
+          });
+          return;
+        }
+        done({
+          reachable: false,
+          authenticated: false,
+          fingerprint,
+          homeDir: null,
+          remoteUser: null,
+          detail: classified.message,
+        });
+      });
+
+      client.on("ready", () => {
+        client.sftp((error, sftp) => {
+          if (error) {
+            done({
+              reachable: true,
+              authenticated: true,
+              fingerprint,
+              homeDir: null,
+              remoteUser: spec.username,
+              detail: "Connected, SFTP unavailable",
+            });
+            return;
+          }
+          sftp.realpath(".", (realpathError, home) => {
+            done({
+              reachable: true,
+              authenticated: true,
+              fingerprint,
+              homeDir: realpathError ? null : home,
+              remoteUser: spec.username,
+              detail: "Connected",
+            });
+          });
+        });
+      });
+
+      // ssh2 parses the key material inside connect() and throws
+      // *synchronously* on a malformed or wrongly-passphrased private key —
+      // it never reaches the "error" handler. Unwrapped, the commonest mistake
+      // anyone makes on this form (a truncated paste, a wrong passphrase)
+      // would reject this promise as a 500 instead of the answer the screen
+      // exists to give, and would leak the timer and the client with it.
+      try {
+        const config = this.connectConfig(spec);
+        client.connect({
+          ...config,
+          hostVerifier: (key: Buffer) => {
+            fingerprint = fingerprintOf(key);
+            // A test trusts on first use — the fingerprint is being shown to
+            // the user precisely so they can decide whether to pin it.
+            return true;
+          },
+        });
+      } catch (error) {
+        done({
+          reachable: false,
+          authenticated: false,
+          fingerprint,
+          homeDir: null,
+          remoteUser: null,
+          // ssh2's own text ("Cannot parse privateKey: ...") names the
+          // problem and quotes no key material.
+          detail: error instanceof Error ? error.message : "Could not start the connection",
+        });
+      }
+    });
+  }
+
   /** Closes a host's connection now — on deletion, credential change or a key mismatch. */
   evictHost(hostId: string, reason: string): void {
     for (const key of [...this.entries.keys()]) {
@@ -245,7 +408,17 @@ export class SshConnectionPool implements OnModuleDestroy {
     if (!entry) return;
     this.entries.delete(key);
     if (entry.idleTimer) clearTimeout(entry.idleTimer);
-    entry.client?.end();
+
+    if (entry.connecting) {
+      // Nothing to close yet — the handshake is still running and owns the
+      // only reference to the client. Mark the key so the connection is
+      // destroyed the moment it arrives instead of being pooled.
+      this.evictedWhileConnecting.add(key);
+      this.logger.log(`SSH connection marked for discard (${reason}, still connecting): ${key}`);
+      return;
+    }
+
+    entry.client.end();
     this.logger.log(`SSH connection closed (${reason}): ${key}`);
   }
 
