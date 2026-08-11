@@ -38,6 +38,9 @@ export default function AboutPage() {
         ))}
       </ul>
 
+      {/* The domain is deliberate and stays: it is the operator's published
+          identity, which is a legal requirement, not an infrastructure leak.
+          Recorded here so TRE-5's sweeps stop re-raising it. */}
       <p className="border-line text-ink-faint mt-2 border-t pt-3 text-center font-mono text-xs">
         trekker · 1991computer.com
       </p>
