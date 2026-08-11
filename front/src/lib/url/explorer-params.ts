@@ -1,4 +1,4 @@
-import { createParser, debounce, parseAsBoolean, parseAsNumberLiteral, parseAsStringLiteral } from "nuqs";
+import { createParser, debounce, parseAsNumberLiteral, parseAsStringLiteral } from "nuqs";
 
 import type { UrlKeys } from "nuqs";
 
@@ -95,7 +95,8 @@ export const RIGHT_KEYS: UrlKeys<typeof paneParams> = { host: "bHost", path: "bP
  * it. Explicit null is what makes a malformed value disappear.
  */
 export const parseAsFlag = createParser({
-  parse: (query: string) => (query === "1" || query === "true" ? true : query === "0" || query === "false" ? false : null),
+  parse: (query: string) =>
+    query === "1" || query === "true" ? true : query === "0" || query === "false" ? false : null,
   serialize: (value: boolean) => (value ? "1" : "0"),
 });
 

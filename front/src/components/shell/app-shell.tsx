@@ -31,6 +31,7 @@ export function AppShell({
   globMatches,
   heat,
   onHeatChange,
+  sidebar,
   children,
 }: {
   host?: HostChip | null;
@@ -46,6 +47,8 @@ export function AppShell({
   globMatches?: number | null;
   heat?: boolean;
   onHeatChange?: (heat: boolean) => void;
+  /** The 176px left rail (TRE-18). Rendered beside the panes, inside the bars. */
+  sidebar?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -70,8 +73,14 @@ export function AppShell({
           onHeatChange={onHeatChange}
         />
 
-        {/* min-h-0 or a tall child stretches the flex item instead of scrolling. */}
-        <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+        {/* min-h-0 or a tall child stretches the flex item instead of scrolling.
+            The sidebar sits inside this row rather than beside the whole app:
+            it belongs between the toolbar and the status bar, as the mockup
+            draws it, and it goes with the panes below the `panes:` breakpoint. */}
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="hidden panes:flex">{sidebar}</div>
+          <main className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
+        </div>
 
         <StatusBar selection={selection} />
       </div>

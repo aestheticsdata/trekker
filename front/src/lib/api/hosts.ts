@@ -79,8 +79,29 @@ export interface HostProbeResult {
   detail: string;
 }
 
+/**
+ * What a host reports about itself (TRE-12). Five probes over one channel,
+ * cached 5s server-side — cheap enough for the sidebar to ask per host, which
+ * is the only place a real ping comes from: `GET /hosts` carries none.
+ *
+ * Every field is independently nullable: a host without /proc answers with
+ * nulls rather than failing.
+ */
+export interface HostSummary {
+  uptimeSeconds: number | null;
+  load: { one: number; five: number; fifteen: number } | null;
+  memory: { totalKb: number; availableKb: number } | null;
+  pingMs: number | null;
+  homeDir: string | null;
+  remoteUser: string | null;
+}
+
 export async function fetchHosts(): Promise<HostView[]> {
   return (await apiRequest("/hosts")) as HostView[];
+}
+
+export async function fetchHostSummary(id: string): Promise<HostSummary> {
+  return (await apiRequest(`/hosts/${id}/summary`)) as HostSummary;
 }
 
 export async function createHost(input: HostInput, csrfToken: string | null): Promise<HostView> {

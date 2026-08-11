@@ -6,6 +6,7 @@ export const QUERY_KEYS = {
   HEALTH: "health",
   HOSTS: "hosts",
   HOST_SUMMARY: "hostSummary",
+  BOOKMARKS: "bookmarks",
   DIRECTORY: "directory",
   ENTRY: "entry",
 } as const;
