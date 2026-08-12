@@ -5,7 +5,12 @@ import { ForbiddenException, HttpException } from "@nestjs/common";
 import { LIMITS } from "@audit/limits";
 import { RateLimitService } from "@audit/rate-limit.service";
 import { LocalDriver } from "@hosts/drivers/local.driver";
-import { PathGuardService, PATH_REFUSED_MESSAGE } from "@hosts/path-guard/path-guard.service";
+import {
+  PathGuardService,
+  PATH_DENYLISTED_MESSAGE,
+  PATH_REFUSED_MESSAGE,
+  withinRoots,
+} from "@hosts/path-guard/path-guard.service";
 import type { AuditOpening, AuditService } from "@audit/audit.service";
 import type { RedisService } from "@redis/redis.service";
 import type { PrismaService } from "../../prisma/prisma.service";
@@ -51,15 +56,17 @@ function memoryLimits(): RateLimitService {
   return new RateLimitService(redis);
 }
 
-function recordingAudit(): { audit: AuditService; rows: AuditOpening[] } {
+function recordingAudit(): { audit: AuditService; rows: AuditOpening[]; details: string[] } {
   const rows: AuditOpening[] = [];
+  const details: string[] = [];
   const audit = {
-    refused: (opening: AuditOpening) => {
+    refused: (opening: AuditOpening, detail: string) => {
       rows.push(opening);
+      details.push(detail);
       return Promise.resolve();
     },
   } as unknown as AuditService;
-  return { audit, rows };
+  return { audit, rows, details };
 }
 
 interface GuardOptions {
@@ -67,6 +74,12 @@ interface GuardOptions {
   denylist?: string[];
   limits?: RateLimitService;
   audit?: AuditService;
+  /**
+   * Defaults to MEMBER, and that default is load-bearing: every test above the
+   * owner block asserts the restricted path, and they only mean anything while
+   * the account under test is a restricted one.
+   */
+  role?: "OWNER" | "MEMBER";
 }
 
 function guardFor(roots: RootFixture[], options: GuardOptions = {}) {
@@ -75,7 +88,13 @@ function guardFor(roots: RootFixture[], options: GuardOptions = {}) {
       findFirst: ({ where }: { where: { id: string; userId: string } }) =>
         Promise.resolve(
           where.id === HOST_ID && where.userId === USER_ID
-            ? { id: HOST_ID, userId: USER_ID, transport: options.transport ?? "LOCAL", roots }
+            ? {
+                id: HOST_ID,
+                userId: USER_ID,
+                transport: options.transport ?? "LOCAL",
+                roots,
+                user: { role: options.role ?? "MEMBER" },
+              }
             : null,
         ),
     },
@@ -289,6 +308,131 @@ describe("PathGuardService", () => {
         intent: "read",
       }),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+// ---------------------------------------------------- owner bypass (TRE-48)
+
+describe("owner bypass", () => {
+  const narrow = (): RootFixture[] => [{ path: join(base, "allowed"), access: "WRITE" }];
+  const owner = { role: "OWNER" as const };
+
+  it("opens a path outside every configured root", async () => {
+    // The pair of the member test above, which refuses this exact path.
+    const guard = guardFor(narrow(), owner);
+    await expect(
+      guard.validate({
+        driver: driver(),
+        userId: USER_ID,
+        path: join(base, "outside", "secret.txt"),
+        intent: "read",
+      }),
+    ).resolves.toMatchObject({ realPath: join(base, "outside", "secret.txt") });
+  });
+
+  it("allows write intent where the configured root is READ", async () => {
+    // The half nobody sees by browsing: containment and intent are separate
+    // checks, so an owner whose reach was READ would still be refused chmod
+    // and chown, and PermissionsService would report it as a per-path failure
+    // rather than a refusal.
+    const guard = guardFor([{ path: join(base, "readonly"), access: "READ" }], owner);
+    await expect(
+      guard.validate({
+        driver: driver(),
+        userId: USER_ID,
+        path: join(base, "readonly", "r.txt"),
+        intent: "write",
+      }),
+    ).resolves.toMatchObject({ realPath: join(base, "readonly", "r.txt") });
+  });
+
+  it("reports the whole filesystem as the owner's reach, so symlinks read as inside it", async () => {
+    // Asserted directly because this return value is the entire contract
+    // behind TRE-13's `linkInsideRoot`, and the front blocks a symlink click
+    // on that flag. Without it the bypass passes its own suite and still
+    // refuses the owner in the browser.
+    const guard = guardFor(narrow(), owner);
+    const roots = await guard.resolveRoots(driver(), USER_ID);
+    expect(roots).toEqual([{ path: "/", realPath: "/", access: "WRITE" }]);
+    expect(withinRoots(join(base, "outside"), roots, "read")).toBe(true);
+  });
+
+  it("still refuses the denylist, and says why", async () => {
+    // The one boundary left standing: past it sit the master key and the API
+    // user's SSH keys. The owner gets an explanation because for them this is
+    // now the only refusal a real path can produce.
+    const guard = guardFor(narrow(), owner);
+    const direct = await refusalOf(
+      guard.validate({
+        driver: driver(),
+        userId: USER_ID,
+        path: join(base, "install", "ecosystem.config.js"),
+        intent: "read",
+      }),
+    );
+    expect(direct.message).toBe(PATH_DENYLISTED_MESSAGE);
+
+    // Through a symlink too, which is what proves the check still happens
+    // after resolution rather than as an early return.
+    const linked = await refusalOf(
+      guard.validate({
+        driver: driver(),
+        userId: USER_ID,
+        path: join(base, "allowed", "link-install", "ecosystem.config.js"),
+        intent: "read",
+      }),
+    );
+    expect(linked.message).toBe(PATH_DENYLISTED_MESSAGE);
+  });
+
+  it("keeps the uniform refusal for a member meeting the denylist", async () => {
+    // The explanation is a courtesy to the owner, not a change to what the
+    // application discloses. Everyone else still cannot tell one refusal from
+    // another.
+    const guard = guardFor([{ path: "/", access: "WRITE" }]);
+    const error = await refusalOf(
+      guard.validate({
+        driver: driver(),
+        userId: USER_ID,
+        path: join(base, "install", "ecosystem.config.js"),
+        intent: "read",
+      }),
+    );
+    expect(error.message).toBe(PATH_REFUSED_MESSAGE);
+  });
+
+  it("is never rate limited out of navigation", async () => {
+    // Through the denylist, because that is the refusal an owner actually
+    // produces in bulk: those directories sit under the API user's home, which
+    // is the LOCAL host's default home and default root, and the explorer
+    // prefetches on hover. A counted owner would be 429ed out of the very walk
+    // this ticket asked for, without ever clicking anything.
+    const guard = guardFor(narrow(), owner);
+    for (let attempt = 1; attempt <= LIMITS.pathRefusal.max + 5; attempt += 1) {
+      const error = await refusalError(guard, join(base, "install", `probe-${attempt}.js`));
+      expect(error.getStatus()).toBe(403);
+      // And it keeps explaining itself past the line, rather than degrading
+      // into the message for a limit that was not applied.
+      expect(error.message).toBe(PATH_DENYLISTED_MESSAGE);
+    }
+  });
+
+  it("still writes the one audit row when the owner crosses the line", async () => {
+    // The count is kept precisely so this row survives the bypass, and the
+    // summary must not claim the owner was blocked when they were not.
+    const { audit, rows, details } = recordingAudit();
+    const guard = guardFor(narrow(), { ...owner, audit });
+
+    for (let attempt = 1; attempt <= LIMITS.pathRefusal.max + 5; attempt += 1) {
+      await refusalError(guard, join(base, "install", `probe-${attempt}.js`));
+    }
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: USER_ID, hostId: HOST_ID, kind: "path.refused" });
+    expect(rows[0].summary).not.toContain("Blocked");
+    // The strip renders summary and detail as one line, so the detail must not
+    // announce a limit the summary just said was not applied.
+    expect(details[0]).not.toContain("Rate limit reached");
   });
 });
 

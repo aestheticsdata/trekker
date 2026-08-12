@@ -17,15 +17,18 @@ follow from that:
 
 - **Generate your own secrets.** Every value in `ecosystem.config.example.js` is a placeholder.
   The real `ecosystem.config.js` is never committed, and the master key that encrypts stored
-  credentials must live outside every path Trekker is allowed to browse.
+  credentials is kept out of the browser by the denylist, which binds every account including the
+  install's owner.
 - **Do not expose it to the public internet** without a reverse proxy in front, registration
   closed, and ideally an IP or VPN restriction. An authenticated Trekker session is shell-adjacent
   access to every host it knows.
 
 The master key is yours to generate and is never derived from anything in this repo — 32 bytes of
-randomness, into `TREKKER_MASTER_KEY`, kept outside every root a host is allowed to browse. The
-version travels with the key as `<version>:<base64>`, so the two cannot be set inconsistently,
-which is the commonest way a rotation goes wrong:
+randomness, into `TREKKER_MASTER_KEY`. The directory holding it is denylisted rather than merely
+left out of the configured roots: the install's owner browses without those roots binding them
+(TRE-48), so root placement alone stopped being a guarantee and the denylist is the one that
+holds. The version travels with the key as `<version>:<base64>`, so the two cannot be set
+inconsistently, which is the commonest way a rotation goes wrong:
 
 ```bash
 node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"
@@ -222,7 +225,8 @@ total rather than quietly ending short.
 ### Changing permissions
 
 `POST /api/fs/chmod` and `POST /api/fs/chown` take a host, a list of paths and a recursive flag.
-Both validate every path through the roots allowlist as a **write**, and both answer per path: a
+Both validate every path through the roots allowlist as a **write** — `/` for the install's owner,
+the host's configured roots for everyone else — and both answer per path: a
 batch where three of ten fail names those three and why, because a single 403 for the batch would
 leave nobody able to tell which files are now different.
 

@@ -77,9 +77,10 @@ const prodEnv = {
 
   // Decrypts every stored SSH credential (TRE-8). Generate ON THE SERVER:
   //   node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"
-  // It must sit outside every path Trekker is allowed to browse (TRE-11),
-  // otherwise a signed-in user browsing the local host reads the key that
-  // unlocks every other machine.
+  // The directory holding it must stay denylisted (TRE-11), otherwise a
+  // signed-in user browsing the local host reads the key that unlocks every
+  // other machine. The denylist, not root placement: the install's owner
+  // browses without the roots binding them (TRE-48).
   TREKKER_MASTER_KEY: "REPLACE_ME",
   // Set only during a rotation, to the key being retired. See DEPLOY.md.
   // TREKKER_MASTER_KEY_PREVIOUS: "",

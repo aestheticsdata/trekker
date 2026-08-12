@@ -66,13 +66,16 @@ const ids = {
     }),
 } as unknown as IdResolverService;
 
-function serviceFor(roots: { path: string; access: "READ" | "WRITE" }[]): PermissionsService {
+function serviceFor(
+  roots: { path: string; access: "READ" | "WRITE" }[],
+  role: "OWNER" | "MEMBER" = "MEMBER",
+): PermissionsService {
   const prisma = {
     hosts: {
       findFirst: ({ where }: { where: { id: string; userId: string } }) =>
         Promise.resolve(
           where.id === HOST_ID && where.userId === USER_ID
-            ? { id: HOST_ID, userId: USER_ID, transport: "LOCAL", roots }
+            ? { id: HOST_ID, userId: USER_ID, transport: "LOCAL", roots, user: { role } }
             : null,
         ),
     },
@@ -305,6 +308,26 @@ describe("chmod", () => {
     // A READ root grants no writes, so this is refused before any driver call.
     expect(result).toBeInstanceOf(HttpException);
     expect(await modeOf(fenced)).toBe("0600");
+  });
+
+  it("lets the install's owner change a file outside every configured root", async () => {
+    // The pair of the test above, and the half of TRE-48 that browsing cannot
+    // show: the owner's reach has to grant write intent too, or chmod stays
+    // refused everywhere the roots do not reach while listing works fine.
+    await mkdir(join(base, "unfenced"), { recursive: true });
+    const target = join(base, "unfenced", "file.txt");
+    await writeFile(target, "x");
+    await chmod(target, 0o600);
+
+    await serviceFor([{ path: join(base, "nowhere-near-it"), access: "READ" }], "OWNER").chmod(
+      USER_ID,
+      HOST_ID,
+      [target],
+      0o644,
+      false,
+    );
+
+    expect(await modeOf(target)).toBe("0644");
   });
 });
 

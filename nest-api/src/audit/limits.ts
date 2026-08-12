@@ -62,6 +62,20 @@ export const LIMITS = {
    * actually allowed to open keeps working. A burst of these is either a
    * broken client or someone walking the filesystem looking for a way out of
    * the roots; the server cannot tell which, and does not need to.
+   *
+   * Counted for every account and enforced against every account but the
+   * install's owner (TRE-48). The owner's uses are still counted rather than
+   * skipped, for two reasons: the count is what writes the single audit row a
+   * filesystem walk ever produces, and a limit that nothing spends from is
+   * precisely what `audit-coverage.spec.ts` exists to catch.
+   *
+   * Worth knowing before the first restricted account arrives: this counts
+   * refusal events, not distinct paths, and the explorer prefetches on hover
+   * and on arrow-key movement. Passing the cursor over one forbidden
+   * directory a few times spends several of the twenty on a single fact, so a
+   * restricted account will reach the ceiling far sooner than its user would
+   * predict. Counting distinct paths instead is the real fix — TRE-50 — and is
+   * not a number to raise here.
    */
   pathRefusal: rule("limit:path", "refused paths", 20, 60, "TREKKER_LIMIT_PATH_REFUSALS_PER_MIN"),
 

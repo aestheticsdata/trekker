@@ -92,10 +92,18 @@ Every path from the client is resolved server-side (`realpath`) and checked agai
 inspection. A symlink pointing outside an allowed root resolves outside it and is refused —
 which is the whole reason resolution happens before the check and not after.
 
+The install's owner is measured against `/` instead of against the configured roots (TRE-48).
+The roots were never a privilege boundary for them: an account edits its own roots from the host
+form, so refusing the owner a directory only meant a detour through that form. Resolution and the
+comparison still happen — what changes is the allowlist compared against. Restricted accounts,
+when they arrive, are `MEMBER` and bound in full.
+
 The local host is the dangerous one: the API process owns Trekker's own files, including the
 env file holding the master key that decrypts every SSH credential. Therefore:
 
-- The install directory is denylisted by default and cannot be added as a root.
+- The install directory is denylisted by default and cannot be added as a root. This is the one
+  check the owner does not escape, and the reason the two mechanisms stay separate: the roots are
+  a fence you set for yourself, the denylist is the boundary around Trekker's own key material.
 - The master key is read from a path outside every allowed root (env file or systemd credential),
   never from inside the app tree.
 

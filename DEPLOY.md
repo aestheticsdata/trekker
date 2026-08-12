@@ -187,6 +187,25 @@ Each ends by checking the half it just shipped actually works. Then set up nginx
 below — until it exists, both processes are listening on loopback and nothing
 external can reach them.
 
+### 8. The first account
+
+Registration is closed on a deployed instance and stays that way, so the way in
+is the script, run on the server:
+
+```bash
+ACCOUNT_EMAIL=you@example.com pnpm --filter ./nest-api account:create
+```
+
+It prints the password and the recovery passphrase once. It also prints the
+role: the **first account on an install owns it** (TRE-48), which means it
+browses every path on every host it configures, without a host's roots
+allowlist binding it. Every account after it is a `MEMBER` and is bound in
+full. The denylist around the master key binds both.
+
+On an install that already had an account before this was introduced, the
+migration marks the earliest one as owner. `curl` the API's `/api/users/me`
+with a signed-in session to confirm which row it landed on.
+
 ## Routine deploy
 
 ```bash
@@ -353,9 +372,13 @@ node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64')
 The API refuses to boot if it is missing, the wrong length, or still
 `REPLACE_ME`, and the error names the variable.
 
-It must live outside every path Trekker is allowed to browse. Otherwise a
-signed-in user browsing the local host reads the key that unlocks every other
-machine, and the encryption is decoration. TRE-11's denylist enforces that.
+The directory holding it must stay denylisted. Otherwise a signed-in user
+browsing the local host reads the key that unlocks every other machine, and the
+encryption is decoration. TRE-11's denylist enforces that, and it is the check
+that binds every account — the install's owner browses without the roots
+allowlist applying to them (TRE-48), so keeping the key merely outside the
+configured roots would no longer be enough. An owner who navigates there is
+told why the path refuses instead of getting the uniform refusal.
 
 **What this protects against is database disclosure, not host compromise.**
 Anyone who owns the API host reads the key out of the process environment and
