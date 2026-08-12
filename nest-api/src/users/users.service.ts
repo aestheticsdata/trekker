@@ -9,6 +9,7 @@ import {
 import { compare, hash, hashSync } from "bcryptjs";
 import { RedisService } from "@redis/redis.service";
 import { generateRecoveryPassphrase } from "@users/recovery-passphrase.util";
+import { isOwnerSlotViolation, roleFields, roleForNewAccount, type UserRole } from "@users/owner";
 import type { AddUserDto } from "@users/dto/add-user.dto";
 import { PrismaService } from "../prisma/prisma.service";
 import type { Users } from "../../generated/prisma/client";
@@ -36,6 +37,12 @@ export interface PublicUser {
   id: string;
   email: string;
   hasRecoveryPassphrase: boolean;
+  /**
+   * Sent to the client so the install's owner can be confirmed without a
+   * database client — `curl /api/users/me` after a deploy answers whether the
+   * migration's backfill landed on the row it was meant to.
+   */
+  role: UserRole;
 }
 
 export interface SignInResponse {
@@ -84,13 +91,29 @@ export class UsersService {
     // a caller with no human in front of it must still get a real passphrase
     // rather than an empty column.
     const recoveryPassphrase = dto.passphrase ?? generateRecoveryPassphrase();
-    const user = await this.prisma.users.create({
-      data: {
-        email: dto.email,
-        passwordHash: await hash(dto.password, BCRYPT_ROUNDS),
-        recoveryPassphraseHash: await hash(recoveryPassphrase, BCRYPT_ROUNDS),
-      },
-    });
+    const data = {
+      email: dto.email,
+      passwordHash: await hash(dto.password, BCRYPT_ROUNDS),
+      recoveryPassphraseHash: await hash(recoveryPassphrase, BCRYPT_ROUNDS),
+    };
+
+    // The first account on an install owns it (TRE-48). One count, on the
+    // registration route only — never anywhere near a filesystem path.
+    const role = await roleForNewAccount(this.prisma.users);
+
+    let user: Users;
+    try {
+      user = await this.prisma.users.create({ data: { ...data, ...roleFields(role) } });
+    } catch (error) {
+      // The count read an empty table and the unique index disagrees, so
+      // somebody else won the first-account race. Retrying as a member rather
+      // than failing is deliberate: the loser of that race still asked for an
+      // account, and the only thing they must not be given is the privilege.
+      // Narrow, not blanket — a duplicate email is the other race the check
+      // above cannot close, and that one still has to surface.
+      if (!isOwnerSlotViolation(error)) throw error;
+      user = await this.prisma.users.create({ data: { ...data, ...roleFields("MEMBER") } });
+    }
 
     return { user: toPublicUser(user), recoveryPassphrase };
   }
@@ -178,5 +201,6 @@ function toPublicUser(user: Users): PublicUser {
     id: user.id,
     email: user.email,
     hasRecoveryPassphrase: user.recoveryPassphraseHash !== null,
+    role: user.role,
   };
 }

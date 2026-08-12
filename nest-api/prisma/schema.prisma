@@ -44,6 +44,18 @@ enum RootAccess {
   WRITE
 }
 
+/// Who an account is to the install, not what it may do to a given path —
+/// that is still the roots' job (TRE-48).
+///
+/// An enum rather than an `isOwner` boolean because the ticket that introduced
+/// it promises a third kind of account. `isOwner: false` is a no-information
+/// state every call site would have to reinterpret when that lands; a named
+/// role is a fact the next reader can extend.
+enum UserRole {
+  OWNER
+  MEMBER
+}
+
 enum TransferOperation {
   COPY
   MOVE
@@ -91,8 +103,28 @@ model Users {
   /// Set when the user opts into passphrase recovery (TRE-7). Null means they
   /// have no recovery route and a lost password is a manual reset.
   recoveryPassphraseHash String?  @db.VarChar(255)
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+
+  /// The install's owner browses without the roots allowlist binding them
+  /// (TRE-48). MEMBER is every other account and is bound by it in full.
+  ///
+  /// The default is the point. A creation path that never thought about
+  /// privilege produces a bound account, so the failure direction is always a
+  /// refusal and never an opening.
+  role UserRole @default(MEMBER)
+
+  /// An install has at most one owner. The same trick as `Hosts.localSlot`:
+  /// MySQL has no partial unique index, so OWNER rows set this to `true` and
+  /// MEMBER rows leave it NULL — a unique index counts every NULL as distinct,
+  /// so only a second owner collides.
+  ///
+  /// It exists because deciding the owner means counting the accounts and then
+  /// creating one, and two registrations can both read zero. Granting
+  /// unrestricted filesystem access on a race is not a thing to leave to
+  /// timing, so the database refuses the second one.
+  ownerSlot Boolean? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   hosts        Hosts[]
   views        Views[]

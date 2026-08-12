@@ -19,6 +19,7 @@ import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { hash } from "bcryptjs";
 import { parseDatabaseUrl } from "../src/config/database-url";
 import { loadEnv } from "../src/config/load-env";
+import { roleFields, roleForNewAccount } from "../src/users/owner";
 import { PrismaClient } from "../generated/prisma/client";
 
 loadEnv();
@@ -49,8 +50,21 @@ async function main(): Promise<void> {
     // re-running is a clean rebuild rather than a pile-up.
     await prisma.users.deleteMany({ where: { email: DEMO_EMAIL } });
 
+    // Claimed after the delete above, which is what lets demo come back as the
+    // owner rather than quietly demoting itself on every reseed — a dev box
+    // that drifts from production on this flag is a bug that surfaces only as
+    // "it browses differently there".
+    //
+    // It asks whether the slot is free, not whether the table is empty, and
+    // this is the case that distinguishes them: where a developer has their
+    // own account and demo held the slot, the delete frees it, and counting
+    // rows would hand demo a MEMBER role and leave the box with no owner at
+    // all. Printed below either way, so a MEMBER demo is visible rather than a
+    // mystery.
+    const role = await roleForNewAccount(prisma.users);
+
     const user = await prisma.users.create({
-      data: { email: DEMO_EMAIL, passwordHash: await hash(password, 10) },
+      data: { email: DEMO_EMAIL, passwordHash: await hash(password, 10), ...roleFields(role) },
     });
 
     const local = await prisma.hosts.create({
@@ -136,7 +150,7 @@ async function main(): Promise<void> {
       ],
     });
 
-    console.log(`Seeded ${DEMO_EMAIL} with hosts: ${local.slug}, ${remote.slug}`);
+    console.log(`Seeded ${DEMO_EMAIL} (${role}) with hosts: ${local.slug}, ${remote.slug}`);
     if (generated) {
       console.log(`Generated password: ${generated}`);
       console.log("Set SEED_PASSWORD to choose your own.");

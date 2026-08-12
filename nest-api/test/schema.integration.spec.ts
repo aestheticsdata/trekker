@@ -162,6 +162,37 @@ describe("one LOCAL host per user", () => {
   });
 });
 
+describe("one owner per install", () => {
+  it("rejects a second one", async () => {
+    // The constraint TRE-48's check-then-act leans on: two registrations can
+    // both read an empty table, and the database is what stops the second one
+    // becoming an owner rather than the timing.
+    //
+    // Written to tolerate an owner already existing, because unlike localSlot
+    // this index is table-wide rather than per user — on a developer's box the
+    // seeded account usually holds the slot already.
+    const existing = await prisma.users.findFirst({ where: { ownerSlot: true } });
+    if (!existing) {
+      const userId = await makeUser();
+      await prisma.users.update({ where: { id: userId }, data: { role: "OWNER", ownerSlot: true } });
+    }
+
+    const contender = await makeUser();
+    await expect(
+      prisma.users.update({ where: { id: contender }, data: { role: "OWNER", ownerSlot: true } }),
+    ).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("lets every member leave the slot alone", async () => {
+    // A null slot has to stay distinct from every other null, or the second
+    // ordinary account an install ever creates would collide.
+    const first = await makeUser();
+    const second = await makeUser();
+
+    expect(await prisma.users.count({ where: { id: { in: [first, second] }, role: "MEMBER" } })).toBe(2);
+  });
+});
+
 describe("deleting a user", () => {
   it("takes their hosts, views, transfers and activity", async () => {
     const userId = await makeUser();

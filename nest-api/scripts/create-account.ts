@@ -15,6 +15,12 @@
  * Both are printed once and never again. There is no endpoint that returns
  * them and no way to read them back out of the database, which is the whole
  * point of storing only bcrypt hashes.
+ *
+ * The first account created on an install becomes its owner (TRE-48) and
+ * browses every path on every host it configures, without the roots allowlist
+ * binding it. The role is printed below for that reason: this is the one
+ * moment a person is looking at the account, so it is where they should learn
+ * what it is.
  */
 import { randomInt } from "node:crypto";
 import { hash } from "bcryptjs";
@@ -23,6 +29,7 @@ import { PrismaClient } from "../generated/prisma/client";
 import { parseDatabaseUrl } from "../src/config/database-url";
 import { loadEnv } from "../src/config/load-env";
 import { MIN_PASSWORD_LENGTH } from "../src/users/dto/add-user.dto";
+import { roleFields, roleForNewAccount } from "../src/users/owner";
 import { generateRecoveryPassphrase } from "../src/users/recovery-passphrase.util";
 
 // The same cost the API hashes with, so an account made here is
@@ -69,11 +76,14 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
+    const role = await roleForNewAccount(prisma.users);
+
     await prisma.users.create({
       data: {
         email,
         passwordHash: await hash(password, BCRYPT_ROUNDS),
         recoveryPassphraseHash: await hash(passphrase, BCRYPT_ROUNDS),
+        ...roleFields(role),
       },
     });
 
@@ -81,6 +91,7 @@ async function main(): Promise<void> {
     console.log(`  email       ${email}`);
     console.log(`  password    ${password}${supplied ? "  (as supplied)" : "  (generated)"}`);
     console.log(`  passphrase  ${passphrase}`);
+    console.log(`  role        ${role}${role === "OWNER" ? "  (browses without the roots allowlist)" : ""}`);
     console.log("\nWrite the passphrase down — it is the only way back into this account.\n");
   } finally {
     await prisma.$disconnect();
