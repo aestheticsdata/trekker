@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@auth/context/AuthContext";
+import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
 import { joinPath } from "@helpers/listing";
 import { parseMode } from "@helpers/permissions";
@@ -8,7 +9,7 @@ import { ApiError } from "@lib/api/client";
 import { changeMode, changeOwner, fetchEntryCount } from "@lib/api/permissions";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useMutation, useQueries } from "@tanstack/react-query";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useState } from "react";
 
 import type { FileRow } from "@lib/api/fs";
 import type { ChangeResult } from "@lib/api/permissions";
@@ -58,6 +59,42 @@ export function PermissionsModal({
   onClose: () => void;
   onApplied: () => void;
 }) {
+  const subject = subjectOf(target);
+
+  return (
+    <Overlay
+      label={`Permissions for ${subject}`}
+      onClosed={onClose}
+      panelClassName="bg-app border-line-strong w-full max-w-[30rem] overflow-hidden rounded-sm border shadow-2xl"
+    >
+      {(close) => (
+        <PermissionsPanel
+          target={target}
+          subject={subject}
+          close={close}
+          onApplied={onApplied}
+        />
+      )}
+    </Overlay>
+  );
+}
+
+/**
+ * Everything inside the panel. Split from the shell above so that `close` — the
+ * animated one, which lets the exit play before React takes the tree down — can
+ * reach the cancel button and the successful save alike.
+ */
+function PermissionsPanel({
+  target,
+  subject,
+  close,
+  onApplied,
+}: {
+  target: PermissionsTarget;
+  subject: string;
+  close: () => void;
+  onApplied: () => void;
+}) {
   const { csrfToken } = useAuth();
   const { push } = useToast();
   const { hostId, directory, entries } = target;
@@ -76,14 +113,6 @@ export function PermissionsModal({
   const [recursive, setRecursive] = useState(false);
   const [outcome, setOutcome] = useState<ChangeResult | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const octal = octalOf(bits);
   const directories = entries.filter((entry) => entry.type === "dir");
@@ -145,235 +174,228 @@ export function PermissionsModal({
         message: `${octal} · ${result.changed} ${result.changed === 1 ? "entry" : "entries"}`,
         detail: changedOwner && changedOwner !== startingOwner ? `owner ${changedOwner}` : undefined,
       });
-      onClose();
+      close();
     },
     onError: (error: unknown) => {
       setFailure(error instanceof ApiError ? error.message : "The change could not be applied.");
     },
   });
 
-  // `/` stats with an empty name — it is the one path that is all separator —
-  // so the header falls back to the path rather than rendering a blank.
-  const subject = entries.length === 1 ? first.name || joinPath(directory, "") : `${entries.length} entries`;
   const command = `chmod ${recursive ? "-R " : ""}${octal} ${entries.length > 2 ? `${entries.length} paths` : paths.join(" ")}`;
   const marked = SPECIAL.filter((special) => (bits & special.bit) !== 0);
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop is a pointer shortcut for ⎋, which the effect above already provides
-    <div
-      className="bg-chrome/80 fixed inset-0 z-40 flex items-center justify-center p-6"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Permissions for ${subject}`}
-        className="bg-app border-line-strong w-full max-w-[30rem] overflow-hidden rounded-sm border shadow-2xl"
-      >
-        <header className="bg-line border-line-strong flex h-topbar flex-none items-center gap-2.25 border-b px-3">
-          <span className="text-ink font-mono text-xs font-semibold tracking-label">chmod</span>
-          <span className="text-ink-muted min-w-0 truncate font-mono text-cmd">{subject}</span>
-          <div className="flex-1" />
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            title="Close (⎋)"
-            className="text-ink-dim font-mono text-2xs"
-          >
-            esc ✕
-          </button>
-        </header>
+    <>
+      <header className="bg-line border-line-strong flex h-topbar flex-none items-center gap-2.25 border-b px-3">
+        <span className="text-ink font-mono text-xs font-semibold tracking-label">chmod</span>
+        <span className="text-ink-muted min-w-0 truncate font-mono text-cmd">{subject}</span>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={close}
+          aria-label="Close"
+          title="Close (⎋)"
+          className="text-ink-dim font-mono text-2xs"
+        >
+          esc ✕
+        </button>
+      </header>
 
-        <div className="flex gap-4.5 px-3.5 pt-3.5 pb-2.5">
-          <div className="w-37.5 flex-none">
-            <div className="text-ink font-mono text-[2.125rem]/none font-bold tracking-[0.06em]">{octal}</div>
-            <div className="text-ink-dim font-mono text-sm/[1.6]">{symbolicOf(bits, first.type === "dir")}</div>
+      <div className="flex gap-4.5 px-3.5 pt-3.5 pb-2.5">
+        <div className="w-37.5 flex-none">
+          <div className="text-ink font-mono text-[2.125rem]/none font-bold tracking-[0.06em]">{octal}</div>
+          <div className="text-ink-dim font-mono text-sm/[1.6]">{symbolicOf(bits, first.type === "dir")}</div>
 
-            <div className="mt-2.75 flex flex-wrap gap-1">
-              {PRESETS.map((preset) => {
-                const active = octal === preset;
-                return (
-                  <button
-                    key={preset}
-                    type="button"
-                    // The preset replaces the nine cells and leaves the fourth
-                    // digit alone: a preset is a permission set, and silently
-                    // clearing a setuid bit would be a security change nobody
-                    // asked this button for.
-                    onClick={() => setBits((current) => (current & 0o7000) | (Number.parseInt(preset, 8) & 0o777))}
-                    className={`border px-1.75 py-1 font-mono text-2xs/none ${
-                      active ? "bg-accent text-on-accent border-accent" : "text-ink-muted border-line-strong"
-                    }`}
-                  >
-                    {preset}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="mt-2.75 flex flex-wrap gap-1">
+            {PRESETS.map((preset) => {
+              const active = octal === preset;
+              return (
+                <button
+                  key={preset}
+                  type="button"
+                  // The preset replaces the nine cells and leaves the fourth
+                  // digit alone: a preset is a permission set, and silently
+                  // clearing a setuid bit would be a security change nobody
+                  // asked this button for.
+                  onClick={() => setBits((current) => (current & 0o7000) | (Number.parseInt(preset, 8) & 0o777))}
+                  className={`border px-1.75 py-1 font-mono text-2xs/none ${
+                    active ? "bg-accent text-on-accent border-accent" : "text-ink-muted border-line-strong"
+                  }`}
+                >
+                  {preset}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="text-ink-muted grid grid-cols-[3.375rem_1fr_1fr_1fr] items-center gap-1 font-mono text-cmd">
+            <span />
+            {COLUMNS.map((column) => (
+              <span
+                key={column}
+                className="text-ink-faint text-center"
+              >
+                {column}
+              </span>
+            ))}
+
+            {CLASSES.map((who, group) => (
+              <Fragment key={who}>
+                <span>{who}</span>
+                {[0, 1, 2].map((column) => {
+                  const bit = 1 << (8 - (group * 3 + column));
+                  const on = (bits & bit) !== 0;
+                  return (
+                    <button
+                      key={column}
+                      type="button"
+                      aria-pressed={on}
+                      aria-label={`${COLUMNS[column]} for ${who}`}
+                      onClick={() => setBits((current) => current ^ bit)}
+                      className={`border py-1.75 text-center font-medium ${
+                        on ? "bg-accent text-on-accent border-accent" : "bg-chrome text-ink-faint border-line-strong"
+                      }`}
+                    >
+                      {on ? "rwx"[column] : "·"}
+                    </button>
+                  );
+                })}
+              </Fragment>
+            ))}
           </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="text-ink-muted grid grid-cols-[3.375rem_1fr_1fr_1fr] items-center gap-1 font-mono text-cmd">
-              <span />
-              {COLUMNS.map((column) => (
-                <span
-                  key={column}
-                  className="text-ink-faint text-center"
-                >
-                  {column}
-                </span>
-              ))}
-
-              {CLASSES.map((who, group) => (
-                <Fragment key={who}>
-                  <span>{who}</span>
-                  {[0, 1, 2].map((column) => {
-                    const bit = 1 << (8 - (group * 3 + column));
-                    const on = (bits & bit) !== 0;
-                    return (
-                      <button
-                        key={column}
-                        type="button"
-                        aria-pressed={on}
-                        aria-label={`${COLUMNS[column]} for ${who}`}
-                        onClick={() => setBits((current) => current ^ bit)}
-                        className={`border py-1.75 text-center font-medium ${
-                          on ? "bg-accent text-on-accent border-accent" : "bg-chrome text-ink-faint border-line-strong"
-                        }`}
-                      >
-                        {on ? "rwx"[column] : "·"}
-                      </button>
-                    );
-                  })}
-                </Fragment>
-              ))}
-            </div>
-
-            {/* Not in 2a: the fourth digit, which the nine cells above cannot
+          {/* Not in 2a: the fourth digit, which the nine cells above cannot
                 say anything about. Kept visually quieter than the grid — these
                 are rarely what someone came here to change, and loudly the
                 ones they must be able to see when they are set. */}
-            <div className="mt-2 flex flex-wrap items-center gap-1">
-              {SPECIAL.map((special) => {
-                const on = (bits & special.bit) !== 0;
-                return (
-                  <button
-                    key={special.label}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => setBits((current) => current ^ special.bit)}
-                    className={`border px-1.75 py-1 font-mono text-2xs/none ${
-                      on
-                        ? special.warn
-                          ? "bg-warning text-on-accent border-warning"
-                          : "bg-accent text-on-accent border-accent"
-                        : "text-ink-faint border-line-strong"
-                    }`}
-                  >
-                    {special.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="text-ink-muted mt-2.5 grid grid-cols-[3.375rem_1fr] items-center gap-1 font-mono text-cmd">
-              <span>owner</span>
-              <input
-                value={owner}
-                onChange={(event) => setOwner(event.target.value)}
-                placeholder={mixedOwners ? "mixed — user:group" : startingOwner}
-                aria-label="Owner and group"
-                className="bg-chrome border-line-strong text-ink w-full border px-2 py-1.5 font-mono text-cmd"
-              />
-            </div>
+          <div className="mt-2 flex flex-wrap items-center gap-1">
+            {SPECIAL.map((special) => {
+              const on = (bits & special.bit) !== 0;
+              return (
+                <button
+                  key={special.label}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => setBits((current) => current ^ special.bit)}
+                  className={`border px-1.75 py-1 font-mono text-2xs/none ${
+                    on
+                      ? special.warn
+                        ? "bg-warning text-on-accent border-warning"
+                        : "bg-accent text-on-accent border-accent"
+                      : "text-ink-faint border-line-strong"
+                  }`}
+                >
+                  {special.label}
+                </button>
+              );
+            })}
           </div>
-        </div>
 
-        <div className="px-3.5 pb-3">
-          <label className="flex items-center gap-2">
+          <div className="text-ink-muted mt-2.5 grid grid-cols-[3.375rem_1fr] items-center gap-1 font-mono text-cmd">
+            <span>owner</span>
             <input
-              type="checkbox"
-              checked={recursive}
-              onChange={(event) => setRecursive(event.target.checked)}
-              className="sr-only"
+              value={owner}
+              onChange={(event) => setOwner(event.target.value)}
+              placeholder={mixedOwners ? "mixed — user:group" : startingOwner}
+              aria-label="Owner and group"
+              className="bg-chrome border-line-strong text-ink w-full border px-2 py-1.5 font-mono text-cmd"
             />
-            <span
-              aria-hidden
-              className={`flex size-3.25 items-center justify-center border font-mono text-caps/none ${
-                recursive ? "bg-accent border-accent text-on-accent" : "bg-chrome border-line-strong"
-              }`}
-            >
-              {recursive ? "✓" : ""}
-            </span>
-            <span className="text-ink-soft font-mono text-cmd">recursive</span>
-            <span className="text-ink-faint font-mono text-2xs/none">{recursiveNote(recursive, counts)}</span>
-          </label>
-
-          {distinctModes > 1 && (
-            <Notice tone="warn">
-              {distinctModes} different modes are selected — applying {octal} unifies them.
-            </Notice>
-          )}
-
-          {marked.length > 0 && (
-            <Notice tone="warn">
-              {marked.map((special) => special.label).join(" and ")} will be set. This is how privilege is left behind
-              on a filesystem.
-            </Notice>
-          )}
-
-          <div className="bg-chrome border-line mt-2.5 truncate border px-2.5 py-2 font-mono text-cmd/[1.6]">
-            <span className="text-ink-link">$</span> <span className="text-ink-muted">{command}</span>
           </div>
+        </div>
+      </div>
 
-          {failure && <Notice tone="bad">{failure}</Notice>}
+      <div className="px-3.5 pb-3">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={recursive}
+            onChange={(event) => setRecursive(event.target.checked)}
+            className="sr-only"
+          />
+          <span
+            aria-hidden
+            className={`flex size-3.25 items-center justify-center border font-mono text-caps/none ${
+              recursive ? "bg-accent border-accent text-on-accent" : "bg-chrome border-line-strong"
+            }`}
+          >
+            {recursive ? "✓" : ""}
+          </span>
+          <span className="text-ink-soft font-mono text-cmd">recursive</span>
+          <span className="text-ink-faint font-mono text-2xs/none">{recursiveNote(recursive, counts)}</span>
+        </label>
 
-          {outcome && outcome.failed > 0 && (
-            <div className="mt-2.5">
-              <Notice tone="bad">
-                {outcome.changed} changed, {outcome.failed} refused:
-              </Notice>
-              {outcome.results
-                .filter((row) => !row.ok)
-                .map((row) => (
-                  <p
-                    key={row.path}
-                    className="text-ink-muted mt-1 font-mono text-2xs"
-                  >
-                    <span className="text-ink-faint">{row.path}</span> — {row.message ?? row.code}
-                  </p>
-                ))}
-            </div>
-          )}
+        {distinctModes > 1 && (
+          <Notice tone="warn">
+            {distinctModes} different modes are selected — applying {octal} unifies them.
+          </Notice>
+        )}
+
+        {marked.length > 0 && (
+          <Notice tone="warn">
+            {marked.map((special) => special.label).join(" and ")} will be set. This is how privilege is left behind on
+            a filesystem.
+          </Notice>
+        )}
+
+        <div className="bg-chrome border-line mt-2.5 truncate border px-2.5 py-2 font-mono text-cmd/[1.6]">
+          <span className="text-ink-link">$</span> <span className="text-ink-muted">{command}</span>
         </div>
 
-        <footer className="bg-chrome border-line flex h-11 flex-none items-center gap-2 border-t px-3.5">
-          <span className="text-ink-faint font-mono text-2xs/none">
-            {entries.length} {entries.length === 1 ? "path" : "paths"} in {directory}
-          </span>
-          <div className="flex-1" />
-          <button
-            type="button"
-            onClick={onClose}
-            className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
-          >
-            cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => apply.mutate()}
-            disabled={apply.isPending}
-            className="bg-accent text-on-accent px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:opacity-60"
-          >
-            {apply.isPending ? "applying…" : `apply ${octal}`}
-          </button>
-        </footer>
+        {failure && <Notice tone="bad">{failure}</Notice>}
+
+        {outcome && outcome.failed > 0 && (
+          <div className="mt-2.5">
+            <Notice tone="bad">
+              {outcome.changed} changed, {outcome.failed} refused:
+            </Notice>
+            {outcome.results
+              .filter((row) => !row.ok)
+              .map((row) => (
+                <p
+                  key={row.path}
+                  className="text-ink-muted mt-1 font-mono text-2xs"
+                >
+                  <span className="text-ink-faint">{row.path}</span> — {row.message ?? row.code}
+                </p>
+              ))}
+          </div>
+        )}
       </div>
-    </div>
+
+      <footer className="bg-chrome border-line flex h-11 flex-none items-center gap-2 border-t px-3.5">
+        <span className="text-ink-faint font-mono text-2xs/none">
+          {entries.length} {entries.length === 1 ? "path" : "paths"} in {directory}
+        </span>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={close}
+          className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
+        >
+          cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => apply.mutate()}
+          disabled={apply.isPending}
+          className="bg-accent text-on-accent px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:opacity-60"
+        >
+          {apply.isPending ? "applying…" : `apply ${octal}`}
+        </button>
+      </footer>
+    </>
   );
+}
+
+/**
+ * `/` stats with an empty name — it is the one path that is all separator — so
+ * the header falls back to the path rather than rendering a blank.
+ */
+function subjectOf({ entries, directory }: PermissionsTarget): string {
+  if (entries.length !== 1) return `${entries.length} entries`;
+  return entries[0].name || joinPath(directory, "");
 }
 
 function Notice({ tone, children }: { tone: "warn" | "bad"; children: ReactNode }) {
