@@ -61,7 +61,7 @@ const prodEnv = {
   // thing between an SSH gateway and the internet (TRE-40).
   HOST: "127.0.0.1",
 
-  // From the Zeus port registry: block 6800-6899.
+  // From the fleet's port registry: block 6800-6899.
   PORT: 6800,
 
   DATABASE_URL: "mysql://trekker:REPLACE_ME@127.0.0.1:3306/trekker",

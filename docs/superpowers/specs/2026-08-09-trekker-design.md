@@ -195,6 +195,6 @@ overlay, and the test harness.
 
 ## 10. Out of scope
 
-Real PTY. File editing in the browser. Archive create/extract. Cron and service management
-(that is Zeus). Log search and alerting (that is Iknos). Mobile layout — the app assumes a wide
-viewport and says so rather than degrading badly.
+Real PTY. File editing in the browser. Archive create/extract. Cron and service management, and
+log search and alerting — each already belongs to another app on the fleet. Mobile layout — the
+app assumes a wide viewport and says so rather than degrading badly.

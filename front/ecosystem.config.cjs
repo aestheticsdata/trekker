@@ -16,7 +16,7 @@ module.exports = {
       name: "trekker-front",
       cwd: __dirname,
       script: "./node_modules/next/dist/bin/next",
-      // From the Zeus port registry: 3005.
+      // From the fleet's port registry: 3005.
       args: "start -p 3005 -H 127.0.0.1",
       interpreter: "node",
       exec_mode: "fork",

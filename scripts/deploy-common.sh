@@ -52,15 +52,16 @@ load_deploy_config() {
   # anything. A colon-separated path list has no spaces, so it survives intact.
   REMOTE_PATH="${TREKKER_REMOTE_PATH:-/usr/local/bin:/usr/bin:/bin:/usr/sbin}"
 
-  # Deploy reporting to Zeus (optional). These name the two files ON THE SERVER
-  # that hold the ingest URL and the shared token, in the order Zeus's own API
-  # resolves them — its pm2 ecosystem file first, its .env second. The values
+  # Deploy reporting to the fleet's deploy registry (optional). These name the
+  # two files ON THE SERVER that hold the ingest URL and the shared token, in
+  # the order that app's own API resolves them — its pm2 ecosystem file first,
+  # its .env second. The values
   # are read on the box and used on the box: the token never travels, never
   # lands in this repo, and never appears on an ssh command line where `ps`
   # would show it. With neither file named, deploys work and go unreported.
   ZEUS_ECOSYSTEM_FILE="${TREKKER_ZEUS_ECOSYSTEM_FILE:-}"
   ZEUS_ENV_FILE="${TREKKER_ZEUS_ENV_FILE:-}"
-  # Trekker's slug in Zeus's port registry. The app's public name, so unlike
+  # Trekker's slug in the port registry. The app's public name, so unlike
   # the paths above it is safe as a committed default.
   ZEUS_APP_NAME="${TREKKER_ZEUS_APP_NAME:-trekker}"
 }
@@ -79,7 +80,7 @@ compute_release_metadata() {
 #
 # rsync sends the working directory and skips .git, so uncommitted edits ship.
 # Meanwhile the release directory name, the changelog on the server and the
-# report to Zeus all take their commit from `git rev-parse HEAD` — so deploying
+# deploy report all take their commit from `git rev-parse HEAD` — so deploying
 # a dirty tree puts three confident labels on the box naming a commit whose
 # content is not what is running, and the version that IS running exists nowhere
 # in git. "What is live?" then has an answer that is wrong rather than missing,
@@ -91,7 +92,7 @@ require_clean_tree() {
   if [ -n "$(git status --porcelain)" ]; then
     die "Working tree has uncommitted changes.
    A deploy ships your files as they are on disk, but labels the release, the
-   server changelog and the Zeus report with HEAD — so this would put the wrong
+   server changelog and the deploy report with HEAD — so this would put the wrong
    commit on all three. Commit or stash, then deploy."
   fi
 }
@@ -197,7 +198,7 @@ run_preflight_checks() {
     output=$(mktemp)
 
     # Not `set -e`'s job: the ERR trap installed by deploy() would report a
-    # failed deploy to Zeus before this has said which check failed and why.
+    # failed deploy upstream before this has said which check failed and why.
     if ! ( cd "$REPO_ROOT" && eval "${commands[$index]}" ) > "$output" 2>&1; then
       status=1
       echo "--- ${commands[$index]} ---" >&2
@@ -239,7 +240,7 @@ write_deploy_log() {
   # Resolved once per run, in zeus_init, before anything writes — this very
   # function moves the marker at the end of a successful deploy, so reading it
   # again here after a redeploy would measure the range from the wrong base.
-  # The report to Zeus counts its commits from the same value, which is the
+  # The deploy report counts its commits from the same value, which is the
   # other reason there is exactly one resolution.
   prev_hash="${ZEUS_BASE_HASH:-}"
   if [ -n "$prev_hash" ]; then
@@ -288,8 +289,9 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Deploy reporting to Zeus. The contract is Zeus/docs/reporting/README.md; the
-# shape is spira's deploy scripts, which are the fleet's worked example. Three
+# Deploy reporting to the fleet's deploy registry. The contract is that app's
+# own docs/reporting/README.md; the shape is a sibling app's deploy scripts,
+# which are the fleet's worked example. Three
 # rules, none optional: reporting must never fail the deploy (every step is
 # `|| true` and callers ignore the return value), fire-and-forget with a 2s
 # timeout and no retries, and the payload travels as a FILE — commit messages
@@ -382,10 +384,10 @@ zeus_commits_json() {
     END { printf "]" }'
 }
 
-# Tell Zeus what this deploy did: `zeus_report <success|failed|rolled_back> [summary]`.
+# Tell the registry what this deploy did: `zeus_report <success|failed|rolled_back> [summary]`.
 #
 # The POST happens on the deploy host over ssh rather than from here: the
-# endpoint is loopback-only and Zeus's nginx denies it from outside the box. The
+# endpoint is loopback-only and that app's nginx denies it from outside. The
 # URL and token are read there too — see load_deploy_config.
 zeus_report() {
   local status="$1"
@@ -393,14 +395,14 @@ zeus_report() {
   local commits payload remote_payload duration
 
   if [ -z "$ZEUS_ECOSYSTEM_FILE" ] && [ -z "$ZEUS_ENV_FILE" ]; then
-    log "zeus: not reported — TREKKER_ZEUS_ECOSYSTEM_FILE / TREKKER_ZEUS_ENV_FILE not set in deploy.env"
+    log "deploy-report: not sent — TREKKER_ZEUS_ECOSYSTEM_FILE / TREKKER_ZEUS_ENV_FILE not set in deploy.env"
     return 0
   fi
 
   commits=$(zeus_commits_json 2>/dev/null || echo "[]")
   duration=$(( ($(date +%s) - ${ZEUS_STARTED_EPOCH:-$(date +%s)}) * 1000 ))
   payload=$(mktemp)
-  remote_payload="/tmp/.zeus-deploy-report.$$.json"
+  remote_payload="/tmp/.trekker-deploy-report.$$.json"
 
   {
     printf '{"app":"%s","role":"%s","status":"%s"' \
@@ -426,14 +428,14 @@ set -uo pipefail
 cleanup() { rm -f "$PAYLOAD"; }
 trap cleanup EXIT
 
-# One setting, looked for in Zeus's pm2 ecosystem file first and its .env
-# second. That order is not a preference, it is the order Zeus's own API
+# One setting, looked for in the registry's pm2 ecosystem file first and its
+# .env second. That order is not a preference, it is the order that app's API
 # resolves them: pm2 injects env_production before Nest starts, and dotenv does
 # not overwrite a variable that is already there. Reading the .env alone would
 # present a token the API is not validating against the day the files disagree
 # — a 401 on every report and no other symptom.
 #
-# Neither value is ever defaulted. A fallback URL would put Zeus's port in this
+# Neither value is ever defaulted. A fallback URL would put its port in this
 # repo, the one place a port reassignment cannot rewrite — and since every
 # error below is swallowed, a stale default would fail quietly and forever.
 #
@@ -457,7 +459,7 @@ url=$(read_setting ZEUS_DEPLOY_INGEST_URL)
 token=$(read_setting ZEUS_INGEST_TOKEN)
 
 if [ -z "$url" ] || [ -z "$token" ]; then
-  echo "zeus: not reported — ZEUS_DEPLOY_INGEST_URL or ZEUS_INGEST_TOKEN found in neither" \
+  echo "deploy-report: not sent — ZEUS_DEPLOY_INGEST_URL or ZEUS_INGEST_TOKEN found in neither" \
     "$ZEUS_ECOSYSTEM_FILE nor $ZEUS_ENV_FILE"
   exit 0
 fi
@@ -470,6 +472,6 @@ code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 \
 
 # 202 is the contract. Anything else is worth one line in the deploy output and
 # nothing more — a deploy that shipped and could not say so still shipped.
-[ "$code" = "202" ] || echo "zeus: report not recorded (HTTP ${code:-none})"
+[ "$code" = "202" ] || echo "deploy-report: not recorded (HTTP ${code:-none})"
 EOF
 }

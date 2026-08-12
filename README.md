@@ -159,7 +159,7 @@ Three things worth knowing:
 
 ### Ports
 
-Allocated from the Zeus port registry, which is the authoritative source — never pick a port
+Allocated from the fleet's port registry, which is the authoritative source — never pick a port
 without claiming it there first.
 
 | | |

@@ -177,7 +177,7 @@ EOF
   trap - ERR
 
   write_deploy_log "$ZEUS_ROLE" || log "⚠️  Deploy changelog update skipped (non-fatal)"
-  zeus_report "success" || log "⚠️  Zeus was not told about this deploy (non-fatal)"
+  zeus_report "success" || log "⚠️  The deploy registry was not told about this deploy (non-fatal)"
 
   log "✅ Front deployed on port $TREKKER_FRONT_PORT"
   log "ℹ️  Previous version: $BACKUP_DIR"

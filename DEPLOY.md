@@ -50,8 +50,9 @@ and `pnpm test:db`. **This project has no `.env` files at all**, on either side.
 
 ## Ports
 
-From the Zeus port registry, which is the authoritative source. Register the two
-services there before the first deploy; do not pick a port without claiming it.
+From the fleet's port registry, which is the authoritative source. Register the
+two services there before the first deploy; do not pick a port without claiming
+it.
 
 | | |
 |---|---|
@@ -217,7 +218,7 @@ with a signed-in session to confirm which row it landed on.
 
 A deploy sends your files as they are on disk — `rsync` copies the working
 folder and skips `.git` — but three things take their commit from `HEAD`: the
-release directory name, the changelog on the server, and the report to Zeus. So
+release directory name, the changelog on the server, and the deploy report. So
 deploying a dirty tree would label all three with a commit whose content is not
 what is running, and the version that *is* running would exist nowhere in git.
 "What is live?" would then have a confident wrong answer instead of no answer.
