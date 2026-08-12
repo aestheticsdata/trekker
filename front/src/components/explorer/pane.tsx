@@ -713,9 +713,8 @@ function EmptyState({
  * no" from "outside your roots" from "unreachable" (TRE-13 §5), and each one
  * needs a different next move from the person reading it.
  *
- * 429 is the odd one out: nothing is wrong with the path being opened. Too
- * many were refused too quickly and the server has stopped answering for the
- * rest of the minute (TRE-30 §3). The detail carries when it lifts.
+ * No 429 arm: a refused path answers 403 however many times it is asked for,
+ * so there is no "come back in a minute" state for a listing to be in (TRE-50).
  */
 function ErrorState({ error, onUp }: { error: unknown; onUp: () => void }) {
   const status = error instanceof ApiError ? error.status : 0;
@@ -726,11 +725,9 @@ function ErrorState({ error, onUp }: { error: unknown; onUp: () => void }) {
       ? "permission denied"
       : status === 404
         ? "no such directory"
-        : status === 429
-          ? "too many refused paths"
-          : status === 502
-            ? "host unreachable"
-            : "listing failed";
+        : status === 502
+          ? "host unreachable"
+          : "listing failed";
 
   return (
     <Placeholder

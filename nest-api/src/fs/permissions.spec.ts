@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HttpException } from "@nestjs/common";
+import { LIMITS } from "@audit/limits";
 import { RateLimitService } from "@audit/rate-limit.service";
 import { LocalDriver } from "@hosts/drivers/local.driver";
 import type { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
@@ -367,6 +368,28 @@ describe("chmod", () => {
     // A READ root grants no writes, so this is refused before any driver call.
     expect(result).toBeInstanceOf(HttpException);
     expect(await modeOf(fenced)).toBe("0600");
+  });
+
+  it("answers 403 for a batch of refused paths, however long the batch is", async () => {
+    // The live bug TRE-50 closed. The refusal counter used to answer 429 past
+    // its threshold; `failure()` stamps `code: String(getStatus())`, and
+    // `allFailed()` maps EPERM, EACCES, "403" and ENOENT and nothing else — so
+    // a long enough all-refused batch fell through to 502 Bad Gateway and told
+    // the operator their host was unreachable when it was their own roots.
+    await mkdir(join(base, "fenced"), { recursive: true });
+    const refused: string[] = [];
+    for (let index = 0; index < LIMITS.pathRefusal.max + 5; index += 1) {
+      const path = join(base, "fenced", `batch-${index}.txt`);
+      await writeFile(path, "x");
+      refused.push(path);
+    }
+
+    const error = await serviceFor([{ path: join(base), access: "READ" }])
+      .chmod(USER_ID, HOST_ID, refused, 0o777, false)
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(403);
   });
 
   it("lets the install's owner change a file outside every configured root", async () => {

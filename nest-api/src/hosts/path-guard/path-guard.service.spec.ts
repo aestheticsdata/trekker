@@ -401,39 +401,9 @@ describe("owner bypass", () => {
     expect(error.message).toBe(PATH_REFUSED_MESSAGE);
   });
 
-  it("is never rate limited out of navigation", async () => {
-    // Through the denylist, because that is the refusal an owner actually
-    // produces in bulk: those directories sit under the API user's home, which
-    // is the LOCAL host's default home and default root, and the explorer
-    // prefetches on hover. A counted owner would be 429ed out of the very walk
-    // this ticket asked for, without ever clicking anything.
-    const guard = guardFor(narrow(), owner);
-    for (let attempt = 1; attempt <= LIMITS.pathRefusal.max + 5; attempt += 1) {
-      const error = await refusalError(guard, join(base, "install", `probe-${attempt}.js`));
-      expect(error.getStatus()).toBe(403);
-      // And it keeps explaining itself past the line, rather than degrading
-      // into the message for a limit that was not applied.
-      expect(error.message).toBe(PATH_DENYLISTED_MESSAGE);
-    }
-  });
-
-  it("still writes the one audit row when the owner crosses the line", async () => {
-    // The count is kept precisely so this row survives the bypass, and the
-    // summary must not claim the owner was blocked when they were not.
-    const { audit, rows, details } = recordingAudit();
-    const guard = guardFor(narrow(), { ...owner, audit });
-
-    for (let attempt = 1; attempt <= LIMITS.pathRefusal.max + 5; attempt += 1) {
-      await refusalError(guard, join(base, "install", `probe-${attempt}.js`));
-    }
-
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ userId: USER_ID, hostId: HOST_ID, kind: "path.refused" });
-    expect(rows[0].summary).not.toContain("Blocked");
-    // The strip renders summary and detail as one line, so the detail must not
-    // announce a limit the summary just said was not applied.
-    expect(details[0]).not.toContain("Rate limit reached");
-  });
+  // The owner's behaviour under a burst of refusals is no longer a bypass of
+  // anything — nothing is enforced against anyone — so it lives with the rest
+  // of it, under "the refusal counter" and "the path.refused activity row".
 });
 
 // ------------------------------------------------ refused-path limit (TRE-30)
@@ -453,51 +423,54 @@ async function refusalError(guard: PathGuardService, path: string): Promise<Http
   throw new Error("expected the guard to refuse");
 }
 
-describe("refused-path limit", () => {
+describe("the refusal counter", () => {
   const roots = (): RootFixture[] => [{ path: join(base, "allowed"), access: "WRITE" }];
   const { max } = LIMITS.pathRefusal;
+  // Far past the threshold, and past it by enough that a fencepost error in
+  // either direction would not be what makes this pass.
+  const WELL_PAST = 50;
 
-  it("answers 403 up to the limit and 429 past it", async () => {
+  it("answers 403 at the fiftieth refusal exactly as at the first", async () => {
+    // The whole of TRE-50. `refuse()` is only ever reached on a path the guard
+    // has already decided against, so a threshold could never withhold a path
+    // this account may open — it could only turn a permanent "you cannot open
+    // this" into a temporary "wait sixty seconds" about a directory that will
+    // never open.
     const guard = guardFor(roots());
 
-    for (let attempt = 1; attempt <= max; attempt += 1) {
-      expect((await refusalError(guard, outside(attempt))).getStatus()).toBe(403);
+    for (let attempt = 1; attempt <= WELL_PAST; attempt += 1) {
+      const error = await refusalError(guard, outside(attempt));
+      expect(error.getStatus()).toBe(403);
+      expect(error.message).toBe(PATH_REFUSED_MESSAGE);
     }
-
-    const blocked = await refusalError(guard, outside(max + 1));
-    expect(blocked.getStatus()).toBe(429);
-    // Names the limit and the wait: a 429 that says only "too many requests"
-    // leaves the caller unable to tell a second from an hour.
-    expect(blocked.message).toContain(String(max));
   });
 
-  it("still serves the paths the user is allowed to open", async () => {
-    // The property that makes this limit safe to enforce: it counts refusals,
-    // never requests. Someone mistyping a path is stopped from mistyping a
-    // twenty-first, not from doing their job.
+  it("answers 403 for the install's owner just as steadily", async () => {
+    const guard = guardFor(roots(), { role: "OWNER" });
+
+    for (let attempt = 1; attempt <= WELL_PAST; attempt += 1) {
+      // Through the denylist, because that is the refusal an owner actually
+      // produces in bulk: those directories sit under the API user's home,
+      // which is the LOCAL host's default home and default root.
+      const error = await refusalError(guard, join(base, "install", `probe-${attempt}.js`));
+      expect(error.getStatus()).toBe(403);
+      // And it keeps explaining itself all the way, rather than degrading into
+      // some other message once a counter fills.
+      expect(error.message).toBe(PATH_DENYLISTED_MESSAGE);
+    }
+  });
+
+  it("never touches a path the account is allowed to open", async () => {
+    // It counts refusals, never requests — so no amount of them costs anyone
+    // access to their own work.
     const guard = guardFor(roots());
-    for (let attempt = 1; attempt <= max + 1; attempt += 1) {
+    for (let attempt = 1; attempt <= WELL_PAST; attempt += 1) {
       await refusalError(guard, outside(attempt));
     }
 
     await expect(
       guard.validate({ driver: driver(), userId: USER_ID, path: join(base, "allowed", "file.txt"), intent: "read" }),
     ).resolves.toMatchObject({ realPath: join(base, "allowed", "file.txt") });
-  });
-
-  it("writes one audit row as the line is crossed, not one per refusal after it", async () => {
-    // Read routes are not audited, so for a filesystem walk this row is the
-    // only record there is — and a row per refusal past the limit would bury
-    // it under the very volume it is reporting.
-    const { audit, rows } = recordingAudit();
-    const guard = guardFor(roots(), { audit });
-
-    for (let attempt = 1; attempt <= max + 5; attempt += 1) {
-      await refusalError(guard, outside(attempt));
-    }
-
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ userId: USER_ID, hostId: HOST_ID, kind: "path.refused" });
   });
 
   it("refuses on its own when the counter is unavailable", async () => {
@@ -514,5 +487,71 @@ describe("refused-path limit", () => {
     for (let attempt = 1; attempt <= max + 2; attempt += 1) {
       expect((await refusalError(guard, outside(attempt))).getStatus()).toBe(403);
     }
+  });
+});
+
+/**
+ * Deliberately its own block, and named for the row rather than for the
+ * counter that writes it (TRE-50 §3).
+ *
+ * The counter stops nobody, so a later reading of it as dead code is a matter
+ * of when rather than whether. This row is the only reason it still exists —
+ * the GET routes carry no `@Audited`, so a burst of refused listings would
+ * otherwise leave no trace at all — and a test filed under "the limit" would
+ * be deleted alongside it by exactly the cleanup that needs to leave it alone.
+ */
+describe("the path.refused activity row", () => {
+  const roots = (): RootFixture[] => [{ path: join(base, "allowed"), access: "WRITE" }];
+  const { max } = LIMITS.pathRefusal;
+
+  it("is written once as the threshold is crossed, not once per refusal after it", async () => {
+    const { audit, rows } = recordingAudit();
+    const guard = guardFor(roots(), { audit });
+
+    for (let attempt = 1; attempt <= max + 5; attempt += 1) {
+      await refusalError(guard, outside(attempt));
+    }
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: USER_ID, hostId: HOST_ID, kind: "path.refused" });
+  });
+
+  it("is written for the install's owner too", async () => {
+    const { audit, rows } = recordingAudit();
+    const guard = guardFor(roots(), { role: "OWNER", audit });
+
+    for (let attempt = 1; attempt <= max + 5; attempt += 1) {
+      await refusalError(guard, join(base, "install", `probe-${attempt}.js`));
+    }
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: USER_ID, hostId: HOST_ID, kind: "path.refused" });
+  });
+
+  it("never claims anybody was stopped, because nobody was", async () => {
+    // The strip renders summary and detail as one line. A row announcing a
+    // block that did not happen would send somebody looking for a limit to
+    // raise, and there is no longer one to find.
+    const { audit, rows, details } = recordingAudit();
+    const guard = guardFor(roots(), { audit });
+
+    for (let attempt = 1; attempt <= max + 1; attempt += 1) {
+      await refusalError(guard, outside(attempt));
+    }
+
+    expect(rows[0].summary).not.toMatch(/blocked/i);
+    expect(details[0]).not.toMatch(/rate limit|try again/i);
+    expect(details[0]).toContain("Nothing was withheld");
+  });
+
+  it("is not written before the threshold", async () => {
+    const { audit, rows } = recordingAudit();
+    const guard = guardFor(roots(), { audit });
+
+    for (let attempt = 1; attempt <= max; attempt += 1) {
+      await refusalError(guard, outside(attempt));
+    }
+
+    expect(rows).toHaveLength(0);
   });
 });

@@ -13,12 +13,23 @@
  * declared now because the limit and the operation should land together rather
  * than the limit being remembered afterwards, and because `TO_ATTACH` below
  * turns "remembered afterwards" into a listed obligation instead of a hope.
+ *
+ * **And one of them limits nothing, ever.** `pathRefusal` counts and reports;
+ * it refuses nobody. It keeps its place here because it is still a threshold
+ * on a Redis counter and still spends through `RateLimitService`, and because
+ * splitting it out would leave the one file that answers "what does this
+ * install actually allow" no longer answering it in full. Its own comment says
+ * what it does. See TRE-50.
  */
 
 export interface LimitRule {
   /** Redis key prefix. Stable — renaming one silently resets every counter. */
   readonly key: string;
-  /** What the refusal tells the user it hit. Written for a person. */
+  /**
+   * What the refusal tells the user it hit. Written for a person — except for
+   * `pathRefusal`, which refuses nobody and whose label reaches only the
+   * activity row it writes.
+   */
   readonly label: string;
   readonly max: number;
   readonly windowSeconds: number;
@@ -52,30 +63,29 @@ export const LIMITS = {
   /**
    * Paths refused by the roots allowlist (TRE-11).
    *
+   * **The one entry here that stops nobody.** It is a detector, not a limit:
+   * `max` is the number of refusals within `windowSeconds` at which a single
+   * `path.refused` activity row is written, and nothing else. Crossing it
+   * changes no answer — a refused path returns 403 at the fiftieth attempt
+   * exactly as at the first, for every account (TRE-50).
+   *
+   * It was a limit until TRE-50, and the reason it stopped being one is worth
+   * keeping: `PathGuardService.refuse()` is only ever reached on a path the
+   * guard has already decided against, so a full window never withheld
+   * anything an account could otherwise have opened. It only turned that
+   * path's permanent 403 into a temporary 429, which reads as the app being
+   * broken rather than the directory being closed.
+   *
    * Spent inside `PathGuardService`, not by a route: refusals are decided
    * below the routing layer, and by the time the interceptor sees the 403 the
-   * decision has already been made. It is the one limit in this table that a
+   * decision has already been made. It is the one rule in this table that a
    * `@Audited` decorator does not name.
    *
-   * Counts refusals, never requests — so a person who mistypes a path twenty
-   * times is stopped from mistyping a twenty-first, and every path they are
-   * actually allowed to open keeps working. A burst of these is either a
-   * broken client or someone walking the filesystem looking for a way out of
-   * the roots; the server cannot tell which, and does not need to.
-   *
-   * Counted for every account and enforced against every account but the
-   * install's owner (TRE-48). The owner's uses are still counted rather than
-   * skipped, for two reasons: the count is what writes the single audit row a
-   * filesystem walk ever produces, and a limit that nothing spends from is
-   * precisely what `audit-coverage.spec.ts` exists to catch.
-   *
-   * Worth knowing before the first restricted account arrives: this counts
-   * refusal events, not distinct paths, and the explorer prefetches on hover
-   * and on arrow-key movement. Passing the cursor over one forbidden
-   * directory a few times spends several of the twenty on a single fact, so a
-   * restricted account will reach the ceiling far sooner than its user would
-   * predict. Counting distinct paths instead is the real fix — TRE-50 — and is
-   * not a number to raise here.
+   * The row is worth having because the GET routes carry no `@Audited` at all,
+   * so a burst of refused listings would otherwise leave no trace. A burst is
+   * either a broken client or someone walking the filesystem looking for a way
+   * out of the roots; the server cannot tell which, and the row is what lets
+   * somebody else decide later.
    */
   pathRefusal: rule("limit:path", "refused paths", 20, 60, "TREKKER_LIMIT_PATH_REFUSALS_PER_MIN"),
 

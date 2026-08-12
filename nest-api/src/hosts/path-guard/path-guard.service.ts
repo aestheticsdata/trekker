@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { ForbiddenException, HttpException, HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
+import { ForbiddenException, HttpException, Inject, Injectable, Logger } from "@nestjs/common";
 import { AuditService } from "@audit/audit.service";
 import { LIMITS } from "@audit/limits";
 import { RateLimitService } from "@audit/rate-limit.service";
@@ -338,16 +338,27 @@ export class PathGuardService {
    * The single exit for every refusal — and, because of that, the only place a
    * refusal can be counted (TRE-30 §3).
    *
-   * The limit lives here rather than on the routes because refusals are
+   * The counter lives here rather than on the routes because refusals are
    * decided below the routing layer: the audit interceptor sees a 403 come out
    * of a handler long after the guard has made up its mind, and on a read route
    * it does not look at all. Every path decision in the application funnels
    * through this method, so counting here is the one placement that cannot be
    * bypassed by adding a route.
    *
-   * Past the limit the answer becomes a 429. That discloses nothing the 403 did
-   * not: it is triggered by how many paths were refused, never by which — a
-   * path that exists and a path that does not still read identically.
+   * It counts, and it does not stop (TRE-50). Every call site is the operand
+   * of a `throw` inside `validate()`, on a path the guard has already decided
+   * against, so a threshold here could never withhold a path an account is
+   * allowed to open. All it could do is turn a permanent "you cannot open
+   * this" into a temporary "wait sixty seconds" about a directory that will
+   * never open — which reads as the app being broken rather than the folder
+   * being closed, the failure TRE-30 §3 set out to avoid. It bought nothing
+   * either way: the syscalls are already spent by the time the count is asked
+   * for, and all four categories answer with one identical line, so there is
+   * no disclosure to ration.
+   *
+   * What the count is worth is the single activity row it writes as the
+   * threshold is crossed. The GET routes carry no `@Audited`, so for a burst
+   * of refused listings that row is the only record there is.
    */
   private async refuse(
     category: string,
@@ -360,58 +371,36 @@ export class PathGuardService {
     this.logger.warn(`refused (${category}) user=${userId} host=${hostId} path=${JSON.stringify(requestedPath)}`);
 
     // Per user, not per session: signing in again mints a new session, so a
-    // per-session counter is no counter at all. The limit is named literally
+    // per-session counter is no counter at all. The rule is named literally
     // here rather than through a local alias — `audit-coverage.spec.ts` reads
-    // the call site to tell an enforced limit from a documented one.
-    // The uniform line, except for the owner meeting the denylist — the only
-    // refusal they can still get from a path that exists, and therefore the
-    // only one worth explaining. See PATH_DENYLISTED_MESSAGE.
-    const forbidden = () =>
-      new ForbiddenException(owner && category === "denylist" ? PATH_DENYLISTED_MESSAGE : PATH_REFUSED_MESSAGE);
-
+    // the call site to tell an attached rule from a merely documented one.
     const verdict = await this.limits.consume(LIMITS.pathRefusal, userId);
-    if (verdict.allowed) return forbidden();
 
-    const message = RateLimitService.describe(LIMITS.pathRefusal, verdict.resetSeconds);
-
-    // One row per window, written as the line is crossed and not once per
+    // One row per window, written as the threshold is crossed and not once per
     // refusal after it. A walker producing a thousand refusals a minute would
     // otherwise write a thousand identical rows and bury the signal under its
-    // own volume — and read routes are not audited at all, so for a filesystem
-    // walk this row is the only record there is.
+    // own volume.
     if (verdict.count === LIMITS.pathRefusal.max + 1) {
       await this.audit.refused(
         {
           userId,
           hostId,
           kind: "path.refused",
-          // The owner was not blocked, and the row must not say they were. It
-          // is still written: a burst of refusals is worth a record whoever
-          // produced it, and for a filesystem walk it is the only one there is.
-          summary: owner
-            ? `${LIMITS.pathRefusal.max} refused paths within the limit window`
-            : `Blocked: ${LIMITS.pathRefusal.max} refused paths within the limit window`,
+          summary: `${LIMITS.pathRefusal.max} refused paths within the counter's window`,
           payload: { category, path: requestedPath },
         },
-        // Same reason as the summary: `message` describes a limit being
-        // enforced, and for an owner it was not. The row is read as one thing
-        // — the strip renders summary and detail together — so a detail
-        // contradicting its own summary is worse than no detail at all.
-        owner ? `${LIMITS.pathRefusal.max} refused paths, not limited: this account owns the install` : message,
+        // Says plainly that nothing was withheld. A detail borrowed from a rate
+        // limiter would describe an enforcement that does not happen, and the
+        // strip renders summary and detail together — so a detail contradicting
+        // the behaviour is worse than no detail at all.
+        `${LIMITS.pathRefusal.max} refused paths in ${LIMITS.pathRefusal.windowSeconds}s. Nothing was withheld: ` +
+          "a refused path answers 403 however many times it is asked for.",
       );
     }
 
-    // The owner is counted but never stopped (TRE-48).
-    //
-    // Refusals survive the roots bypass, and the denylist is the one that
-    // survives in bulk: those directories sit under the API user's home,
-    // which is the LOCAL host's default home and default root — the directory
-    // the pane opens on. The explorer prefetches on hover, so an owner moving
-    // the cursor across the install tree spends refusals several at a time
-    // without ever clicking. Without this line the very walk the ticket asked
-    // for would 429 them out of navigation in seconds.
-    if (owner) return forbidden();
-
-    return new HttpException(message, HttpStatus.TOO_MANY_REQUESTS);
+    // The uniform line, except for the owner meeting the denylist — the only
+    // refusal they can still get from a path that exists, and therefore the
+    // only one worth explaining. See PATH_DENYLISTED_MESSAGE.
+    return new ForbiddenException(owner && category === "denylist" ? PATH_DENYLISTED_MESSAGE : PATH_REFUSED_MESSAGE);
   }
 }
