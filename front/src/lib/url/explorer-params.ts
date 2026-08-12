@@ -104,7 +104,10 @@ export const explorerParams = {
   active: parseAsNumberLiteral([0, 1] as const).withDefault(0),
   split: parseAsStringLiteral(SPLIT_MODES).withDefault("split"),
   view: parseAsStringLiteral(VIEW_MODES).withDefault("detail"),
-  heat: parseAsFlag.withDefault(false),
+  // On by default (TRE-53). The heat map is the reason the share column is
+  // there; off, that column carries nothing until you find the switch, which
+  // is the same mistake `insp` below already had to correct.
+  heat: parseAsFlag.withDefault(true),
   // Visible by default, as 2a draws it (`inspector: this.props.showInspector ??
   // true`). It shipped hidden in TRE-17, which made the panel — and the only
   // way into the permissions modal — reachable solely by a shortcut nobody had
@@ -121,3 +124,18 @@ export const explorerParams = {
     .withDefault("")
     .withOptions({ limitUrlUpdates: debounce(400) }),
 };
+
+/**
+ * Every key this module can put in a query string.
+ *
+ * Session restore (TRE-51) reads it to tell a cold open from a link, and it has
+ * to be the complete list: a key missing here makes a shared link look bare, so
+ * the recipient's own last position replaces part of it and they get a
+ * perfectly plausible explorer pointed at the wrong thing. Derived from the
+ * maps rather than written out again, because the copy is what would rot.
+ */
+export const EXPLORER_URL_KEYS: readonly string[] = [
+  ...Object.values(LEFT_KEYS),
+  ...Object.values(RIGHT_KEYS),
+  ...Object.keys(explorerParams),
+];
