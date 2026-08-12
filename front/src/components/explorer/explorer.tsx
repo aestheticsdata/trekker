@@ -16,6 +16,7 @@ import { useToast } from "@components/ui/toast";
 import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
 import { fetchListing, fetchStat } from "@lib/api/fs";
 import { QUERY_KEYS } from "@lib/query/keys";
+import { warmDirectory } from "@lib/query/warm-directory";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useState } from "react";
 
@@ -381,14 +382,7 @@ export function Explorer({
   // opened, whether the pointer is a mouse or the keyboard cursor.
   const prefetch = (pane: PaneView, row: FileRow) => {
     if (row.type !== "dir" || pane.hostId === null) return;
-    const path = joinPath(pane.path, row.name);
-    queryClient.prefetchQuery({
-      queryKey: [QUERY_KEYS.DIRECTORY, pane.hostId, path],
-      queryFn: () => fetchListing(pane.hostId as string, path),
-      staleTime: STALE_MS,
-      // A guess that fails should cost one request, not four.
-      retry: false,
-    });
+    warmDirectory(queryClient, pane.hostId, joinPath(pane.path, row.name), STALE_MS);
   };
 
   // The keyboard's half of the same idea: arrowing onto a directory warms it.
@@ -396,12 +390,7 @@ export function Explorer({
   const activeHostId = activePane.hostId;
   useEffect(() => {
     if (!cursorDirectory || activeHostId === null) return;
-    queryClient.prefetchQuery({
-      queryKey: [QUERY_KEYS.DIRECTORY, activeHostId, cursorDirectory],
-      queryFn: () => fetchListing(activeHostId, cursorDirectory),
-      staleTime: STALE_MS,
-      retry: false,
-    });
+    warmDirectory(queryClient, activeHostId, cursorDirectory, STALE_MS);
   }, [cursorDirectory, activeHostId, queryClient]);
 
   const prefetchFromEvent = (pane: PaneView, rows: readonly FileRow[], target: EventTarget | null) => {
