@@ -9,5 +9,7 @@ export const QUERY_KEYS = {
   BOOKMARKS: "bookmarks",
   DIRECTORY: "directory",
   ENTRY: "entry",
+  /** What a recursive change would touch — asked only when the box is ticked. */
+  ENTRY_COUNT: "entryCount",
   ACTIVITY: "activity",
 } as const;

@@ -1,8 +1,9 @@
-import { ForbiddenException, HttpException, HttpStatus, Injectable, Logger } from "@nestjs/common";
-import { type DriverError, isDriverError } from "@hosts/drivers/driver-error";
+import { ForbiddenException, Injectable, Logger } from "@nestjs/common";
+import { isDriverError } from "@hosts/drivers/driver-error";
 import type { FileEntry, HostDriver } from "@hosts/drivers/host-driver";
 import { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
 import { PathGuardService, type ResolvedRoot, withinRoots } from "@hosts/path-guard/path-guard.service";
+import { toHttp } from "@fs/driver-http";
 import { type FileRow, type FileRowDetail, toDetail, toRow } from "@fs/file-row";
 import { IdResolverService } from "@fs/id-resolver.service";
 
@@ -153,11 +154,7 @@ export class FsService {
     return this.run(() => this.factory.forHost(hostId, userId));
   }
 
-  /**
-   * Driver failures become the three responses the client switches on
-   * (TRE-13 §5). A permission denial must never reach the UI as an empty
-   * directory — that is the one mapping that would quietly lie.
-   */
+  /** Driver failures become HTTP through the shared table in driver-http.ts. */
   private async run<T>(operation: () => Promise<T>): Promise<T> {
     try {
       return await operation();
@@ -166,35 +163,5 @@ export class FsService {
       if (isDriverError(error)) throw toHttp(error);
       throw error;
     }
-  }
-}
-
-function toHttp(error: DriverError): HttpException {
-  const body = (status: HttpStatus, message: string): HttpException =>
-    new HttpException({ statusCode: status, code: error.code, message }, status);
-
-  switch (error.code) {
-    case "ENOENT":
-      return body(HttpStatus.NOT_FOUND, "No such file or directory");
-    case "EACCES":
-    case "EPERM":
-      // 403 with a code of its own: distinguishable from the guard's refusal,
-      // which means "outside your roots" rather than "the host said no".
-      return body(HttpStatus.FORBIDDEN, "Permission denied on the host");
-    case "ENOTDIR":
-      return body(HttpStatus.BAD_REQUEST, "Not a directory");
-    // TRE-10 §3: the mismatch must read as its own thing. The `code` already
-    // distinguished it, but the message did not, and the message is what a
-    // person sees — telling someone to check the network during a host key
-    // change is the worst possible advice, because the host answered fine.
-    case "EHOSTKEY":
-      return body(HttpStatus.BAD_GATEWAY, "The host key does not match the pinned fingerprint");
-    case "EAUTH":
-      return body(HttpStatus.BAD_GATEWAY, "The host refused the credential");
-    case "EUNREACHABLE":
-    case "ETIMEDOUT":
-      return body(HttpStatus.BAD_GATEWAY, "The host could not be reached");
-    default:
-      return body(HttpStatus.INTERNAL_SERVER_ERROR, "The host returned an unexpected error");
   }
 }

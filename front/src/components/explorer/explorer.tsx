@@ -10,6 +10,7 @@ import {
   openTarget,
   upTarget,
 } from "@components/explorer/pane-state";
+import { PermissionsModal } from "@components/explorer/permissions-modal";
 import { HostManager } from "@components/hosts/host-manager";
 import { useToast } from "@components/ui/toast";
 import { globToRegExp, joinPath, resolveTarget, sortRows } from "@helpers/listing";
@@ -20,6 +21,7 @@ import { useEffect, useReducer, useState } from "react";
 
 import type { PaneCallbacks } from "@components/explorer/pane";
 import type { PaneIndex, PaneView } from "@components/explorer/pane-state";
+import type { PermissionsTarget } from "@components/explorer/permissions-modal";
 import type { SplitMode } from "@components/shell/toolbar";
 import type { SortKey } from "@helpers/listing";
 import type { FileRow } from "@lib/api/fs";
@@ -97,6 +99,11 @@ export function Explorer({
   const queryClient = useQueryClient();
   /** Set once a host has been bound automatically, so it happens per pane once. */
   const [seeded, setSeeded] = useState<[boolean, boolean]>([false, false]);
+  // What the permissions modal is aimed at, captured when it opens (TRE-21).
+  // A snapshot rather than a live read of the selection: the listing refreshes
+  // under it the moment a change lands, and a panel whose target moves while it
+  // is open is a panel that applies to something other than what it says.
+  const [permissionsFor, setPermissionsFor] = useState<PermissionsTarget | null>(null);
 
   const views: [PaneView, PaneView] = [
     { ...memory.panes[0], hostId: panes[0].host, path: panes[0].path, sort: panes[0].sort, dir: panes[0].dir },
@@ -438,6 +445,23 @@ export function Explorer({
           error={activeView.listing.error}
           now={now}
           onClose={() => onInspectorChange(false)}
+          onEditPermissions={() => {
+            if (activePane.hostId === null || inspected.length === 0) return;
+            setPermissionsFor({ hostId: activePane.hostId, directory: activePane.path, entries: inspected });
+          }}
+        />
+      )}
+
+      {permissionsFor && (
+        <PermissionsModal
+          target={permissionsFor}
+          onClose={() => setPermissionsFor(null)}
+          onApplied={() => {
+            // Both caches: the listing carries the mode column, and the
+            // inspector reads its own stat for the selected entry.
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, permissionsFor.hostId] });
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.ENTRY, permissionsFor.hostId] });
+          }}
         />
       )}
 

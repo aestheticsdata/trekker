@@ -109,6 +109,13 @@ const prodEnv = {
   // TREKKER_LIMIT_HOST_MUTATIONS_PER_MIN: "30",
   // TREKKER_LIMIT_PASSWORD_CHANGES_PER_HOUR: "5",
   // TREKKER_LIMIT_PATH_REFUSALS_PER_MIN: "20",
+  // TREKKER_LIMIT_PERMISSION_CHANGES_PER_MIN: "20",
+  //
+  // How many entries a recursive chmod or chown may touch before it is refused
+  // with the count instead of started (TRE-21). Not a load setting: it is what
+  // stands between a mis-aimed "recursive" and an hour of changes nobody
+  // wanted. Read per request, so raising it takes effect without a restart.
+  // TREKKER_RECURSIVE_ENTRY_CEILING: "10000",
   //
   // Declared but not yet attached — the operations they govern do not exist.
   // Each is removed from `TO_ATTACH` by the ticket named beside it:

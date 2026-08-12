@@ -64,6 +64,17 @@ export const LIMITS = {
    * the roots; the server cannot tell which, and does not need to.
    */
   pathRefusal: rule("limit:path", "refused paths", 20, 60, "TREKKER_LIMIT_PATH_REFUSALS_PER_MIN"),
+
+  /**
+   * chmod and chown (TRE-21), sharing one budget the way the host mutations do
+   * — they are one capability from an attacker's side, and a script that walks
+   * a filesystem making everything world-writable alternates between them.
+   *
+   * Per request, not per entry: one recursive call may change ten thousand
+   * files, which is what the entry ceiling is for. This counter bounds how many
+   * times someone may aim that, and 20 a minute is far past deliberate use.
+   */
+  permissionChange: rule("limit:perm", "permission changes", 20, 60, "TREKKER_LIMIT_PERMISSION_CHANGES_PER_MIN"),
 } as const satisfies Record<string, LimitRule>;
 
 /**

@@ -68,6 +68,7 @@ export function Inspector({
   error,
   now,
   onClose,
+  onEditPermissions,
 }: {
   host: HostView | null;
   /** The active pane's directory. */
@@ -85,6 +86,8 @@ export function Inspector({
   /** Passed in so the panel ages against the same instant as the rows. */
   now: number;
   onClose: () => void;
+  /** Opens the permissions modal on whatever is selected (TRE-21). */
+  onEditPermissions: () => void;
 }) {
   const one = selected.length === 1 ? selected[0] : null;
 
@@ -164,9 +167,13 @@ export function Inspector({
           // a folder of 40 000 files would otherwise report the cap as a fact.
           items={folder.data?.meta.totalEntries ?? null}
           now={now}
+          onEditPermissions={onEditPermissions}
         />
       ) : (
-        <SelectionPanel selected={selected} />
+        <SelectionPanel
+          selected={selected}
+          onEditPermissions={onEditPermissions}
+        />
       )}
     </aside>
   );
@@ -248,6 +255,7 @@ function EntryPanel({
   detail,
   items,
   now,
+  onEditPermissions,
 }: {
   host: HostView;
   entry: FileRow;
@@ -256,6 +264,7 @@ function EntryPanel({
   /** A selected directory's child count, once it is known. */
   items: number | null;
   now: number;
+  onEditPermissions: () => void;
 }) {
   const isLink = entry.type === "link";
 
@@ -298,6 +307,7 @@ function EntryPanel({
         <Permissions
           mode={entry.mode}
           line={`${entry.mode} · ${entry.owner}:${entry.group}`}
+          onEdit={onEditPermissions}
         />
       </Scroller>
 
@@ -321,7 +331,13 @@ function EntryPanel({
  * what tells you, before a bulk chmod, whether you are about to flatten three
  * different permission sets into one.
  */
-function SelectionPanel({ selected }: { selected: readonly FileRow[] }) {
+function SelectionPanel({
+  selected,
+  onEditPermissions,
+}: {
+  selected: readonly FileRow[];
+  onEditPermissions: () => void;
+}) {
   const folders = selected.filter((row) => row.type === "dir").length;
   const bytes = selected.reduce((sum, row) => sum + row.size, 0);
   const modes = [...new Set(selected.map((row) => row.mode))].sort();
@@ -366,6 +382,7 @@ function SelectionPanel({ selected }: { selected: readonly FileRow[] }) {
       <Permissions
         mode={selected[0].mode}
         line={modes.join(" · ")}
+        onEdit={onEditPermissions}
       />
     </Scroller>
   );
@@ -488,12 +505,34 @@ function Heading({ children }: { children: ReactNode }) {
  * it — it carries the owner too, and it is the only place the exact mode is
  * printed as text.
  */
-function Permissions({ mode, line }: { mode: string | null; line: string | null }) {
+function Permissions({
+  mode,
+  line,
+  onEdit,
+}: {
+  mode: string | null;
+  line: string | null;
+  /** Present only where there is a selection to change (TRE-21). */
+  onEdit?: () => void;
+}) {
   const rows = mode === null ? null : permissionRows(mode);
 
   return (
     <section className="px-2.5 pt-2.25 pb-2.5">
-      <Heading>PERMISSIONS</Heading>
+      {/* Baseline-aligned, as 2a draws it: the link is the same row as the
+          heading, not a control floating beside it. */}
+      <div className="flex items-baseline justify-between">
+        <Heading>PERMISSIONS</Heading>
+        {onEdit && (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
+          >
+            edit
+          </button>
+        )}
+      </div>
 
       {rows === null || mode === null ? (
         <p className="text-ink-faint font-mono text-2xs">unknown</p>

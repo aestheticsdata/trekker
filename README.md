@@ -219,6 +219,24 @@ A host that will not surrender those files shows numeric ids, which is what `ls 
 The cap is 10,000 entries, above which the response sets `meta.truncated` and reports the real
 total rather than quietly ending short.
 
+### Changing permissions
+
+`POST /api/fs/chmod` and `POST /api/fs/chown` take a host, a list of paths and a recursive flag.
+Both validate every path through the roots allowlist as a **write**, and both answer per path: a
+batch where three of ten fail names those three and why, because a single 403 for the batch would
+leave nobody able to tell which files are now different.
+
+Recursive is bounded. `GET /api/fs/count` walks the tree first and the modal shows the number
+before the box is worth ticking; past the ceiling — 10,000 entries, `TREKKER_RECURSIVE_ENTRY_CEILING`
+— the change is refused with the count rather than started. The walk never follows or changes a
+symlink (`chmod` follows them, and a link three levels down is a way out of the roots the guard
+never validated), and it applies children before their parent, because removing `x` from a
+directory is exactly what makes its children unreachable.
+
+`chown` needs root for anything but a no-op, so `EPERM` is the expected answer for an unprivileged
+user rather than a malfunction: it comes back as "requires elevation" and points at the sudo
+toggle (TRE-29), not as a generic denial.
+
 ## Tracking
 
 Tickets live in Spira under the `TRE` key. Code comments reference them by identifier.
