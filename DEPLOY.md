@@ -67,13 +67,68 @@ process does. After a deploy, `ss -ltn` on the server must show both ports on
 
 ## First install
 
-On the server, as the deploy user:
+Once per machine. Steps 1–4 are on the server, 5–7 on your workstation.
+
+### 1. What has to be on the server already
+
+Nothing in this repo installs these, and each one fails at a different point:
+
+| | Without it |
+|---|---|
+| Node, pnpm | `❌ ERROR: pnpm not found on the server`, before anything is built |
+| PM2 | `❌ ERROR: pm2 not found on the server`, after the release switch |
+| MySQL | the deploy reaches `prisma migrate deploy` and stops there |
+| Redis | the deploy runs to completion and the API comes up **degraded** |
+| nginx, certbot | the deploy succeeds and the subdomain answers nothing |
+
+Redis is the one to check twice. It is the only dependency whose absence used to
+let a deploy report success: `REDIS_URL` merely has to be *set* for the API to
+boot, and nothing connects to it until a session is used. The deploy now reads
+`status` out of `/api/health` rather than just checking it answered, so a missing
+Redis fails the deploy — but it fails it at the very last step, after a full
+build. Cheaper to install it first.
+
+### 2. The base directory, owned by the deploy user
+
+The scripts create everything under `TREKKER_REMOTE_ROOT` themselves — releases,
+backups, deploy logs. What they cannot do is create that root inside a root-owned
+`/var/www`, so do that once:
 
 ```bash
-mkdir -p /var/www/trekker/nest-api
+sudo mkdir -p /var/www/trekker && sudo chown deploy:deploy /var/www/trekker
 ```
 
-Create the database and its user:
+Nothing else needs creating by hand, and in particular **there is no `nest-api`
+directory at that level**. The API is deployed to `<root>/api/nest-api`, and
+`ecosystem.config.js` lives at `<root>` itself — one level above the directory
+that gets swapped, which is what lets it survive a release switch.
+
+### 3. Make PM2 come back after a reboot
+
+Two separate mechanisms, and having only one of them is the usual way to find
+this out at the worst possible moment:
+
+- **`pm2 save`** writes the running process list to `~/.pm2/dump.pm2`. Both
+  deploy scripts already do this on every run, so it needs no attention.
+- **`pm2 startup`** installs a systemd service that starts PM2 itself at boot and
+  replays that list. Nothing in this repo does it. Without it, a reboot leaves
+  both processes down until someone starts them by hand — `pm2 save` alone does
+  not survive a restart.
+
+Run it once, as the deploy user. It prints a `sudo ...` line; run that line:
+
+```bash
+pm2 startup
+```
+
+Then confirm it took — `enabled` is the answer you want, and `not-found` means
+the `sudo` line was printed but never run:
+
+```bash
+systemctl is-enabled pm2-$USER
+```
+
+### 4. Database
 
 ```sql
 CREATE DATABASE trekker CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -84,29 +139,53 @@ GRANT ALL PRIVILEGES ON trekker.* TO 'trekker'@'127.0.0.1';
 No shadow database here — that is a `migrate dev` concern, and production only
 ever runs `migrate deploy`, which needs nothing beyond the app's own schema.
 
-Locally, fill in the two untracked files:
+### 5. What has to be on your workstation
+
+`pnpm`, an SSH key that reaches the deploy user without a passphrase prompt, and
+**`gitleaks`** — the pre-deploy gate refuses to ship without it rather than
+treating a sweep it could not run as a sweep that passed:
+
+```bash
+brew install gitleaks
+```
+
+### 6. The two untracked config files
 
 ```bash
 cp deploy.env.example deploy.env && cp nest-api/ecosystem.config.example.js nest-api/ecosystem.config.js
 ```
 
-`ecosystem.config.js` needs every variable the API requires, `PORT` included —
+`deploy.env` needs the SSH target, the remote root and the two ports. Read its
+comments on `TREKKER_REMOTE_PATH` before filling it in — an SSH session that does
+not source a profile has neither `pnpm` nor `pm2` on `PATH`, and that variable is
+the fix.
+
+`ecosystem.config.js` needs every variable the API reads, `PORT` included;
 `env.validation.ts` refuses to boot without them and names the one that is
-missing. Generate the secrets on the server, never on a workstation:
+missing. Two of them are generated rather than chosen, both **on the server**,
+then pasted into this file — it is untracked and never committed, and the deploy
+copies it up:
 
 ```bash
-openssl rand -base64 48        # SESSION_SECRET
+openssl rand -base64 48                                                          # SESSION_SECRET
+node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"  # TREKKER_MASTER_KEY
 ```
 
-Then deploy the API first — the front's health panel expects it to answer:
+`FRONTEND_URL` is the real subdomain, not a placeholder — it is what the API
+allows as an origin.
+
+### 7. Deploy, API first
+
+The front's health panel expects the API to answer:
 
 ```bash
 ./nest-api/deploy-api.sh
 ./front/deploy-front.sh
 ```
 
-Finally `pm2 save` so both come back after a reboot (the scripts already do this,
-it is listed here for the manual case).
+Each ends by checking the half it just shipped actually works. Then set up nginx
+below — until it exists, both processes are listening on loopback and nothing
+external can reach them.
 
 ## Routine deploy
 
@@ -126,9 +205,13 @@ what is running, and the version that *is* running would exist nowhere in git.
 
 Commit first. That is the whole rule.
 
-Each ends by checking the thing it just shipped actually answers: the API on
-`/api/health`, the front on `/`. A deploy that reports success while the service
-is down is the failure this prevents.
+Each ends by checking the half it just shipped actually works. The front has to
+answer `/` with a 200 or a redirect. The API has to report `"status":"ok"` from
+`/api/health` — not merely answer it, since that endpoint returns 200 even while
+degraded so it can name the dependency that is down instead of collapsing every
+failure into a 503. An API that cannot reach MySQL is a running process that
+serves no login, no host list and no session, and a green deploy over it is the
+failure this prevents.
 
 ### The gate
 
@@ -204,6 +287,23 @@ one level deep — older releases are under `*-releases/` and are restored by ha
 
 One subdomain, TLS through the existing certbot setup, `/api/` to the API and
 everything else to the front.
+
+Write the server block to `/etc/nginx/sites-available/trekker`, symlink it into
+`sites-enabled`, then let certbot add the TLS listener and the redirect:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/trekker /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d trekker.example.com
+```
+
+`nginx -t` before every reload. A reload of a config that does not parse is
+refused and the old one keeps serving, so the damage is not immediate — which is
+the problem: the failure looks like your changes having no effect. The bill
+arrives at the next restart, when nginx will not come up at all, for every site
+on the box rather than this one.
+
+The `location` blocks, inside that server block:
 
 ```nginx
 location / {

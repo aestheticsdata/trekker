@@ -221,14 +221,30 @@ EOF
     API_PORT="$TREKKER_API_PORT" \
     'bash -s' << 'EOF'
 set -Eeuo pipefail
+body=""
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
-  if body=$(curl -fsS --max-time 5 "http://127.0.0.1:$API_PORT/api/health" 2>/dev/null); then
-    echo "✅ health: $body"
-    exit 0
-  fi
+  body=$(curl -fsS --max-time 5 "http://127.0.0.1:$API_PORT/api/health" 2>/dev/null || true)
+
+  # Read `status`, not the HTTP code. The endpoint answers 200 even when a
+  # dependency is down, on purpose: it names the broken one in the body rather
+  # than collapsing every failure into a 503 that cannot say which (see
+  # health.service.ts). So "it answered" is not the check — an API that cannot
+  # reach MySQL serves no login, no host list and no session, which is down by
+  # every measure this step exists to catch.
+  case "$body" in
+    *'"status":"ok"'*)
+      echo "✅ health: $body"
+      exit 0
+      ;;
+  esac
   sleep 2
 done
-echo "❌ ERROR: API did not answer /api/health after 20s" >&2
+
+if [ -n "$body" ]; then
+  echo "❌ ERROR: API is up but degraded after 20s: $body" >&2
+else
+  echo "❌ ERROR: API did not answer /api/health after 20s" >&2
+fi
 exit 1
 EOF
 
