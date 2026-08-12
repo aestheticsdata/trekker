@@ -58,6 +58,13 @@ cd "$API_ROOT"
 command -v pm2 >/dev/null 2>&1 || { echo "❌ ERROR: pm2 not found on the server" >&2; exit 1; }
 pm2 startOrReload ecosystem.config.js --env production --update-env
 pm2 save
+
+# `pm2 save` copies the resolved environment — master key included — into
+# dump.pm2, and writes it with the daemon's umask rather than this shell's, so
+# setting umask here would not reach it (TRE-54). Tightened after the fact,
+# which is second best and stated as such: the file exists readable for the
+# instant between the save and this line.
+chmod 600 "$HOME/.pm2/dump.pm2" 2>/dev/null || true
 EOF
 }
 
@@ -129,9 +136,30 @@ EOF
 
   # The PM2 config lives above the app directory so it survives the release
   # swap, which is why it is copied separately rather than left where rsync put
-  # it. It holds no secrets — see the file itself.
+  # it. It holds TREKKER_MASTER_KEY in clear, which decrypts every stored SSH
+  # credential, so the deploy owns its mode as well as its content (TRE-54).
+  #
+  # Written through a temp file rather than `scp`: the mode has to be right at
+  # the moment the content lands, and `scp` onto an existing path leaves
+  # whatever mode that path already had. `umask 077` creates the temp private,
+  # and `mv` carries that mode onto the destination in one step, so there is no
+  # window where the key sits readable.
   log "➡️  Syncing ecosystem.config.js"
-  scp -q "$ECOSYSTEM_FILE" "$TREKKER_DEPLOY_HOST:$API_ROOT/ecosystem.config.js"
+  ssh "$TREKKER_DEPLOY_HOST" \
+    "umask 077 && cat > '$API_ROOT/.ecosystem.config.js.tmp' \
+      && chmod 600 '$API_ROOT/.ecosystem.config.js.tmp' \
+      && mv '$API_ROOT/.ecosystem.config.js.tmp' '$API_ROOT/ecosystem.config.js'" \
+    < "$ECOSYSTEM_FILE"
+
+  # Asserted, not assumed. This is the kind of thing that is fixed once and
+  # regresses quietly, and the deploy is the only moment anything looks at it.
+  log "➡️  Checking the key is not readable beyond its owner"
+  ssh "$TREKKER_DEPLOY_HOST" API_ROOT="$API_ROOT" 'bash -s' << 'EOF'
+set -Eeuo pipefail
+mode=$(stat -c '%a' "$API_ROOT/ecosystem.config.js")
+[ "$mode" = "600" ] || { echo "❌ ERROR: ecosystem.config.js is $mode, expected 600" >&2; exit 1; }
+echo "✅ ecosystem.config.js is $mode"
+EOF
 
   log "➡️  Atomic release switch"
   ssh "$TREKKER_DEPLOY_HOST" \

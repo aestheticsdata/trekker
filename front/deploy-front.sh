@@ -37,6 +37,12 @@ cd "$CURRENT_DIR"
 [ -f "$PM2_ECOSYSTEM_FILE" ] || { echo "❌ ERROR: missing $CURRENT_DIR/$PM2_ECOSYSTEM_FILE" >&2; exit 1; }
 pm2 startOrReload "$CURRENT_DIR/$PM2_ECOSYSTEM_FILE" --update-env
 pm2 save
+
+# The front's own config holds no secrets, but `pm2 save` rewrites the one
+# dump.pm2 shared by every process on this box — the API's resolved environment,
+# master key included, among them. So this deploy loosens the API's secret if it
+# does not tighten it back (TRE-54).
+chmod 600 "$HOME/.pm2/dump.pm2" 2>/dev/null || true
 EOF
 }
 

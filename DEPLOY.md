@@ -384,6 +384,27 @@ told why the path refuses instead of getting the uniform refusal.
 Anyone who owns the API host reads the key out of the process environment and
 it is over. That is the accepted limit, not an oversight.
 
+### File modes
+
+Two files hold the key in clear, and both must be `600`:
+
+| File | Written by |
+| --- | --- |
+| `$TREKKER_REMOTE_ROOT/ecosystem.config.js` | `deploy-api.sh`, through a private temp file and an atomic `mv` |
+| `~/.pm2/dump.pm2` | `pm2 save`, then chmodded by both deploy scripts |
+
+`deploy-api.sh` fails the deploy if the config is anything but `600`, so finding
+either at `644` means a regression rather than a choice (TRE-54).
+
+The dump is the one to remember: `pm2 save` writes it with the PM2 daemon's
+umask, not the deploy shell's, so it cannot be fixed by setting `umask` before
+the call — and **every** deploy on this box rewrites it, the front's included,
+because all the processes share one dump. That is why the chmod sits in both
+scripts rather than only in the API's.
+
+This is defence in depth against another unprivileged account on the machine,
+not against the host compromise the paragraph above already concedes.
+
 ### Rotation
 
 No downtime. Both keys are live during the rotation, and the version travels
