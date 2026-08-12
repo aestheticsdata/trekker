@@ -56,6 +56,15 @@ export interface ChangeResult {
   skippedLinks: number;
   /** Directories a recursive walk could not read; nothing under them changed. */
   unreadable: string[];
+  /**
+   * Entries the walk found inside the denylist and did not touch (TRE-52).
+   *
+   * Reported rather than silently dropped, and named individually rather than
+   * counted: a recursive chmod that says it changed everything under a home
+   * directory while quietly stepping over `~/.ssh` is a worse answer than one
+   * that says which entries it left alone.
+   */
+  refused: string[];
 }
 
 export interface CountResult {
@@ -67,6 +76,12 @@ export interface CountResult {
   ceiling: number;
   skippedLinks: number;
   unreadable: number;
+  /**
+   * Entries a recursive change would step over because they are denylisted
+   * (TRE-52). Excluded from `entries`, so the figure the modal shows is what
+   * would actually be touched rather than what the walk happened to find.
+   */
+  refused: number;
 }
 
 @Injectable()
@@ -89,13 +104,19 @@ export class PermissionsService {
 
     const ceiling = entryCeiling();
     const walked = await walkTree(driver, validated.realPath, ceiling);
+    // Counted the same way the change itself filters, so the number in the
+    // modal is what would be touched rather than what the walk found.
+    const denied = await this.guard.localDenial(driver, userId);
+    const refused = walked.paths.filter(denied).length;
+
     return {
       path,
-      entries: walked.paths.length,
+      entries: walked.paths.length - refused,
       exceeded: walked.exceeded,
       ceiling,
       skippedLinks: walked.skippedLinks,
       unreadable: walked.unreadable.length,
+      refused,
     };
   }
 
@@ -168,8 +189,12 @@ export class PermissionsService {
     }
 
     const driver = existing ?? (await this.driverFor(hostId, userId));
+    // One lookup for the whole request; a walk holds thousands of paths and
+    // none of them is worth a query (TRE-52).
+    const denied = await this.guard.localDenial(driver, userId);
     const results: PathOutcome[] = [];
     const unreadable: string[] = [];
+    const refused: string[] = [];
     let skippedLinks = 0;
     let changed = 0;
 
@@ -207,7 +232,20 @@ export class PermissionsService {
         unreadable.push(...walked.unreadable);
       }
 
-      const outcome = await this.applyTo(driver, path, targets, change);
+      // The walk invents paths the guard never saw, and a change aimed at a
+      // home directory reaches `~/.ssh` through them. Skipped rather than
+      // failed: the rest of the tree is a legitimate change and refusing all of
+      // it would be the batch failure this route exists to avoid.
+      //
+      // `realPath` itself went through the guard above, so it is never in here
+      // — which is also why `targets` cannot come back empty.
+      const permitted = targets.filter((target) => {
+        if (!denied(target)) return true;
+        refused.push(target);
+        return false;
+      });
+
+      const outcome = await this.applyTo(driver, path, permitted, change);
       results.push(outcome);
       changed += outcome.entries;
     }
@@ -220,7 +258,7 @@ export class PermissionsService {
     // client has to know which.
     if (failed === results.length) throw allFailed(results);
 
-    return { results, changed, failed, skippedLinks, unreadable };
+    return { results, changed, failed, skippedLinks, unreadable, refused };
   }
 
   /** One path and everything the walk found under it. */

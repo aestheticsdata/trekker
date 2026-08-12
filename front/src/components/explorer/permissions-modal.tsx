@@ -345,6 +345,29 @@ function PermissionsPanel({
 
         {failure && <Notice tone="bad">{failure}</Notice>}
 
+        {/*
+          Shown on a successful run too, unlike the failure panel below (TRE-52).
+          A recursive change that reports a clean sweep while quietly stepping
+          over the directories holding this server's keys is a worse answer than
+          one that says which entries it left alone.
+        */}
+        {outcome && outcome.refused.length > 0 && (
+          <div className="mt-2.5">
+            <Notice tone="warn">
+              {outcome.refused.length} {outcome.refused.length === 1 ? "entry holds" : "entries hold"} Trekker's own key
+              material and {outcome.refused.length === 1 ? "was" : "were"} left untouched:
+            </Notice>
+            {outcome.refused.map((path) => (
+              <p
+                key={path}
+                className="text-ink-faint mt-1 font-mono text-2xs"
+              >
+                {path}
+              </p>
+            ))}
+          </div>
+        )}
+
         {outcome && outcome.failed > 0 && (
           <div className="mt-2.5">
             <Notice tone="bad">
@@ -454,5 +477,9 @@ function merge(mode: ChangeResult, ownership: ChangeResult): ChangeResult {
     failed: mode.failed + ownership.failed,
     skippedLinks: mode.skippedLinks + ownership.skippedLinks,
     unreadable: [...mode.unreadable, ...ownership.unreadable],
+    // Deduplicated, unlike the two lists above: chmod and chown walk the same
+    // tree and step over the same entries, so concatenating would report every
+    // protected path twice for a run that changed both mode and owner.
+    refused: [...new Set([...mode.refused, ...ownership.refused])],
   };
 }

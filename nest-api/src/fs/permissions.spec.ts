@@ -69,6 +69,8 @@ const ids = {
 function serviceFor(
   roots: { path: string; access: "READ" | "WRITE" }[],
   role: "OWNER" | "MEMBER" = "MEMBER",
+  /** Denylisted on the LOCAL host, as `computeLocalDenylist` produces at boot. */
+  denylist: string[] = [join(base, "install")],
 ): PermissionsService {
   const prisma = {
     hosts: {
@@ -81,7 +83,7 @@ function serviceFor(
     },
   } as unknown as PrismaService;
 
-  const guard = new PathGuardService(prisma, [join(base, "install")], memoryLimits(), silentAudit);
+  const guard = new PathGuardService(prisma, denylist, memoryLimits(), silentAudit);
   const factory = { forHost: () => Promise.resolve(new LocalDriver(HOST_ID)) } as unknown as HostDriverFactory;
   return new PermissionsService(factory, guard, ids);
 }
@@ -236,6 +238,63 @@ describe("chmod", () => {
     expect(await modeOf(root)).toBe("0700");
   });
 
+  unlessRoot("does not follow a symlink into the denylist, which is a second lock on the same door", async () => {
+    // Deliberately recorded as what it is: this passes with or without TRE-52's
+    // filter, because the walk skips symlinks outright and so never reaches the
+    // target. Kept because the two mechanisms guard the same door and the day
+    // the walk starts following links, the filter is what has to hold — and
+    // this test is where that change announces itself.
+    const root = join(base, "around");
+    await mkdir(join(root, "keep"), { recursive: true });
+    await writeFile(join(root, "keep", "ordinary.txt"), "x");
+    await chmod(join(root, "keep", "ordinary.txt"), 0o600);
+
+    const secret = join(base, "install", "under-around");
+    await mkdir(secret, { recursive: true });
+    const key = join(secret, "ecosystem.config.js");
+    await writeFile(key, "master key lives here");
+    await chmod(key, 0o600);
+    await symlink(secret, join(root, "link-to-install"));
+
+    const result = await serviceFor(writeRoot()).chmod(USER_ID, HOST_ID, [root], 0o777, true);
+
+    expect(await modeOf(join(root, "keep", "ordinary.txt"))).toBe("0777");
+    expect(await modeOf(key)).toBe("0600");
+    // The reason it was spared, asserted rather than assumed.
+    expect(result.skippedLinks).toBeGreaterThan(0);
+  });
+
+  unlessRoot("leaves a denylisted entry the walk really reaches alone, and names it", async () => {
+    // TRE-52 proper. The guard refuses a denylisted path the client names; a
+    // recursive change aimed at the directory ABOVE it never names those paths
+    // at all — the walk invents them — and that is what used to reach `~/.ssh`
+    // from a chmod on the home directory it sits in.
+    //
+    // No symlink here: the denylisted directory is a real child, so the walk
+    // enumerates it and only the filter can stop the change.
+    const root = join(base, "holds-install");
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "plain.txt"), "x");
+    await chmod(join(root, "plain.txt"), 0o600);
+
+    const denied = join(root, "secrets");
+    await mkdir(denied, { recursive: true });
+    const inside = join(denied, "key.txt");
+    await writeFile(inside, "x");
+    await chmod(inside, 0o600);
+
+    const result = await serviceFor(writeRoot(), "MEMBER", [denied]).chmod(USER_ID, HOST_ID, [root], 0o777, true);
+
+    expect(await modeOf(join(root, "plain.txt"))).toBe("0777");
+    expect(await modeOf(inside)).toBe("0600");
+    expect(result.refused).toEqual(expect.arrayContaining([inside, denied]));
+    // A partial result, not a failure: the rest of the tree is a legitimate
+    // change and refusing all of it would be the batch failure this route
+    // exists to avoid.
+    expect(result.failed).toBe(0);
+    expect(result.changed).toBeGreaterThan(0);
+  });
+
   it("refuses a recursive change above the ceiling, and says how big it is", async () => {
     const root = join(base, "huge");
     await mkdir(root, { recursive: true });
@@ -360,6 +419,34 @@ describe("chown", () => {
     expect(result.changed).toBe(1);
   });
 
+  unlessRoot("steps over the denylist on a recursive change, the same as chmod does", async () => {
+    // TRE-52 again, through the other verb. chown is the half that hands a file
+    // to another uid, which is the version of this that gives `~/.ssh` away
+    // rather than merely opening it.
+    const root = join(base, "chown-around");
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "plain.txt"), "x");
+
+    const denied = join(root, "secrets");
+    await mkdir(denied, { recursive: true });
+    await writeFile(join(denied, "key.txt"), "x");
+
+    const result = await serviceFor(writeRoot(), "MEMBER", [denied]).chown(
+      USER_ID,
+      HOST_ID,
+      [root],
+      String(process.getuid?.() ?? 0),
+      undefined,
+      true,
+    );
+
+    expect(result.refused).toEqual(expect.arrayContaining([denied, join(denied, "key.txt")]));
+    // Counted as untouched, not as changed: `changed` is what the response
+    // promises actually happened.
+    expect(result.changed).toBe(2); // root and plain.txt
+    expect(result.failed).toBe(0);
+  });
+
   unlessRoot("says an unprivileged chown needs elevation instead of just denying it", async () => {
     // The distinction the ticket asks for: "you may not" is wrong. The truth is
     // "not without root", and it points at the toggle that provides it.
@@ -414,6 +501,24 @@ describe("count", () => {
     expect(result.entries).toBe(4); // root, sub, a.txt, b.txt
     expect(result.skippedLinks).toBe(1);
     expect(result.exceeded).toBe(false);
+  });
+
+  it("excludes what the change would step over, so the modal's figure is the honest one", async () => {
+    // TRE-52. This number is what the confirmation dialog shows before a
+    // recursive change, so counting entries the change will refuse to touch
+    // would make the dialog promise work that is not going to happen.
+    const root = join(base, "counted-denied");
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "a.txt"), "x");
+
+    const denied = join(root, "secrets");
+    await mkdir(denied, { recursive: true });
+    await writeFile(join(denied, "key.txt"), "x");
+
+    const result = await serviceFor(writeRoot(), "MEMBER", [denied]).count(USER_ID, HOST_ID, root);
+
+    expect(result.refused).toBe(2); // secrets, key.txt
+    expect(result.entries).toBe(2); // root, a.txt
   });
 });
 

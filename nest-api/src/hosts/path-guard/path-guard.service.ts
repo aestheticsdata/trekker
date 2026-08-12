@@ -214,6 +214,32 @@ export class PathGuardService {
   }
 
   /**
+   * The denylist as a predicate over resolved paths (TRE-52).
+   *
+   * `validate()` judges the path the client named. An operation that *walks* —
+   * a recursive chmod, and later a transfer or a delete — invents paths the
+   * client never named and the guard therefore never saw, and those are exactly
+   * the ones that reach `~/.ssh` from a change aimed at the home directory
+   * above it. The walk is the only place they exist, so the check has to be
+   * available there.
+   *
+   * Returned as a closure over one host lookup rather than as a per-path async
+   * call: a walk holds thousands of paths and none of them is worth a query.
+   *
+   * The roots are deliberately not part of this. A walk starts from a path the
+   * guard already admitted and never climbs above it, so containment is settled
+   * before the first step; the denylist is not, because it is about where a
+   * path lands rather than where the walk began.
+   */
+  async localDenial(driver: HostDriver, userId: string): Promise<(realPath: string) => boolean> {
+    const host = await this.loadHost(driver.hostId, userId);
+    // Remote hosts have no install tree of ours to protect, which is the same
+    // reason `validate()` only consults it for LOCAL.
+    if (host.transport !== "LOCAL") return () => false;
+    return (realPath: string) => this.isDeniedLocally(realPath);
+  }
+
+  /**
    * The host's roots, resolved on the host — TRE-13 calls this once per
    * listing and then uses `withinRoots` per symlink.
    */

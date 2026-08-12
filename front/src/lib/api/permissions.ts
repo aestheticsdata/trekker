@@ -24,6 +24,8 @@ export interface ChangeResult {
   failed: number;
   skippedLinks: number;
   unreadable: string[];
+  /** Entries left untouched because they are denylisted on the host (TRE-52). */
+  refused: string[];
 }
 
 export interface CountResult {
@@ -34,6 +36,8 @@ export interface CountResult {
   ceiling: number;
   skippedLinks: number;
   unreadable: number;
+  /** Denylisted entries a recursive change would step over, already excluded from `entries`. */
+  refused: number;
 }
 
 export interface ModeChange {
