@@ -402,9 +402,18 @@ describe("route wiring", () => {
   // cross-site form cannot forge one — are decorator metadata, which is
   // exactly the kind of thing a refactor drops silently. Read back from Nest's
   // own metadata rather than trusted to review.
+  //
+  // The handler is fetched through its property descriptor rather than off the
+  // prototype: `@UseGuards` stores its metadata on the function object itself,
+  // and reading a method out as a value is exactly what `unbound-method` is
+  // there to stop — correctly, in the general case. The descriptor asks for the
+  // function without pretending it is a callable this-bound method.
+  const handlerOf = (method: string): object =>
+    Object.getOwnPropertyDescriptor(FsController.prototype, method)?.value as object;
+
   const guardsOn = (method: "chmod" | "chown" | "list"): unknown[] => [
     ...((Reflect.getMetadata("__guards__", FsController) as unknown[]) ?? []),
-    ...((Reflect.getMetadata("__guards__", FsController.prototype[method]) as unknown[]) ?? []),
+    ...((Reflect.getMetadata("__guards__", handlerOf(method)) as unknown[]) ?? []),
   ];
 
   it("puts CSRF and the session guard on both writes", () => {
