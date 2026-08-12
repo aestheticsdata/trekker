@@ -1,5 +1,6 @@
 "use client";
 
+import { Inspector } from "@components/explorer/inspector";
 import { Pane } from "@components/explorer/pane";
 import {
   backTarget,
@@ -62,6 +63,8 @@ export function Explorer({
   onMatchesChange,
   splitMode,
   heat,
+  inspector,
+  onInspectorChange,
   onSelectionChange,
   manageHostsFor,
   onManageHosts,
@@ -80,6 +83,9 @@ export function Explorer({
   onMatchesChange: (matches: number | null) => void;
   splitMode: SplitMode;
   heat: boolean;
+  /** Whether the 218px panel is showing (TRE-17 §4). URL-backed, like the split. */
+  inspector: boolean;
+  onInspectorChange: (open: boolean) => void;
   onSelectionChange: (selection: { row: FileRow; path: string } | null) => void;
   /** Which pane opened the host manager, if any — owned by the page so the
    * sidebar can open it too. */
@@ -250,6 +256,16 @@ export function Explorer({
     },
   });
 
+  // ⌘I is its own listener rather than a case in the switch above: that one
+  // stands down while a modifier is held and while the glob field has focus,
+  // both of which are correct for ⌫ and the arrow keys and wrong for a chord
+  // nothing else in the browser is going to want.
+  useShortcut({
+    enabled: manageHostsFor === null,
+    key: "i",
+    onPress: () => onInspectorChange(!inspector),
+  });
+
   const callbacksFor = (index: PaneIndex): PaneCallbacks => ({
     onFocus: () => onActiveChange(index),
     onCd: (path) => go(index, path),
@@ -351,41 +367,62 @@ export function Explorer({
   };
 
   return (
-    <div className={`flex h-full min-h-0 ${splitMode === "split" ? "flex-row" : "flex-col"}`}>
-      {([0, 1] as const).map((index) => {
-        const solo = splitMode !== "split";
-        const shown = splitMode === "split" || (splitMode === "left" ? index === 0 : index === 1);
-        if (solo && !shown) return null;
+    // Two rows of nesting, not one: the split arranges the panes, and the
+    // inspector sits beside whatever that arrangement produced. Left flat, a
+    // solo pane would stack the panel underneath itself rather than beside it.
+    <div className="flex h-full min-h-0">
+      <div className={`flex min-h-0 min-w-0 flex-1 ${splitMode === "split" ? "flex-row" : "flex-col"}`}>
+        {([0, 1] as const).map((index) => {
+          const solo = splitMode !== "split";
+          const shown = splitMode === "split" || (splitMode === "left" ? index === 0 : index === 1);
+          if (solo && !shown) return null;
 
-        const pane = views[index];
-        const view = rendered[index];
-        return (
-          // biome-ignore lint/a11y/noStaticElementInteractions: a cache warm-up on hover, with no behaviour of its own
-          <div
-            key={index}
-            className="flex min-h-0 min-w-0 flex-1"
-            onMouseOver={(event) => prefetchFromEvent(pane, view.rows, event.target)}
-            onFocus={(event) => prefetchFromEvent(pane, view.rows, event.target)}
-          >
-            <Pane
-              pane={pane}
-              active={active === index}
-              host={hosts.find((host) => host.id === pane.hostId) ?? null}
-              rows={view.rows}
-              meta={view.listing.data?.meta ?? null}
-              // A disabled query never leaves `isPending`, so an unbound pane
-              // would shimmer for ever if that alone drove the skeleton.
-              loading={hostsPending || (pane.hostId !== null && view.listing.isPending)}
-              error={view.listing.error}
-              glob={index === active ? glob.trim() : ""}
-              hiddenByGlob={index === active ? view.hiddenByGlob : 0}
-              heat={heat}
-              now={now}
-              callbacks={callbacksFor(index)}
-            />
-          </div>
-        );
-      })}
+          const pane = views[index];
+          const view = rendered[index];
+          return (
+            // biome-ignore lint/a11y/noStaticElementInteractions: a cache warm-up on hover, with no behaviour of its own
+            <div
+              key={index}
+              className="flex min-h-0 min-w-0 flex-1"
+              onMouseOver={(event) => prefetchFromEvent(pane, view.rows, event.target)}
+              onFocus={(event) => prefetchFromEvent(pane, view.rows, event.target)}
+            >
+              <Pane
+                pane={pane}
+                active={active === index}
+                host={hosts.find((host) => host.id === pane.hostId) ?? null}
+                rows={view.rows}
+                meta={view.listing.data?.meta ?? null}
+                // A disabled query never leaves `isPending`, so an unbound pane
+                // would shimmer for ever if that alone drove the skeleton.
+                loading={hostsPending || (pane.hostId !== null && view.listing.isPending)}
+                error={view.listing.error}
+                glob={index === active ? glob.trim() : ""}
+                hiddenByGlob={index === active ? view.hiddenByGlob : 0}
+                heat={heat}
+                now={now}
+                callbacks={callbacksFor(index)}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {inspector && (
+        <Inspector
+          host={hosts.find((host) => host.id === activePane.hostId) ?? null}
+          path={activePane.path}
+          rows={activeView.rows}
+          selected={activeView.rows.filter((row) => activePane.sel.includes(row.name))}
+          sort={activePane.sort}
+          dir={activePane.dir}
+          glob={glob.trim()}
+          loading={hostsPending || (activePane.hostId !== null && activeView.listing.isPending)}
+          error={activeView.listing.error}
+          now={now}
+          onClose={() => onInspectorChange(false)}
+        />
+      )}
 
       {manageHostsFor !== null && (
         <HostManager
@@ -446,4 +483,25 @@ function useKeyboard({ enabled, onKey }: { enabled: boolean; onKey: (event: Keyb
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [enabled, onKey]);
+}
+
+/**
+ * One ⌘-chord, live everywhere — including inside the glob field, which is the
+ * difference from `useKeyboard`. `metaKey || ctrlKey` rather than a platform
+ * check: this app is read on a Mac and on Linux, and a shortcut that works on
+ * only one of them is a shortcut nobody trusts.
+ */
+function useShortcut({ enabled, key, onPress }: { enabled: boolean; key: string; onPress: () => void }) {
+  useEffect(() => {
+    if (!enabled) return;
+    const handler = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== key) return;
+      event.preventDefault();
+      onPress();
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [enabled, key, onPress]);
 }

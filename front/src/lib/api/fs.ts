@@ -33,6 +33,23 @@ export interface FileRow {
   linkInsideRoot?: boolean;
 }
 
+/**
+ * One entry, statted (TRE-13 §4) — what the inspector's metadata rows read.
+ *
+ * The four extra fields are nullable because SFTP v3 has no attribute for an
+ * inode or a link count. A remote host does not report them, and the panel
+ * prints a dash rather than a zero it would be inventing.
+ */
+export interface FileRowDetail extends FileRow {
+  path: string;
+  /** The resolved real path — what the guard validated and the driver used. */
+  realPath: string;
+  inode: number | null;
+  nlink: number | null;
+  atime: string | null;
+  ctime: string | null;
+}
+
 export interface ListMeta {
   count: number;
   totalBytes: number;
@@ -49,4 +66,9 @@ export interface ListResult {
 export async function fetchListing(hostId: string, path: string): Promise<ListResult> {
   const query = new URLSearchParams({ hostId, path });
   return (await apiRequest(`/fs/list?${query}`)) as ListResult;
+}
+
+export async function fetchStat(hostId: string, path: string): Promise<FileRowDetail> {
+  const query = new URLSearchParams({ hostId, path });
+  return (await apiRequest(`/fs/stat?${query}`)) as FileRowDetail;
 }

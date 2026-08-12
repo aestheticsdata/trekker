@@ -9,6 +9,10 @@
     "noImplicitAny": false,
     "allowJs": true,
     "noEmit": true,
+    // Node runs scripts/*.ts directly, and ESM resolution there wants the real
+    // extension on the import. Safe alongside noEmit: it permits the suffix,
+    // it does not ask anyone to write it.
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true,

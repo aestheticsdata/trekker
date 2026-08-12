@@ -31,6 +31,8 @@ export function AppShell({
   globMatches,
   heat,
   onHeatChange,
+  inspector,
+  onInspectorChange,
   sidebar,
   children,
 }: {
@@ -47,6 +49,10 @@ export function AppShell({
   globMatches?: number | null;
   heat?: boolean;
   onHeatChange?: (heat: boolean) => void;
+  /** The inspector's toolbar switch. The panel itself is the explorer's, since
+   * everything it describes — selection, rows, sort — belongs to a pane. */
+  inspector?: boolean;
+  onInspectorChange?: (open: boolean) => void;
   /** The 176px left rail (TRE-18). Rendered beside the panes, inside the bars. */
   sidebar?: ReactNode;
   children: ReactNode;
@@ -71,6 +77,8 @@ export function AppShell({
           globMatches={globMatches ?? null}
           heat={heat}
           onHeatChange={onHeatChange}
+          inspector={inspector}
+          onInspectorChange={onInspectorChange}
         />
 
         {/* min-h-0 or a tall child stretches the flex item instead of scrolling.

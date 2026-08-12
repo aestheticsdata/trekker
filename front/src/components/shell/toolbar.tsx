@@ -56,6 +56,8 @@ export function Toolbar({
   globMatches = null,
   heat = false,
   onHeatChange,
+  inspector = false,
+  onInspectorChange,
   actions = M2_ACTIONS,
 }: {
   viewMode?: ViewMode;
@@ -68,6 +70,9 @@ export function Toolbar({
   globMatches?: number | null;
   heat?: boolean;
   onHeatChange?: (heat: boolean) => void;
+  /** The inspector's other switch (TRE-17 §4); ⌘I is the first. */
+  inspector?: boolean;
+  onInspectorChange?: (open: boolean) => void;
   actions?: readonly ToolbarAction[];
 }) {
   return (
@@ -118,6 +123,17 @@ export function Toolbar({
         label="heat"
         pressed={heat}
         onChange={() => onHeatChange?.(!heat)}
+      />
+
+      {/* Hidden exactly where the panel is, rather than left as a switch with
+          nothing to open below the inspector breakpoint. */}
+      <Toggle
+        label="inspector"
+        title="Show the inspector (⌘I)"
+        tone="accent"
+        className="hidden inspector:flex"
+        pressed={inspector}
+        onChange={() => onInspectorChange?.(!inspector)}
       />
 
       <div className="flex-1" />
@@ -254,14 +270,39 @@ function Rule() {
   );
 }
 
-function Toggle({ label, pressed, onChange }: { label: string; pressed: boolean; onChange: () => void }) {
+/**
+ * The heat map's switch, and the inspector's.
+ *
+ * Two tones because they mean different things: the heat map recolours the
+ * listing, which is a warning-coloured thing to have done to it, while the
+ * inspector is a panel and takes the accent every other panel in the app does.
+ */
+function Toggle({
+  label,
+  title,
+  pressed,
+  tone = "warning",
+  className = "flex",
+  onChange,
+}: {
+  label: string;
+  title?: string;
+  pressed: boolean;
+  tone?: "warning" | "accent";
+  className?: string;
+  onChange: () => void;
+}) {
+  const lit =
+    tone === "accent" ? "border-accent-soft text-brand bg-accent/20" : "border-warning text-warning bg-warning/10";
+
   return (
     <button
       type="button"
       aria-pressed={pressed}
+      title={title}
       onClick={onChange}
-      className={`flex h-5 items-center rounded-sm border px-2 font-mono text-xs ${
-        pressed ? "border-warning text-warning bg-warning/10" : "border-line-strong text-ink-faint hover:text-ink-muted"
+      className={`h-5 items-center rounded-sm border px-2 font-mono text-xs ${className} ${
+        pressed ? lit : "border-line-strong text-ink-faint hover:text-ink-muted"
       }`}
     >
       {label}

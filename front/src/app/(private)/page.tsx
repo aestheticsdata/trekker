@@ -3,7 +3,7 @@
 import { Explorer } from "@components/explorer/explorer";
 import { AppShell } from "@components/shell/app-shell";
 import { Sidebar } from "@components/sidebar/sidebar";
-import { formatSize } from "@helpers/listing";
+import { formatInstant, formatSize } from "@helpers/listing";
 import { fetchHealth } from "@lib/api/health";
 import { fetchHostSummary, fetchHosts } from "@lib/api/hosts";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -109,6 +109,8 @@ export default function HomePage() {
       globMatches={globMatches}
       heat={shared.heat}
       onHeatChange={(heat) => void setShared({ heat })}
+      inspector={shared.insp}
+      onInspectorChange={(insp) => void setShared({ insp })}
       sidebar={
         <Sidebar
           hosts={hosts ?? []}
@@ -131,6 +133,8 @@ export default function HomePage() {
         onMatchesChange={setGlobMatches}
         splitMode={shared.split}
         heat={shared.heat}
+        inspector={shared.insp}
+        onInspectorChange={(insp) => void setShared({ insp })}
         onSelectionChange={setSelection}
         manageHostsFor={manageHostsFor}
         onManageHosts={setManageHostsFor}
@@ -154,7 +158,7 @@ function summarise({ row, path }: { row: FileRow; path: string }): SelectionSumm
     size: formatSize(row.size, row.type),
     mode: `${row.mode} ${row.modeText}`,
     owner: `${row.owner}:${row.group}`,
-    modified: row.mtime.replace("T", " ").replace("Z", ""),
+    modified: formatInstant(row.mtime),
   };
 }
 

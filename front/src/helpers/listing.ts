@@ -27,6 +27,47 @@ export function formatTotal(bytes: number): string {
   return formatSize(bytes, "file");
 }
 
+/**
+ * The exact count, grouped (TRE-17 §2). The stats row rounds; the metadata row
+ * is where the number is the number, and nine digits unbroken are unreadable.
+ *
+ * The locale is pinned rather than the browser's: this renders on the server
+ * first, and a separator chosen from two different locales is a hydration
+ * mismatch on every file over a thousand bytes.
+ */
+export function formatExactBytes(bytes: number): string {
+  return `${bytes.toLocaleString("en-US")} B`;
+}
+
+/**
+ * What a file costs the filesystem, as opposed to what it contains.
+ *
+ * An estimate, and labelled as one: 4 KiB is the block size of every filesystem
+ * this app is likely to meet, but neither `stat` over SFTP nor the listing
+ * carries the real one, and a sparse file occupies far less than this says.
+ * Worth showing anyway — the gap between 12 bytes and 4 KiB is the answer to
+ * "why is this directory of tiny files so large".
+ */
+const BLOCK_BYTES = 4096;
+
+export function onDiskBytes(bytes: number): number {
+  return Math.ceil(bytes / BLOCK_BYTES) * BLOCK_BYTES;
+}
+
+/**
+ * "2026-08-07 04:20:11" — the ISO instant, made readable, still UTC.
+ *
+ * Sliced rather than stripped of its `T` and `Z`, because `toISOString()` — how
+ * the API builds every timestamp — always emits a milliseconds field, even
+ * after the server has deliberately floored the value to whole seconds. Trimming
+ * only the two letters leaves a `.000` on every file in the app: three digits of
+ * precision that were thrown away upstream, wide enough to push the inspector's
+ * `modified` row into its own ellipsis.
+ */
+export function formatInstant(iso: string): string {
+  return iso.slice(0, 19).replace("T", " ");
+}
+
 export function ageDays(mtime: string, now: number): number {
   return (now - Date.parse(mtime)) / 86_400_000;
 }

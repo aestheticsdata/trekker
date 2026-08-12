@@ -8,7 +8,8 @@
     "lint": "biome check ./src",
     "lint:fix": "biome check --write ./src",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'no front tests yet — test tooling lands with TRE-39'"
+    "test": "echo 'no front tests yet — test tooling lands with TRE-39'",
+    "verify:permissions": "node scripts/verify-permissions.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",
