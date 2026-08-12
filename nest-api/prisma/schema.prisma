@@ -330,10 +330,36 @@ model DiskScanEntries {
 
 // ---------------------------------------------------------------- audit
 
+/// The outcome of an audited operation.
+///
+/// `pending` is written BEFORE the handler runs and is the reason this enum
+/// exists at all: a row that never left `pending` is an operation that started
+/// and did not finish — a crash, a kill, a timeout. Those are precisely the
+/// ones worth having a record of, and a log written only on success cannot
+/// have one (TRE-30 §1).
+enum AuditOutcome {
+  pending
+  success
+  failure
+  /// Stopped before it ran: a rate limit, a rejected path, a missing token.
+  /// Distinct from `failure`, which means it ran and did not work.
+  refused
+}
+
 /// The audit trail and the activity strip are the same rows: an action worth
 /// showing the user is an action worth recording. TRE-30 owns the vocabulary
 /// of `kind`, which is a string rather than an enum because it gains a value
 /// with nearly every feature and a migration per value is not worth it.
+///
+/// Append-only from the application's side. Exactly two writes touch a row —
+/// the interceptor's pre-write and its outcome update — and only the prune job
+/// deletes. Nothing else may update or delete, and `audit-coverage.spec.ts`
+/// holds that line.
+///
+/// The job is the unit, never the item: a transfer of ten thousand files is
+/// one row here and ten thousand in `TransferItems`. A log that grows with the
+/// work instead of with the decisions stops being readable exactly when it
+/// matters (TRE-30 §2).
 model ActivityLog {
   id      String  @id @default(uuid(7)) @db.Char(36)
   userId  String  @db.Char(36)
@@ -344,10 +370,51 @@ model ActivityLog {
   tag     String? @db.VarChar(32)
   payload Json?
 
+  /// Which session acted. A stolen session is the thing you reconstruct from
+  /// this table, and a user id cannot separate one login from another.
+  /// Nullable because the pre-session routes (register, recover) have none.
+  sessionId String? @db.VarChar(128)
+
+  outcome AuditOutcome @default(pending)
+  /// Why it failed or was refused, for the operator reading the strip. Never a
+  /// stack trace and never a credential — see `redact.ts`.
+  detail  String?      @db.VarChar(255)
+
+  /// Ran with elevated privileges (TRE-29). Its own column rather than a
+  /// payload key: "what did this session do as root" is a question worth an
+  /// index, not a JSON scan.
+  elevated Boolean @default(false)
+
+  /// Destroyed or moved data, or granted privilege. Copied onto the row from
+  /// the route's `@Audited` spec rather than derived from `kind` at prune
+  /// time: the prune job runs months later, and a `kind` renamed or retired in
+  /// between would silently reclassify old rows into the short retention
+  /// window — deleting exactly the history worth keeping.
+  destructive Boolean @default(false)
+  /// Bytes moved, where the operation moves bytes. BigInt because a transfer
+  /// outgrows a 32-bit count and the overflow would be silent.
+  bytes    BigInt?
+
+  durationMs Int?
+
   createdAt DateTime @default(now())
 
   user Users  @relation(fields: [userId], references: [id], onDelete: Cascade)
   host Hosts? @relation(fields: [hostId], references: [id], onDelete: SetNull)
 
+  /// Cursor pagination orders by `id`, not `createdAt`: the id is a uuid v7,
+  /// so it is already time-ordered, unique, and immune to two rows sharing a
+  /// millisecond — which a createdAt cursor is not, and which loses rows
+  /// silently at the page boundary rather than loudly.
   @@index([userId, createdAt(sort: Desc)])
+  /// The unfiltered page, which is what the sidebar strip asks for on every
+  /// load. Ordering by `id` after filtering on `userId` alone cannot use the
+  /// composite indexes below — MySQL will not skip a middle column to satisfy
+  /// an ORDER BY — so without this the commonest query in the app filesorts.
+  @@index([userId, id(sort: Desc)])
+  @@index([userId, kind, id(sort: Desc)])
+  @@index([userId, hostId, id(sort: Desc)])
+  @@index([outcome, id])
+  /// The prune job's only query: everything of one class older than a date.
+  @@index([destructive, createdAt])
 }

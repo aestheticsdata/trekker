@@ -15,6 +15,7 @@
     "outDir": "./dist",
     "baseUrl": "./",
     "paths": {
+      "@audit/*": ["./src/audit/*"],
       "@bookmarks/*": ["./src/bookmarks/*"],
       "@config/*": ["./src/config/*"],
       "@infrastructure/*": ["./src/infrastructure/*"],

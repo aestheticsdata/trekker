@@ -90,6 +90,34 @@ const prodEnv = {
   // Setting it here would mean a second, writable database on the server that
   // nothing ever reads.
 
+  // ---- audit log and rate limits (TRE-30) ----------------------------------
+  //
+  // All optional, all with the defaults shown. `env.validation` does not
+  // declare them for that reason — it lists what the API refuses to boot
+  // without, and every value here has a working default. Set one only to
+  // override it.
+  //
+  // Retention, in days. Rows that destroyed or moved data, or granted
+  // privilege, are kept four times as long: they are the ones someone comes
+  // looking for, always long after the fact.
+  // TREKKER_AUDIT_RETENTION_DAYS: "90",
+  // TREKKER_AUDIT_RETENTION_DESTRUCTIVE_DAYS: "365",
+  //
+  // Limits, per user. Chosen to be invisible to a person and obstructive to a
+  // script. See nest-api/src/audit/limits.ts, which is the one file to read for
+  // what this install actually allows.
+  // TREKKER_LIMIT_HOST_MUTATIONS_PER_MIN: "30",
+  // TREKKER_LIMIT_PASSWORD_CHANGES_PER_HOUR: "5",
+  // TREKKER_LIMIT_PATH_REFUSALS_PER_MIN: "20",
+  //
+  // Declared but not yet attached — the operations they govern do not exist.
+  // Each is removed from `TO_ATTACH` by the ticket named beside it:
+  //   TREKKER_LIMIT_DELETES_PER_MIN            TRE-25
+  //   TREKKER_LIMIT_DELETED_ENTRIES_PER_HOUR   TRE-25
+  //   TREKKER_LIMIT_TRANSFERS_IN_FLIGHT        TRE-23
+  //   TREKKER_LIMIT_HASHES_IN_FLIGHT           TRE-27
+  //   TREKKER_LIMIT_ELEVATIONS_PER_5MIN        TRE-29
+
   // Added by later tickets:
   //   TREKKER_DOWNLOAD_LINK_KEY  TRE-26 — signs expiring download links.
 };

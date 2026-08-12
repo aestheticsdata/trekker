@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@auth/context/AuthContext";
+import { ActivityStrip } from "@components/sidebar/activity-strip";
 import { useToast } from "@components/ui/toast";
 import { deleteBookmark, fetchBookmarks } from "@lib/api/bookmarks";
 import { fetchHostSummary } from "@lib/api/hosts";
@@ -14,13 +15,14 @@ import type { ReactNode } from "react";
 /**
  * The 176px left sidebar (TRE-18 §2, §3), built from the App mockup's markup.
  *
- * Two sections ship here. VOLUMES is deliberately absent rather than empty:
+ * Three sections ship here. VOLUMES is deliberately absent rather than empty:
  * `GET /hosts/:id/summary` carries uptime, load, memory and ping and no disk
  * data at all, and the ticket's own rule is to hide the panel rather than fake
- * it — the `df` probe belongs to TRE-33. The activity strip is absent for a
- * harder reason: nothing in the API writes an ActivityLog row yet, and the
- * vocabulary for `kind` is TRE-30's to define, so the panel would be empty on
- * every install. VIEWS is TRE-34.
+ * it — the `df` probe belongs to TRE-33. VIEWS is TRE-34.
+ *
+ * ACTIVITY was absent for a harder reason — nothing in the API wrote an
+ * ActivityLog row, and the vocabulary of `kind` was TRE-30's to define — and
+ * arrived with that ticket.
  */
 export function Sidebar({
   hosts,
@@ -71,6 +73,12 @@ export function Sidebar({
             bookmarks={bookmarks ?? []}
             onNavigate={onNavigate}
           />
+        </Section>
+
+        <Rule />
+
+        <Section title="ACTIVITY">
+          <ActivityStrip />
         </Section>
       </div>
     </aside>

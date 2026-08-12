@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { AuditModule } from "@audit/audit.module";
 import { BookmarksModule } from "@bookmarks/bookmarks.module";
 import appConfig from "@config/app.config";
 import { validate } from "@config/env.validation";
@@ -31,6 +32,11 @@ loadEnv();
     DatabaseModule,
     PrismaModule,
     RedisModule,
+    // Before every feature module that mutates anything. It is @Global and
+    // binds the interceptor with APP_INTERCEPTOR, so ordering is not load-
+    // bearing — but reading it here first states the intent: nothing below
+    // gets to write without being recorded (TRE-30).
+    AuditModule,
     SecretStoreModule,
     HostsModule,
     BookmarksModule,

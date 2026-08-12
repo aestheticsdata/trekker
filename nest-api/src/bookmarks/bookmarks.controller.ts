@@ -12,6 +12,8 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import type { Request } from "express";
+import { AuditService } from "@audit/audit.service";
+import { Audited } from "@audit/audited.decorator";
 import { type BookmarkView, BookmarksService } from "@bookmarks/bookmarks.service";
 import { CreateBookmarkDto } from "@bookmarks/dto/create-bookmark.dto";
 import { ReorderBookmarksDto } from "@bookmarks/dto/reorder-bookmarks.dto";
@@ -29,7 +31,10 @@ import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/sessi
 @Controller("bookmarks")
 @UseGuards(SessionAuthGuard)
 export class BookmarksController {
-  constructor(private readonly bookmarks: BookmarksService) {}
+  constructor(
+    private readonly bookmarks: BookmarksService,
+    private readonly audit: AuditService,
+  ) {}
 
   @Get()
   list(@Req() req: Request): Promise<BookmarkView[]> {
@@ -40,27 +45,68 @@ export class BookmarksController {
   @Patch("reorder")
   @UseGuards(CsrfGuard)
   @HttpCode(HttpStatus.OK)
-  reorder(@Req() req: Request, @Body() dto: ReorderBookmarksDto): Promise<BookmarkView[]> {
-    return this.bookmarks.reorder(userIdOf(req), dto.hostId, dto.ids);
+  @Audited({
+    kind: "bookmark.reorder",
+    describe: (request) => {
+      const body = request.body as { ids?: string[] };
+      return {
+        summary: "Reordered favourites",
+        tag: body.ids ? `${body.ids.length} items` : undefined,
+      };
+    },
+  })
+  async reorder(@Req() req: Request, @Body() dto: ReorderBookmarksDto): Promise<BookmarkView[]> {
+    const view = await this.bookmarks.reorder(userIdOf(req), dto.hostId, dto.ids);
+    this.audit.annotate(req, { hostId: dto.hostId });
+    return view;
   }
 
   @Post()
   @UseGuards(CsrfGuard)
   @HttpCode(HttpStatus.CREATED)
-  create(@Req() req: Request, @Body() dto: CreateBookmarkDto): Promise<BookmarkView> {
-    return this.bookmarks.create(userIdOf(req), dto);
+  @Audited({
+    kind: "bookmark.create",
+    describe: (request) => {
+      const body = request.body as { label?: string; path?: string };
+      return {
+        summary: `Bookmarked ${body.path ?? "a path"}`,
+        tag: body.label,
+        paths: body.path ? [body.path] : undefined,
+      };
+    },
+  })
+  async create(@Req() req: Request, @Body() dto: CreateBookmarkDto): Promise<BookmarkView> {
+    const bookmark = await this.bookmarks.create(userIdOf(req), dto);
+    this.audit.annotate(req, { hostId: bookmark.hostId });
+    return bookmark;
   }
 
   @Patch(":id")
   @UseGuards(CsrfGuard)
   @HttpCode(HttpStatus.OK)
-  update(@Req() req: Request, @Param("id") id: string, @Body() dto: UpdateBookmarkDto): Promise<BookmarkView> {
-    return this.bookmarks.update(userIdOf(req), id, dto);
+  @Audited({
+    kind: "bookmark.update",
+    describe: (request) => ({
+      summary: "Edited a favourite",
+      payload: { requestedBookmarkId: request.params.id },
+    }),
+  })
+  async update(@Req() req: Request, @Param("id") id: string, @Body() dto: UpdateBookmarkDto): Promise<BookmarkView> {
+    const bookmark = await this.bookmarks.update(userIdOf(req), id, dto);
+    this.audit.annotate(req, { hostId: bookmark.hostId, summary: `Edited the favourite ${bookmark.label}` });
+    return bookmark;
   }
 
   @Delete(":id")
   @UseGuards(CsrfGuard)
   @HttpCode(HttpStatus.OK)
+  @Audited({
+    kind: "bookmark.delete",
+    describe: (request) => ({
+      summary: "Removed a favourite",
+      payload: { requestedBookmarkId: request.params.id },
+    }),
+  })
   async remove(@Req() req: Request, @Param("id") id: string): Promise<{ ok: true }> {
     await this.bookmarks.remove(userIdOf(req), id);
     return { ok: true };

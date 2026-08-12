@@ -712,6 +712,10 @@ function EmptyState({
  * A refusal is never an empty directory. The API distinguishes "the host said
  * no" from "outside your roots" from "unreachable" (TRE-13 §5), and each one
  * needs a different next move from the person reading it.
+ *
+ * 429 is the odd one out: nothing is wrong with the path being opened. Too
+ * many were refused too quickly and the server has stopped answering for the
+ * rest of the minute (TRE-30 §3). The detail carries when it lifts.
  */
 function ErrorState({ error, onUp }: { error: unknown; onUp: () => void }) {
   const status = error instanceof ApiError ? error.status : 0;
@@ -722,9 +726,11 @@ function ErrorState({ error, onUp }: { error: unknown; onUp: () => void }) {
       ? "permission denied"
       : status === 404
         ? "no such directory"
-        : status === 502
-          ? "host unreachable"
-          : "listing failed";
+        : status === 429
+          ? "too many refused paths"
+          : status === 502
+            ? "host unreachable"
+            : "listing failed";
 
   return (
     <Placeholder

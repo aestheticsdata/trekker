@@ -1,5 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Req, Res, UseGuards } from "@nestjs/common";
 import type { Request, Response } from "express";
+import { Audited, NotAudited } from "@audit/audited.decorator";
+import { LIMITS } from "@audit/limits";
 import { RedisService } from "@redis/redis.service";
 import { clearCsrfToken, getOrCreateCsrfToken, rotateCsrfToken } from "@users/csrf-token.util";
 import { AddUserDto } from "@users/dto/add-user.dto";
@@ -46,6 +48,12 @@ export class UsersController {
 
   @Post()
   @HttpCode(HttpStatus.OK)
+  @NotAudited(
+    "Authentication events cannot live in ActivityLog: its userId is a NOT NULL foreign key, " +
+      "and this row would have to be written before the handler has decided who — or whether — " +
+      "anyone is signing in. A failed attempt against an address with no account has no user at " +
+      "all, and those are the attempts most worth recording. Needs its own table. See TRE-47.",
+  )
   async signIn(@Body() dto: SignInDto, @Req() req: Request): Promise<SignInResponse & { csrfToken: string }> {
     const result = await this.usersService.signIn(dto.email, dto.password, clientIp(req));
 
@@ -60,6 +68,11 @@ export class UsersController {
   @Post("add")
   @UseGuards(SignupGuard)
   @HttpCode(HttpStatus.CREATED)
+  @NotAudited(
+    "The account being created does not exist when the pre-write would run, so there is no user " +
+      "for the row's foreign key to reference. Registration belongs in the authentication log " +
+      "alongside sign-in and recovery rather than here. See TRE-47.",
+  )
   async addUser(
     @Body() dto: AddUserDto,
     @Req() req: Request,
@@ -80,6 +93,11 @@ export class UsersController {
    */
   @Post("recover")
   @HttpCode(HttpStatus.OK)
+  @NotAudited(
+    "There is no session here by design, and the account is only identified once the passphrase " +
+      "has been checked inside the handler — after the pre-write would have had to name a user. " +
+      "Recovery is an authentication event and belongs in that log. See TRE-47.",
+  )
   async recover(@Body() dto: RecoverDto, @Req() req: Request): Promise<{ ok: true }> {
     await this.usersService.recover(dto.email, dto.passphrase, dto.newPassword, clientIp(req));
     return { ok: true };
@@ -88,6 +106,16 @@ export class UsersController {
   @Patch("password")
   @UseGuards(SessionAuthGuard, CsrfGuard)
   @HttpCode(HttpStatus.OK)
+  @Audited({
+    kind: "user.password",
+    // Unlike the three routes above, this one has a session: the account is
+    // already known before the handler runs, so the row can be attributed and
+    // pre-written like any other. A password change on an account holding SSH
+    // credentials for a fleet is worth a permanent record.
+    destructive: true,
+    limit: LIMITS.passwordChange,
+    describe: () => ({ summary: "Changed the account password" }),
+  })
   async changePassword(@Body() dto: ChangePasswordDto, @Req() req: Request): Promise<{ ok: true }> {
     await this.usersService.changePassword((req as AuthenticatedRequest).user.id, dto.currentPassword, dto.newPassword);
     return { ok: true };
@@ -96,6 +124,14 @@ export class UsersController {
   @Post("logout")
   @HttpCode(HttpStatus.OK)
   @UseGuards(CsrfGuard)
+  @Audited({
+    kind: "user.logout",
+    // Recordable where sign-in is not: the session still exists when the
+    // pre-write runs, so the row has a user. The interceptor reads it from the
+    // session rather than from `request.user`, because this route carries no
+    // SessionAuthGuard to have set that.
+    describe: () => ({ summary: "Signed out" }),
+  })
   logout(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<{ ok: true }> {
     clearCsrfToken(req);
     return new Promise((resolve, reject) => {

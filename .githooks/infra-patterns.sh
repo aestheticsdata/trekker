@@ -103,14 +103,24 @@ scan_infra() {
     "An IPv4 address. Only 127.0.0.1, 0.0.0.0 and the RFC 5737 ranges belong in this repo." \
     '^(127\.[0-9.]+|0\.0\.0\.0|255\.255\.[0-9.]+|10\.[0-9.]+|192\.168\.[0-9.]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9.]+|192\.0\.2\.[0-9]+|198\.51\.100\.[0-9]+|203\.0\.113\.[0-9]+)$'
 
-  # The line-level escape is for a PEM header shown to the user as a `placeholder`
-  # prop, telling them what shape to paste. Real key material never arrives on
-  # such a line — it is a header followed by base64 — and gitleaks' own default
-  # rules cover the loaded gun properly. This rule is the fallback for when
-  # gitleaks is not installed, so it stays blunt everywhere else.
+  # Two line-level escapes, and both are narrow on purpose.
+  #
+  # `placeholder=` is the PEM header shown to the user as a form hint, telling
+  # them what shape to paste. Real key material never arrives on such a line —
+  # it is a header followed by base64.
+  #
+  # `gitleaks:allow` is gitleaks' own inline marker, honoured here so that one
+  # marker answers both layers instead of a line needing two. It is what the
+  # code that *recognises* key material has to write: a redactor and its tests
+  # cannot detect a shape they are forbidden to name. Per line, never per file —
+  # exempting `redact.ts` wholesale would make it the one place a real key could
+  # sit unread.
+  #
+  # This rule is the fallback for when gitleaks is not installed, so it stays
+  # blunt everywhere else.
   _check '(SHA256:[A-Za-z0-9+/]{43}|BEGIN [A-Z ]*PRIVATE KEY|ssh-(rsa|ed25519|dss) AAAA)' \
     "Key material or a host key fingerprint." \
-    "" "-nEio" 'placeholder[=:]'
+    "" "-nEio" 'placeholder[=:]|gitleaks:allow'
 
   return $found
 }

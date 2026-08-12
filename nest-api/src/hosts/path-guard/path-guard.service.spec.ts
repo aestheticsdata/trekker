@@ -1,9 +1,13 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ForbiddenException } from "@nestjs/common";
+import { ForbiddenException, HttpException } from "@nestjs/common";
+import { LIMITS } from "@audit/limits";
+import { RateLimitService } from "@audit/rate-limit.service";
 import { LocalDriver } from "@hosts/drivers/local.driver";
 import { PathGuardService, PATH_REFUSED_MESSAGE } from "@hosts/path-guard/path-guard.service";
+import type { AuditOpening, AuditService } from "@audit/audit.service";
+import type { RedisService } from "@redis/redis.service";
 import type { PrismaService } from "../../prisma/prisma.service";
 
 /**
@@ -22,7 +26,50 @@ interface RootFixture {
   access: "READ" | "WRITE";
 }
 
-function guardFor(roots: RootFixture[], options: { transport?: "LOCAL" | "SSH"; denylist?: string[] } = {}) {
+/**
+ * A stand-in Redis with the three operations the limiter uses, counting for
+ * real. Deliberately not an always-allow stub: the refusal limit now sits on
+ * the path of every refusal in this file, and stubbing it away would mean the
+ * tests below no longer run the code they appear to run.
+ *
+ * One counter per guard, so a test that pushes past the limit cannot change
+ * what the next test sees.
+ */
+function memoryLimits(): RateLimitService {
+  const counts = new Map<string, number>();
+  const redis = {
+    getClient: () => ({
+      incrBy: (key: string, amount: number) => {
+        const next = (counts.get(key) ?? 0) + amount;
+        counts.set(key, next);
+        return Promise.resolve(next);
+      },
+      expire: () => Promise.resolve(true),
+      ttl: () => Promise.resolve(30),
+    }),
+  } as unknown as RedisService;
+  return new RateLimitService(redis);
+}
+
+function recordingAudit(): { audit: AuditService; rows: AuditOpening[] } {
+  const rows: AuditOpening[] = [];
+  const audit = {
+    refused: (opening: AuditOpening) => {
+      rows.push(opening);
+      return Promise.resolve();
+    },
+  } as unknown as AuditService;
+  return { audit, rows };
+}
+
+interface GuardOptions {
+  transport?: "LOCAL" | "SSH";
+  denylist?: string[];
+  limits?: RateLimitService;
+  audit?: AuditService;
+}
+
+function guardFor(roots: RootFixture[], options: GuardOptions = {}) {
   const prisma = {
     hosts: {
       findFirst: ({ where }: { where: { id: string; userId: string } }) =>
@@ -33,7 +80,12 @@ function guardFor(roots: RootFixture[], options: { transport?: "LOCAL" | "SSH"; 
         ),
     },
   } as unknown as PrismaService;
-  return new PathGuardService(prisma, options.denylist ?? [join(base, "install")]);
+  return new PathGuardService(
+    prisma,
+    options.denylist ?? [join(base, "install")],
+    options.limits ?? memoryLimits(),
+    options.audit ?? recordingAudit().audit,
+  );
 }
 
 const driver = () => new LocalDriver(HOST_ID);
@@ -237,5 +289,86 @@ describe("PathGuardService", () => {
         intent: "read",
       }),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+// ------------------------------------------------ refused-path limit (TRE-30)
+
+/** A path that is always outside the roots, and never the same one twice. */
+function outside(attempt: number): string {
+  return join(base, "outside", `no-${attempt}.txt`);
+}
+
+async function refusalError(guard: PathGuardService, path: string): Promise<HttpException> {
+  try {
+    await guard.validate({ driver: driver(), userId: USER_ID, path, intent: "read" });
+  } catch (error) {
+    if (error instanceof HttpException) return error;
+    throw error;
+  }
+  throw new Error("expected the guard to refuse");
+}
+
+describe("refused-path limit", () => {
+  const roots = (): RootFixture[] => [{ path: join(base, "allowed"), access: "WRITE" }];
+  const { max } = LIMITS.pathRefusal;
+
+  it("answers 403 up to the limit and 429 past it", async () => {
+    const guard = guardFor(roots());
+
+    for (let attempt = 1; attempt <= max; attempt += 1) {
+      expect((await refusalError(guard, outside(attempt))).getStatus()).toBe(403);
+    }
+
+    const blocked = await refusalError(guard, outside(max + 1));
+    expect(blocked.getStatus()).toBe(429);
+    // Names the limit and the wait: a 429 that says only "too many requests"
+    // leaves the caller unable to tell a second from an hour.
+    expect(blocked.message).toContain(String(max));
+  });
+
+  it("still serves the paths the user is allowed to open", async () => {
+    // The property that makes this limit safe to enforce: it counts refusals,
+    // never requests. Someone mistyping a path is stopped from mistyping a
+    // twenty-first, not from doing their job.
+    const guard = guardFor(roots());
+    for (let attempt = 1; attempt <= max + 1; attempt += 1) {
+      await refusalError(guard, outside(attempt));
+    }
+
+    await expect(
+      guard.validate({ driver: driver(), userId: USER_ID, path: join(base, "allowed", "file.txt"), intent: "read" }),
+    ).resolves.toMatchObject({ realPath: join(base, "allowed", "file.txt") });
+  });
+
+  it("writes one audit row as the line is crossed, not one per refusal after it", async () => {
+    // Read routes are not audited, so for a filesystem walk this row is the
+    // only record there is — and a row per refusal past the limit would bury
+    // it under the very volume it is reporting.
+    const { audit, rows } = recordingAudit();
+    const guard = guardFor(roots(), { audit });
+
+    for (let attempt = 1; attempt <= max + 5; attempt += 1) {
+      await refusalError(guard, outside(attempt));
+    }
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: USER_ID, hostId: HOST_ID, kind: "path.refused" });
+  });
+
+  it("refuses on its own when the counter is unavailable", async () => {
+    // RateLimitService fails open by design. That must not become the guard
+    // failing open: a path outside the roots is still forbidden when Redis is
+    // down, it simply stops being counted.
+    const broken = new RateLimitService({
+      getClient: () => {
+        throw new Error("redis down");
+      },
+    } as unknown as RedisService);
+    const guard = guardFor(roots(), { limits: broken });
+
+    for (let attempt = 1; attempt <= max + 2; attempt += 1) {
+      expect((await refusalError(guard, outside(attempt))).getStatus()).toBe(403);
+    }
   });
 });

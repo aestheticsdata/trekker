@@ -1,3 +1,6 @@
+import { AuditService } from "@audit/audit.service";
+import { Audited } from "@audit/audited.decorator";
+import { LIMITS } from "@audit/limits";
 import type { HostProbeResult } from "@hosts/drivers/ssh-connection.pool";
 // The DTOs are value imports, and must stay that way: `import type` erases the
 // token from `design:paramtypes`, so `@Body()` arrives as `Function`, the
@@ -34,6 +37,14 @@ import type { Request } from "express";
  *
  * Ownership is enforced in the service by scoping each query to the session
  * user, so another account's host id reads as 404 rather than 403.
+ *
+ * Every mutating route carries `@Audited` (TRE-30). Note what the `describe`
+ * callbacks deliberately do NOT do: none of them sets `hostId`. They run before
+ * the handler, so the id in the URL or the body has not been ownership-checked
+ * yet, and writing it to a foreign key there would let anyone mint a row
+ * pointing at a host they do not own — an existence oracle in a table they can
+ * read. The id goes in the payload as plain text, and the real `hostId` is
+ * annotated after the service call has proven the host is theirs.
  */
 @Controller("hosts")
 @UseGuards(SessionAuthGuard)
@@ -41,6 +52,7 @@ export class HostsController {
   constructor(
     private readonly hosts: HostsService,
     private readonly hostKeys: HostKeyService,
+    private readonly audit: AuditService,
   ) {}
 
   @Get()
@@ -55,8 +67,23 @@ export class HostsController {
   @Post("test")
   @UseGuards(CsrfGuard)
   @HttpCode(HttpStatus.OK)
-  test(@Req() req: Request, @Body() dto: TestHostDto): Promise<HostProbeResult> {
-    return this.hosts.test(dto, userIdOf(req));
+  @Audited({
+    kind: "host.test",
+    // Audited even though it changes nothing here: it opens an SSH connection
+    // to an arbitrary address using a stored credential. "Who made this box
+    // reach out, and where to" is the question this row answers.
+    describe: (request) => {
+      const body = request.body as { label?: string; address?: string; hostId?: string };
+      return {
+        summary: `Tested a connection to ${body.label ?? body.address ?? "a host"}`,
+        payload: { requestedHostId: body.hostId },
+      };
+    },
+  })
+  async test(@Req() req: Request, @Body() dto: TestHostDto): Promise<HostProbeResult> {
+    const result = await this.hosts.test(dto, userIdOf(req));
+    if (dto.hostId) this.audit.annotate(req, { hostId: dto.hostId });
+    return result;
   }
 
   @Get(":id")
@@ -72,15 +99,45 @@ export class HostsController {
   @Post()
   @UseGuards(CsrfGuard)
   @HttpCode(HttpStatus.CREATED)
-  create(@Req() req: Request, @Body() dto: CreateHostDto): Promise<HostView> {
-    return this.hosts.create(userIdOf(req), dto);
+  @Audited({
+    kind: "host.create",
+    destructive: true,
+    limit: LIMITS.hostMutation,
+    describe: (request) => {
+      const body = request.body as { label?: string; transport?: string };
+      return {
+        summary: `Added the host ${body.label ?? "(unnamed)"}`,
+        tag: body.transport,
+      };
+    },
+  })
+  async create(@Req() req: Request, @Body() dto: CreateHostDto): Promise<HostView> {
+    const host = await this.hosts.create(userIdOf(req), dto);
+    this.audit.annotate(req, { hostId: host.id });
+    return host;
   }
 
   @Patch(":id")
   @UseGuards(CsrfGuard)
   @HttpCode(HttpStatus.OK)
-  update(@Req() req: Request, @Param("id") id: string, @Body() dto: UpdateHostDto): Promise<HostView> {
-    return this.hosts.update(userIdOf(req), id, dto);
+  @Audited({
+    kind: "host.update",
+    // Destructive: this route can rewrite the credential and the roots, which
+    // is what decides where Trekker may write on that machine.
+    destructive: true,
+    limit: LIMITS.hostMutation,
+    describe: (request) => ({
+      summary: "Edited a host",
+      payload: {
+        requestedHostId: request.params.id,
+        fields: Object.keys((request.body ?? {}) as Record<string, unknown>),
+      },
+    }),
+  })
+  async update(@Req() req: Request, @Param("id") id: string, @Body() dto: UpdateHostDto): Promise<HostView> {
+    const host = await this.hosts.update(userIdOf(req), id, dto);
+    this.audit.annotate(req, { hostId: host.id, summary: `Edited the host ${host.label}` });
+    return host;
   }
 
   /**
@@ -93,15 +150,47 @@ export class HostsController {
   @Post(":id/known-keys")
   @UseGuards(CsrfGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Audited({
+    kind: "host.acceptkey",
+    // The single most security-relevant row in this controller. Re-pinning a
+    // host key is the action a man-in-the-middle needs the user to take, so the
+    // fingerprint goes in the payload verbatim: "which key did we start
+    // trusting, and when" has to be answerable afterwards (TRE-10).
+    destructive: true,
+    limit: LIMITS.hostMutation,
+    describe: (request) => {
+      const body = request.body as { algorithm?: string; fingerprint?: string };
+      return {
+        summary: "Pinned a new host key",
+        tag: body.algorithm,
+        payload: { requestedHostId: request.params.id, fingerprint: body.fingerprint },
+      };
+    },
+  })
   async acceptKey(@Req() req: Request, @Param("id") id: string, @Body() dto: AcceptHostKeyDto): Promise<void> {
     await this.hostKeys.accept(userIdOf(req), id, dto.algorithm, dto.fingerprint);
+    this.audit.annotate(req, { hostId: id });
   }
 
   @Delete(":id")
   @UseGuards(CsrfGuard)
   @HttpCode(HttpStatus.OK)
+  @Audited({
+    kind: "host.delete",
+    destructive: true,
+    limit: LIMITS.hostMutation,
+    describe: (request) => ({
+      summary: "Removed a host",
+      payload: { requestedHostId: request.params.id },
+    }),
+  })
   async remove(@Req() req: Request, @Param("id") id: string): Promise<{ ok: true }> {
     await this.hosts.remove(userIdOf(req), id);
+    // `hostId` stays null here, and that is the correct record rather than a
+    // gap: the row it would point at no longer exists, so the foreign key
+    // cannot be satisfied. The schema already anticipates this — deleting a
+    // host nulls the reference on its activity rows and keeps their story. The
+    // id itself is in the payload, which is what an operator actually needs.
     return { ok: true };
   }
 }

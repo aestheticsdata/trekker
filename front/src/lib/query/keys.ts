@@ -9,4 +9,5 @@ export const QUERY_KEYS = {
   BOOKMARKS: "bookmarks",
   DIRECTORY: "directory",
   ENTRY: "entry",
+  ACTIVITY: "activity",
 } as const;

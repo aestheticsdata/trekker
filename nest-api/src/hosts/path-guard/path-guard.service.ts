@@ -1,5 +1,8 @@
 import { posix } from "node:path";
-import { ForbiddenException, Inject, Injectable, Logger } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
+import { AuditService } from "@audit/audit.service";
+import { LIMITS } from "@audit/limits";
+import { RateLimitService } from "@audit/rate-limit.service";
 import { DriverError, isDriverError } from "@hosts/drivers/driver-error";
 import type { HostDriver } from "@hosts/drivers/host-driver";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -112,13 +115,15 @@ export class PathGuardService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(LOCAL_DENYLIST) private readonly localDenylist: readonly string[],
+    private readonly limits: RateLimitService,
+    private readonly audit: AuditService,
   ) {}
 
   async validate({ driver, userId, path, intent }: ValidateArgs): Promise<ValidatedPath> {
     const host = await this.loadHost(driver.hostId, userId);
 
     if (path.includes("\0") || !posix.isAbsolute(path)) {
-      throw this.refuse("malformed", userId, driver.hostId, path);
+      throw await this.refuse("malformed", userId, driver.hostId, path);
     }
 
     let realPath: string;
@@ -129,18 +134,23 @@ export class PathGuardService {
       // connection error surface as itself.
       if (isDriverError(error) && error.isConnectionError) throw error;
       const category = error instanceof ResolveRefusal ? error.category : "unresolvable";
-      throw this.refuse(category, userId, driver.hostId, path);
+      throw await this.refuse(category, userId, driver.hostId, path);
     }
 
     const roots = await this.resolveRootRows(driver, host.roots);
     if (!withinRoots(realPath, roots, intent)) {
-      throw this.refuse(intent === "write" ? "outside-write-roots" : "outside-roots", userId, driver.hostId, path);
+      throw await this.refuse(
+        intent === "write" ? "outside-write-roots" : "outside-roots",
+        userId,
+        driver.hostId,
+        path,
+      );
     }
 
     // Checked after resolution on purpose: a symlink into the install
     // directory has already been unmasked by realpath at this point.
     if (host.transport === "LOCAL" && this.isDeniedLocally(realPath)) {
-      throw this.refuse("denylist", userId, driver.hostId, path);
+      throw await this.refuse("denylist", userId, driver.hostId, path);
     }
 
     return mint(driver.hostId, path, realPath, intent);
@@ -225,9 +235,57 @@ export class PathGuardService {
     return this.localDenylist.some((entry) => contains(entry, realPath));
   }
 
-  private refuse(category: string, userId: string, hostId: string, requestedPath: string): ForbiddenException {
+  /**
+   * The single exit for every refusal — and, because of that, the only place a
+   * refusal can be counted (TRE-30 §3).
+   *
+   * The limit lives here rather than on the routes because refusals are
+   * decided below the routing layer: the audit interceptor sees a 403 come out
+   * of a handler long after the guard has made up its mind, and on a read route
+   * it does not look at all. Every path decision in the application funnels
+   * through this method, so counting here is the one placement that cannot be
+   * bypassed by adding a route.
+   *
+   * Past the limit the answer becomes a 429. That discloses nothing the 403 did
+   * not: it is triggered by how many paths were refused, never by which — a
+   * path that exists and a path that does not still read identically.
+   */
+  private async refuse(
+    category: string,
+    userId: string,
+    hostId: string,
+    requestedPath: string,
+  ): Promise<HttpException> {
     // The category stays server-side; the response is always the same line.
     this.logger.warn(`refused (${category}) user=${userId} host=${hostId} path=${JSON.stringify(requestedPath)}`);
-    return new ForbiddenException(PATH_REFUSED_MESSAGE);
+
+    // Per user, not per session: signing in again mints a new session, so a
+    // per-session counter is no counter at all. The limit is named literally
+    // here rather than through a local alias — `audit-coverage.spec.ts` reads
+    // the call site to tell an enforced limit from a documented one.
+    const verdict = await this.limits.consume(LIMITS.pathRefusal, userId);
+    if (verdict.allowed) return new ForbiddenException(PATH_REFUSED_MESSAGE);
+
+    const message = RateLimitService.describe(LIMITS.pathRefusal, verdict.resetSeconds);
+
+    // One row per window, written as the line is crossed and not once per
+    // refusal after it. A walker producing a thousand refusals a minute would
+    // otherwise write a thousand identical rows and bury the signal under its
+    // own volume — and read routes are not audited at all, so for a filesystem
+    // walk this row is the only record there is.
+    if (verdict.count === LIMITS.pathRefusal.max + 1) {
+      await this.audit.refused(
+        {
+          userId,
+          hostId,
+          kind: "path.refused",
+          summary: `Blocked: ${LIMITS.pathRefusal.max} refused paths within the limit window`,
+          payload: { category, path: requestedPath },
+        },
+        message,
+      );
+    }
+
+    return new HttpException(message, HttpStatus.TOO_MANY_REQUESTS);
   }
 }
