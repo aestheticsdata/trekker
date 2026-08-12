@@ -61,10 +61,23 @@ describe("CreateHostDto", () => {
     expect(reasons.join(" ")).toMatch(/READ or WRITE/);
   });
 
-  it("refuses an empty roots array, which would serve nothing", async () => {
-    const reasons = await refusalOf({ ...validCreate, roots: [] }, CreateHostDto);
+  it("passes an empty roots array through to the service, which knows who is asking", async () => {
+    // It used to be refused here. It cannot be any more (TRE-49): the same
+    // array is a host that serves nothing to a MEMBER and an ordinary save from
+    // the install's owner, and a decorator never learns which one sent it.
+    // `hosts.service.spec.ts` holds both halves of that decision.
+    const result = (await pipe.transform({ ...validCreate, roots: [] }, metadata(CreateHostDto))) as typeof validCreate;
 
-    expect(reasons.join(" ")).toMatch(/no roots/);
+    expect(result.roots).toEqual([]);
+  });
+
+  it("still refuses more roots than the guard will resolve per request", async () => {
+    const reasons = await refusalOf(
+      { ...validCreate, roots: Array.from({ length: 33 }, (_, n) => ({ path: `/srv/${n}`, access: "READ" })) },
+      CreateHostDto,
+    );
+
+    expect(reasons.join(" ")).toMatch(/at most 32 roots/);
   });
 
   it("still accepts a host with no roots at all, which takes the home default", async () => {

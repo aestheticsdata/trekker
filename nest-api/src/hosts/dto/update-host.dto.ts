@@ -1,7 +1,6 @@
 import { Type } from "class-transformer";
 import {
   ArrayMaxSize,
-  ArrayMinSize,
   IsArray,
   IsHexColor,
   IsIn,
@@ -40,11 +39,12 @@ export class UpdateHostDto {
   /**
    * Replaces the whole allowlist — this is not a merge. Editing roots is
    * removing them as often as adding them, and a PATCH that could only ever
-   * widen the boundary would be a strange security control.
+   * widen the boundary would be a strange security control. Including, for the
+   * install's owner, removing the last one — see CreateHostDto on why no floor
+   * is stated here (TRE-49).
    */
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1, { message: "a host with no roots can serve nothing" })
   @ArrayMaxSize(MAX_ROOTS, { message: `a host has at most ${MAX_ROOTS} roots` })
   @ValidateNested({ each: true })
   @Type(() => HostRootInput)

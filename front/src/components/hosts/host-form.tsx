@@ -37,7 +37,10 @@ export function HostForm({
   onDeleted: (host: HostView) => void;
   onCancel: () => void;
 }) {
-  const { csrfToken } = useAuth();
+  const { csrfToken, user } = useAuth();
+  // The install's owner (TRE-48). Read here rather than threaded down from the
+  // manager: it is a property of who is signed in, not of which host is open.
+  const owner = user?.role === "OWNER";
   const [failure, setFailure] = useState<string | null>(null);
   const [probe, setProbe] = useState<HostProbeResult | null>(null);
   const [probing, setProbing] = useState(false);
@@ -53,9 +56,9 @@ export function HostForm({
     formState: { errors, isSubmitting },
   } = useForm<HostFormValues>({
     // A new SSH host must arrive with a credential; an edit keeps the stored one.
-    resolver: zodResolver(hostSchemaFor(host === null)),
+    resolver: zodResolver(hostSchemaFor({ requireCredential: host === null, owner })),
     mode: "onSubmit",
-    defaultValues: defaultsFor(host, localTaken),
+    defaultValues: defaultsFor(host, localTaken, owner),
   });
 
   const transport = watch("transport");
@@ -332,7 +335,7 @@ export function HostForm({
         <Field
           label="home"
           htmlFor="host-home"
-          hint="Where a pane opens. It must sit inside a root."
+          hint={owner ? "Where a pane opens." : "Where a pane opens. It must sit inside a root."}
           error={errors.homePath?.message}
         >
           <TextInput
@@ -348,6 +351,7 @@ export function HostForm({
         <RootsEditor
           roots={roots}
           homePath={homePath}
+          enforced={!owner}
           error={errors.roots?.message ?? errors.roots?.root?.message}
           onChange={(next) => setValue("roots", next)}
         />
@@ -540,15 +544,21 @@ function ProbePanel({
   );
 }
 
-function defaultsFor(host: HostView | null, localTaken: boolean): HostFormValues {
+function defaultsFor(host: HostView | null, localTaken: boolean, owner: boolean): HostFormValues {
   if (host) {
     return {
       label: host.label,
       transport: host.transport,
       colour: host.colour,
       homePath: host.homePath,
+      // A host with no roots is a state only an owner can save, and only their
+      // form can show. Standing one in for anyone else keeps the editor from
+      // rendering a list the schema would refuse; doing it for an owner would
+      // put a root back on the next save that they had just removed.
       roots:
-        host.roots.length > 0 ? host.roots.map((root) => ({ ...root })) : [{ path: host.homePath, access: "WRITE" }],
+        host.roots.length > 0 || owner
+          ? host.roots.map((root) => ({ ...root }))
+          : [{ path: host.homePath, access: "WRITE" }],
       address: host.address ?? "",
       port: String(host.port),
       username: host.username ?? "",

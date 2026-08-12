@@ -81,7 +81,7 @@ export class HostsService {
     // what every host had before TRE-43 and still the right default: the one
     // directory you named is the one you meant to reach.
     const roots = dto.roots ? normaliseRoots(dto.roots) : [{ path: cleanRootPath(homePath), access: "WRITE" as const }];
-    requireHomeInsideRoots(homePath, roots);
+    requireUsableRoots(homePath, roots, await this.isOwner(userId));
 
     const created = await this.prisma
       .$transaction(async (tx) => {
@@ -102,13 +102,17 @@ export class HostsService {
           },
         });
 
-        await tx.hostRoots.createMany({
-          data: roots.map((root) => ({
-            hostId: host.id,
-            path: root.path,
-            access: root.access,
-          })),
-        });
+        // An owner may save none at all, and `createMany` with an empty list is
+        // a round trip to insert nothing.
+        if (roots.length > 0) {
+          await tx.hostRoots.createMany({
+            data: roots.map((root) => ({
+              hostId: host.id,
+              path: root.path,
+              access: root.access,
+            })),
+          });
+        }
 
         if (dto.transport === "SSH" && dto.credentialKind && dto.credentialSecret) {
           await this.storeCredential(tx, host.id, dto.credentialKind, dto.credentialSecret);
@@ -164,7 +168,7 @@ export class HostsService {
     // the home and narrowing the roots in one PATCH is judged as one change
     // rather than as two that each look fine on their own.
     const roots = dto.roots ? normaliseRoots(dto.roots) : null;
-    if (roots) requireHomeInsideRoots(dto.homePath ?? host.homePath, roots);
+    if (roots) requireUsableRoots(dto.homePath ?? host.homePath, roots, await this.isOwner(userId));
 
     // Half a credential is never "no credential change" — silently keeping the
     // old secret while answering 200 would tell an operator rotating a leaked
@@ -222,13 +226,15 @@ export class HostsService {
         // reaches exactly this state anyway, and the guard reads the table
         // fresh on every request, so there is no cache to keep in step.
         await tx.hostRoots.deleteMany({ where: { hostId: id } });
-        await tx.hostRoots.createMany({
-          data: roots.map((root) => ({
-            hostId: id,
-            path: root.path,
-            access: root.access,
-          })),
-        });
+        if (roots.length > 0) {
+          await tx.hostRoots.createMany({
+            data: roots.map((root) => ({
+              hostId: id,
+              path: root.path,
+              access: root.access,
+            })),
+          });
+        }
       }
       // The home is also the host's default root, seeded at creation. Moving
       // one without the other either leaves the pane pointing outside every
@@ -390,6 +396,19 @@ export class HostsService {
   }
 
   /** A URL-safe, per-user-unique handle derived from the label. */
+  /**
+   * Whether this account owns the install (TRE-48).
+   *
+   * Read per request rather than carried on the session, so a role that changes
+   * binds the next call instead of the next sign-in. An account the query
+   * cannot find reads as a MEMBER — unreachable behind the session guard, and
+   * the restrictive answer is the one to be wrong in.
+   */
+  private async isOwner(userId: string): Promise<boolean> {
+    const user = await this.prisma.users.findUnique({ where: { id: userId }, select: { role: true } });
+    return user?.role === "OWNER";
+  }
+
   private async uniqueSlug(userId: string, label: string): Promise<string> {
     const base =
       label
@@ -450,14 +469,34 @@ function normaliseRoots(rows: readonly HostRootInput[]): NormalisedRoot[] {
 }
 
 /**
- * A home outside every root is a host whose pane opens on a refusal — a
- * misconfiguration worth catching at the edge rather than at first listing.
+ * Both rules a roots list has to satisfy before it is saved, and the one
+ * account they do not apply to.
+ *
+ * Each is a prediction about what the guard would do to the *next* listing: a
+ * host with nothing granted serves nothing, and a home outside every root opens
+ * its pane on a refusal. Neither prediction holds for the install's owner, who
+ * resolves against `/` whatever this list says (TRE-48) — so enforcing them
+ * there would refuse a save on the strength of a failure that cannot happen.
+ * For a MEMBER the reasoning is untouched, and so are the messages.
+ *
+ * The rows are still stored and still editable for an owner: the role lives in
+ * a column, so an account can stop being one, and a boundary nobody can write
+ * down before it binds is a boundary nobody can prepare.
  *
  * String containment, deliberately: the real check happens in the guard, after
  * both sides are resolved on the host, and reaching out to the machine to
  * validate a form field would make saving a host depend on it being up.
  */
-function requireHomeInsideRoots(homePath: string, roots: readonly NormalisedRoot[]): void {
+function requireUsableRoots(homePath: string, roots: readonly NormalisedRoot[], owner: boolean): void {
+  if (owner) return;
+
+  // Said the way the DTO used to say it, because it is the same refusal — it
+  // simply cannot be decided until the role is known, and a decorator never
+  // sees one.
+  if (roots.length === 0) {
+    throw new BadRequestException("a host with no roots can serve nothing");
+  }
+
   const home = cleanRootPath(homePath);
   const inside = roots.some((root) => home === root.path || home.startsWith(root.path === "/" ? "/" : `${root.path}/`));
   if (!inside) {

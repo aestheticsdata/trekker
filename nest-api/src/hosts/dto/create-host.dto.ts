@@ -1,7 +1,6 @@
 import { Type } from "class-transformer";
 import {
   ArrayMaxSize,
-  ArrayMinSize,
   IsArray,
   IsHexColor,
   IsIn,
@@ -43,12 +42,16 @@ export class CreateHostDto {
   /**
    * The allowlist (TRE-11). Omitted, the host gets one WRITE root at its home,
    * which is the bootstrap default and what every host had before TRE-43. Given,
-   * it is the complete list, and the home must sit inside one of them or the
-   * pane would open on a refusal.
+   * it is the complete list.
+   *
+   * An empty list is a shape question here and a policy question in the service
+   * (TRE-49): it serves nothing to a MEMBER, and nothing to refuse from the
+   * install's owner, who reaches every path regardless. A decorator never learns
+   * which account is asking, so the floor moved to `requireUsableRoots` and only
+   * the ceiling stayed.
    */
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1, { message: "a host with no roots can serve nothing" })
   @ArrayMaxSize(MAX_ROOTS, { message: `a host has at most ${MAX_ROOTS} roots` })
   @ValidateNested({ each: true })
   @Type(() => HostRootInput)

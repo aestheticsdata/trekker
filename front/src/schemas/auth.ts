@@ -13,6 +13,17 @@ export const AuthUserSchema = z.object({
   email: z.string(),
   /** Whether recovery is even possible for this account. */
   hasRecoveryPassphrase: z.boolean(),
+  /**
+   * Who owns the install (TRE-48). Nothing on this side is guarded by it — the
+   * API decides what an account may reach, and this copy only stops the screens
+   * asserting a rule the server no longer applies (TRE-49).
+   *
+   * `catch`, in the same spirit as the loose object above: an API that stopped
+   * sending it, or that one day sends a role this build has never heard of,
+   * degrades to the account with the fewest assumptions attached rather than
+   * failing sign-in outright.
+   */
+  role: z.enum(["OWNER", "MEMBER"]).catch("MEMBER"),
 });
 
 export const AuthResponseSchema = z.object({

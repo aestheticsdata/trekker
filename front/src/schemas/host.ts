@@ -34,13 +34,18 @@ export const CREDENTIAL_LABELS: Record<(typeof CREDENTIAL_KINDS)[number], string
 };
 
 /**
- * A schema per form, because one rule depends on which form it is: a new SSH
- * host must arrive with a credential (the API refuses it otherwise), while an
- * edit leaves the field blank to keep the stored one. Everything else is the
- * same, so the difference is a parameter rather than two schemas to keep in
- * step.
+ * A schema per form, because two rules depend on the circumstances rather than
+ * on the values: a new SSH host must arrive with a credential (the API refuses
+ * it otherwise) while an edit leaves the field blank to keep the stored one,
+ * and the two roots rules bind every account except the install's owner, whose
+ * paths resolve against `/` whatever the list says (TRE-48). Everything else is
+ * the same, so those are parameters rather than three schemas to keep in step.
+ *
+ * The relaxation is cosmetic in the strict sense — the API decides, and it now
+ * decides the same way (TRE-49). What it buys is an owner who is not stopped by
+ * a message predicting a refusal that would not happen.
  */
-export const hostSchemaFor = (requireCredential: boolean) =>
+export const hostSchemaFor = ({ requireCredential, owner }: { requireCredential: boolean; owner: boolean }) =>
   z
     .object({
       label: z
@@ -51,7 +56,9 @@ export const hostSchemaFor = (requireCredential: boolean) =>
       transport: z.enum(["LOCAL", "SSH"]),
       colour: z.string().regex(/^#[0-9a-fA-F]{6}$/, { message: "A colour is six hex digits, e.g. #7fa8c9." }),
       homePath: ABSOLUTE_PATH,
-      roots: z.array(rootSchema).min(1, { message: "A host with no roots can serve nothing." }),
+      roots: owner
+        ? z.array(rootSchema)
+        : z.array(rootSchema).min(1, { message: "A host with no roots can serve nothing." }),
 
       // SSH only. Kept in the object rather than behind a discriminated union so
       // that switching transport does not throw away what was already typed.
@@ -89,8 +96,9 @@ export const hostSchemaFor = (requireCredential: boolean) =>
     })
     // The home has to sit inside a root or the pane opens on a refusal. Checked
     // as strings here and again on the host after resolution, where a symlink
-    // can still change the answer.
-    .refine((values) => values.roots.some((root) => contains(root.path, values.homePath)), {
+    // can still change the answer — and not at all for an owner, for whom the
+    // refusal being predicted cannot occur.
+    .refine((values) => owner || values.roots.some((root) => contains(root.path, values.homePath)), {
       message: "The home sits outside every root, so this host would open on a refusal.",
       path: ["homePath"],
     });
