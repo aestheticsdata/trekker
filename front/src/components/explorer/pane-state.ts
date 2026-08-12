@@ -69,6 +69,9 @@ export type ExplorerAction =
   /** A click on a row, carrying the modifiers and the order they were seen in. */
   | { type: "click"; pane: PaneIndex; name: string; names: readonly string[]; extend: boolean; toggle: boolean }
   | { type: "move"; pane: PaneIndex; delta: number; names: readonly string[] }
+  /** ⌘A. Carries the names for the same reason `click` does — the pane knows
+   * what is on screen, the reducer does not. */
+  | { type: "selectAll"; pane: PaneIndex; names: readonly string[] }
   | { type: "cursor"; pane: PaneIndex; name: string | null };
 
 export function explorerReducer(state: ExplorerState, action: ExplorerAction): ExplorerState {
@@ -127,6 +130,14 @@ function paneReducer(pane: PaneMemory, action: ExplorerAction): PaneMemory {
       const next = Math.max(0, Math.min(action.names.length - 1, current < 0 ? 0 : current + action.delta));
       const name = action.names[next];
       return { ...pane, cur: name, sel: [name] };
+    }
+
+    case "selectAll": {
+      // Everything the pane is showing, which under a glob is not everything
+      // the directory holds — selecting rows you filtered away would be a way
+      // to delete files you never saw.
+      if (action.names.length === 0) return pane;
+      return { ...pane, sel: [...action.names], cur: pane.cur ?? action.names[0] };
     }
 
     case "cursor":

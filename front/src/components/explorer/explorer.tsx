@@ -175,6 +175,11 @@ export function Explorer({
   }, [firstNames, cursors]);
 
   const activePane = views[active];
+  // Indexed, not searched: `sel.includes` once per row is a hundred million
+  // comparisons when ⌘A has selected ten thousand of them (TRE-19 §2). Skipped
+  // outright while the panel is closed, since nothing else needs the rows.
+  const inspecting = inspector ? new Set(activePane.sel) : null;
+  const inspected = inspecting ? activeView.rows.filter((row) => inspecting.has(row.name)) : [];
   const cursorRow = activeView.rows.find((row) => row.name === activePane.cur) ?? null;
   const cursorPath = cursorRow ? joinPath(activePane.path, cursorRow.name) : null;
 
@@ -263,7 +268,19 @@ export function Explorer({
   useShortcut({
     enabled: manageHostsFor === null,
     key: "i",
+    inFields: true,
     onPress: () => onInspectorChange(!inspector),
+  });
+
+  // ⌘A selects what the pane is showing, from the array (TRE-19 §2). Nothing
+  // here counts rows in the DOM, so a selection of ten thousand costs the same
+  // as a selection of ten — but inside the glob field ⌘A still means "select
+  // this text", which is why this one stands down there and ⌘I does not.
+  useShortcut({
+    enabled: manageHostsFor === null,
+    key: "a",
+    inFields: false,
+    onPress: () => dispatch({ type: "selectAll", pane: active, names: rendered[active].rows.map((row) => row.name) }),
   });
 
   const callbacksFor = (index: PaneIndex): PaneCallbacks => ({
@@ -413,7 +430,7 @@ export function Explorer({
           host={hosts.find((host) => host.id === activePane.hostId) ?? null}
           path={activePane.path}
           rows={activeView.rows}
-          selected={activeView.rows.filter((row) => activePane.sel.includes(row.name))}
+          selected={inspected}
           sort={activePane.sort}
           dir={activePane.dir}
           glob={glob.trim()}
@@ -486,22 +503,41 @@ function useKeyboard({ enabled, onKey }: { enabled: boolean; onKey: (event: Keyb
 }
 
 /**
- * One ⌘-chord, live everywhere — including inside the glob field, which is the
- * difference from `useKeyboard`. `metaKey || ctrlKey` rather than a platform
- * check: this app is read on a Mac and on Linux, and a shortcut that works on
- * only one of them is a shortcut nobody trusts.
+ * One ⌘-chord. `metaKey || ctrlKey` rather than a platform check: this app is
+ * read on a Mac and on Linux, and a shortcut that works on only one of them is
+ * a shortcut nobody trusts.
+ *
+ * `inFields` is the whole difference from `useKeyboard`, which stands down
+ * wholesale while someone is typing. A chord the browser has no use for inside
+ * a text field (⌘I) should still work there; one that already means something
+ * (⌘A) must not be stolen.
  */
-function useShortcut({ enabled, key, onPress }: { enabled: boolean; key: string; onPress: () => void }) {
+function useShortcut({
+  enabled,
+  key,
+  inFields,
+  onPress,
+}: {
+  enabled: boolean;
+  key: string;
+  inFields: boolean;
+  onPress: () => void;
+}) {
   useEffect(() => {
     if (!enabled) return;
     const handler = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
       if (event.key.toLowerCase() !== key) return;
+      if (!inFields) {
+        const target = event.target as HTMLElement | null;
+        const tag = target?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+      }
       event.preventDefault();
       onPress();
     };
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [enabled, key, onPress]);
+  }, [enabled, key, inFields, onPress]);
 }

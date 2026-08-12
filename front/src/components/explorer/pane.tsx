@@ -1,9 +1,9 @@
 "use client";
 
 import { pathOf } from "@components/explorer/pane-state";
+import { useRowWindow } from "@components/explorer/row-window";
 import { ageDays, ageIndex, breadcrumbs, formatAge, formatSize, formatTotal, typeTag } from "@helpers/listing";
 import { ApiError } from "@lib/api/client";
-import { useEffect, useRef } from "react";
 
 import type { PaneView } from "@components/explorer/pane-state";
 import type { Crumb, SortKey } from "@helpers/listing";
@@ -16,6 +16,13 @@ import type { HostView } from "@lib/api/hosts";
  * Presentational and controlled — every interaction is an action the explorer
  * dispatches, so the two panes share one reducer and the keyboard layer can
  * drive either of them without reaching inside.
+ *
+ * The rows are virtualised (TRE-19): only the ones on screen are in the DOM,
+ * which is what makes `node_modules` open. Two consequences run through this
+ * file. Nothing may be answered by looking at the DOM — the cursor scrolls by
+ * index, the footer counts from the array — and nothing may be O(rows) *per
+ * row*, because at ten thousand entries that is a hundred million comparisons
+ * for a footer nobody is reading.
  */
 
 /**
@@ -86,17 +93,31 @@ export function Pane({
   callbacks: PaneCallbacks;
 }) {
   const path = pathOf(pane);
-  const listRef = useRef<HTMLDivElement>(null);
 
-  // The cursor must stay visible when the arrow keys push it past an edge.
-  useEffect(() => {
-    if (!pane.cur || !active) return;
-    const row = listRef.current?.querySelector(`[data-row="${CSS.escape(pane.cur)}"]`);
-    row?.scrollIntoView({ block: "nearest" });
-  }, [pane.cur, active]);
+  // The selection is a list of names (TRE-16 §3) because a listing can be
+  // re-sorted underneath it. Asking that list a question once per row is fine
+  // at twenty rows and quadratic at ten thousand, so it is indexed once here
+  // and the array is never searched again in this render.
+  const selected = new Set(pane.sel);
 
-  const selectedBytes = rows.filter((row) => pane.sel.includes(row.name)).reduce((sum, row) => sum + row.size, 0);
-  const directories = rows.filter((row) => row.type === "dir").length;
+  // `..` is part of the scrolling list, not furniture above it: it is one row
+  // tall like the rest, so counting it into the window keeps the arithmetic
+  // exact and the whole listing under one scroll container.
+  const upRow = path === "/" ? 0 : 1;
+  const cursorIndex = pane.cur === null ? -1 : rows.findIndex((row) => row.name === pane.cur);
+
+  const list = useRowWindow({
+    count: rows.length + upRow,
+    memoryKey: path,
+    ready: !loading && !error && host !== null,
+    // Kept in view by index: the row the cursor names is usually not mounted,
+    // so there is nothing to call `scrollIntoView` on. An inactive pane chases
+    // nothing — its cursor is not the one the arrow keys are moving.
+    cursor: active && cursorIndex >= 0 ? cursorIndex + upRow : -1,
+  });
+
+  const selectedBytes = rows.reduce((sum, row) => (selected.has(row.name) ? sum + row.size : sum), 0);
+  const directories = rows.reduce((count, row) => (row.type === "dir" ? count + 1 : count), 0);
   const largest = rows.reduce((max, row) => Math.max(max, row.size), 0);
   // Totalled over the rows on screen, not the whole directory: a count and a
   // size sitting on the same line must describe the same set of files.
@@ -137,9 +158,18 @@ export function Pane({
       />
 
       <div
-        ref={listRef}
-        className="min-h-16.5 flex-auto overflow-x-hidden overflow-y-auto"
+        ref={list.scrollRef}
+        className="relative min-h-16.5 flex-auto overflow-x-hidden overflow-y-auto"
       >
+        {/* The row height, asked of the browser rather than written down here.
+            `--ui-base` (TRE-44) rescales it at runtime and the virtualiser has
+            to follow; zero width and absolute, so it is only ever a height. */}
+        <i
+          ref={list.probeRef}
+          aria-hidden
+          className="pointer-events-none absolute top-0 left-0 h-row w-0"
+        />
+
         {loading ? (
           <Skeleton />
         ) : host === null ? (
@@ -163,32 +193,53 @@ export function Pane({
             onUp={callbacks.onUp}
           />
         ) : (
-          <>
-            {path !== "/" && (
-              <button
-                type="button"
-                onClick={callbacks.onUp}
-                className="text-on-pane-muted hover:bg-pane-hover grid h-row w-full grid-cols-[0.875rem_1fr] items-center gap-1.25 px-2.25 text-left font-mono text-xs"
-              >
-                <span className="text-center">↰</span>
-                <span>..</span>
-              </button>
-            )}
-            {rows.map((row) => (
-              <Row
-                key={row.name}
-                row={row}
-                selected={pane.sel.includes(row.name)}
-                cursor={active && pane.cur === row.name}
-                paneActive={active}
-                largest={largest}
-                heat={heat}
-                now={now}
-                onClick={callbacks.onRowClick}
-                onOpen={callbacks.onOpen}
-              />
-            ))}
-          </>
+          // The full height, so the scrollbar describes the whole directory,
+          // with the mounted rows translated into place inside it. One
+          // transform for the window rather than a position per row: the
+          // browser then has one thing to composite when the window moves.
+          <div
+            className="relative"
+            style={{ height: `${list.total}px` }}
+          >
+            <div
+              className="absolute inset-x-0 top-0"
+              style={{ transform: `translateY(${list.offset}px)` }}
+            >
+              {Array.from({ length: list.end - list.start }, (_, offset) => {
+                const index = list.start + offset;
+
+                if (upRow === 1 && index === 0) {
+                  return (
+                    <button
+                      key=".."
+                      type="button"
+                      onClick={callbacks.onUp}
+                      className="text-on-pane-muted hover:bg-pane-hover grid h-row w-full grid-cols-[0.875rem_1fr] items-center gap-1.25 px-2.25 text-left font-mono text-xs"
+                    >
+                      <span className="text-center">↰</span>
+                      <span>..</span>
+                    </button>
+                  );
+                }
+
+                const row = rows[index - upRow];
+                return (
+                  <Row
+                    key={row.name}
+                    row={row}
+                    selected={selected.has(row.name)}
+                    cursor={active && pane.cur === row.name}
+                    paneActive={active}
+                    largest={largest}
+                    heat={heat}
+                    now={now}
+                    onClick={callbacks.onRowClick}
+                    onOpen={callbacks.onOpen}
+                  />
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
 

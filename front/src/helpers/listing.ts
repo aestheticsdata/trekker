@@ -203,6 +203,14 @@ export type SortDirection = 1 | -1;
  * re-render never shuffles equal rows.
  */
 export function sortRows(rows: readonly FileRow[], key: SortKey, direction: SortDirection): FileRow[] {
+  /**
+   * `Date.parse` in the comparator is one parse per comparison of a string with
+   * one answer — a quarter of a million of them on a ten-thousand-entry
+   * directory, which made age eight times dearer than every other column
+   * (TRE-19). Parsed once per row instead.
+   */
+  const instant = key === "age" ? new Map(rows.map((row) => [row, Date.parse(row.mtime)])) : null;
+
   return rows.slice().sort((a, b) => {
     if ((a.type === "dir") !== (b.type === "dir")) return a.type === "dir" ? -1 : 1;
 
@@ -211,7 +219,7 @@ export function sortRows(rows: readonly FileRow[], key: SortKey, direction: Sort
     // The column shows an age, so ascending means youngest first — which is
     // the newest mtime, not the oldest. Sorting the timestamps the obvious way
     // round would contradict the values printed in the column.
-    else if (key === "age") comparison = Date.parse(b.mtime) - Date.parse(a.mtime);
+    else if (instant) comparison = (instant.get(b) as number) - (instant.get(a) as number);
     else if (key === "mode") comparison = a.mode.localeCompare(b.mode);
     else if (key === "owner") comparison = a.owner.localeCompare(b.owner);
 
