@@ -13,8 +13,8 @@ import {
 import { PermissionsModal } from "@components/explorer/permissions-modal";
 import { HostManager } from "@components/hosts/host-manager";
 import { useToast } from "@components/ui/toast";
-import { globToRegExp, joinPath, resolveTarget, sortRows } from "@helpers/listing";
-import { fetchListing } from "@lib/api/fs";
+import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
+import { fetchListing, fetchStat } from "@lib/api/fs";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useState } from "react";
@@ -70,6 +70,8 @@ export function Explorer({
   onSelectionChange,
   manageHostsFor,
   onManageHosts,
+  permissionsOpen,
+  onPermissionsOpenChange,
 }: {
   hosts: readonly HostView[];
   /** True while the hosts query is in flight, so an unbound pane waits rather
@@ -93,17 +95,16 @@ export function Explorer({
    * sidebar can open it too. */
   manageHostsFor: PaneIndex | null;
   onManageHosts: (pane: PaneIndex | null) => void;
+  /** The toolbar's `permissions` button, owned by the page for the same reason
+   * the host manager is: the button lives up there, the selection lives here. */
+  permissionsOpen: boolean;
+  onPermissionsOpenChange: (open: boolean) => void;
 }) {
   const [memory, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
   const { push } = useToast();
   const queryClient = useQueryClient();
   /** Set once a host has been bound automatically, so it happens per pane once. */
   const [seeded, setSeeded] = useState<[boolean, boolean]>([false, false]);
-  // What the permissions modal is aimed at, captured when it opens (TRE-21).
-  // A snapshot rather than a live read of the selection: the listing refreshes
-  // under it the moment a change lands, and a panel whose target moves while it
-  // is open is a panel that applies to something other than what it says.
-  const [permissionsFor, setPermissionsFor] = useState<PermissionsTarget | null>(null);
 
   const views: [PaneView, PaneView] = [
     { ...memory.panes[0], hostId: panes[0].host, path: panes[0].path, sort: panes[0].sort, dir: panes[0].dir },
@@ -185,7 +186,9 @@ export function Explorer({
   // Indexed, not searched: `sel.includes` once per row is a hundred million
   // comparisons when ⌘A has selected ten thousand of them (TRE-19 §2). Skipped
   // outright while the panel is closed, since nothing else needs the rows.
-  const inspecting = inspector ? new Set(activePane.sel) : null;
+  // Also computed while the permissions modal is open: the toolbar's button
+  // needs the selection whether or not the panel that usually shows it is up.
+  const inspecting = inspector || permissionsOpen ? new Set(activePane.sel) : null;
   const inspected = inspecting ? activeView.rows.filter((row) => inspecting.has(row.name)) : [];
   const cursorRow = activeView.rows.find((row) => row.name === activePane.cur) ?? null;
   const cursorPath = cursorRow ? joinPath(activePane.path, cursorRow.name) : null;
@@ -193,6 +196,40 @@ export function Explorer({
   useEffect(() => {
     onSelectionChange(cursorRow && cursorPath ? { row: cursorRow, path: cursorPath } : null);
   }, [cursorRow, cursorPath, onSelectionChange]);
+
+  /**
+   * What the permissions modal is aimed at (TRE-21).
+   *
+   * With nothing selected it is the directory the pane is showing — which is
+   * the case the toolbar button lands in most often, since opening a folder is
+   * how you arrive at wanting to change its mode. That needs the directory's
+   * own stat, which the listing does not carry; it shares the inspector's cache
+   * entry, so it is usually already there.
+   */
+  const needsDirectoryStat = permissionsOpen && inspected.length === 0 && activePane.hostId !== null;
+  const directoryStat = useQuery({
+    queryKey: [QUERY_KEYS.ENTRY, activePane.hostId, activePane.path],
+    queryFn: () => fetchStat(activePane.hostId as string, activePane.path),
+    enabled: needsDirectoryStat,
+    staleTime: STALE_MS,
+    retry: false,
+    throwOnError: false,
+  });
+
+  const permissionsTarget: PermissionsTarget | null =
+    !permissionsOpen || activePane.hostId === null
+      ? null
+      : inspected.length > 0
+        ? { hostId: activePane.hostId, directory: activePane.path, entries: inspected }
+        : directoryStat.data
+          ? // The stat's `name` is the basename, so the parent is where it
+            // lives and the modal joins the two back into the same path.
+            {
+              hostId: activePane.hostId,
+              directory: parentPath(activePane.path),
+              entries: [directoryStat.data],
+            }
+          : null;
 
   /**
    * The one way a pane moves. Both writes are issued here — the reducer's
@@ -445,22 +482,19 @@ export function Explorer({
           error={activeView.listing.error}
           now={now}
           onClose={() => onInspectorChange(false)}
-          onEditPermissions={() => {
-            if (activePane.hostId === null || inspected.length === 0) return;
-            setPermissionsFor({ hostId: activePane.hostId, directory: activePane.path, entries: inspected });
-          }}
+          onEditPermissions={() => onPermissionsOpenChange(true)}
         />
       )}
 
-      {permissionsFor && (
+      {permissionsTarget && (
         <PermissionsModal
-          target={permissionsFor}
-          onClose={() => setPermissionsFor(null)}
+          target={permissionsTarget}
+          onClose={() => onPermissionsOpenChange(false)}
           onApplied={() => {
             // Both caches: the listing carries the mode column, and the
             // inspector reads its own stat for the selected entry.
-            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, permissionsFor.hostId] });
-            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.ENTRY, permissionsFor.hostId] });
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, permissionsTarget.hostId] });
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.ENTRY, permissionsTarget.hostId] });
           }}
         />
       )}

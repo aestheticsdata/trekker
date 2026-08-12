@@ -6,7 +6,7 @@ import { TopBar } from "@components/shell/top-bar";
 import { ToastProvider } from "@components/ui/toast";
 
 import type { SelectionSummary } from "@components/shell/status-bar";
-import type { SplitMode, ViewMode } from "@components/shell/toolbar";
+import type { SplitMode, ToolbarAction, ViewMode } from "@components/shell/toolbar";
 import type { HostChip, MachineStats, SavedView } from "@components/shell/top-bar";
 import type { ReactNode } from "react";
 
@@ -33,6 +33,7 @@ export function AppShell({
   onHeatChange,
   inspector,
   onInspectorChange,
+  actions,
   sidebar,
   children,
 }: {
@@ -53,6 +54,8 @@ export function AppShell({
    * everything it describes — selection, rows, sort — belongs to a pane. */
   inspector?: boolean;
   onInspectorChange?: (open: boolean) => void;
+  /** The action row, with whatever M2 has actually built wired up (TRE-21). */
+  actions?: readonly ToolbarAction[];
   /** The 176px left rail (TRE-18). Rendered beside the panes, inside the bars. */
   sidebar?: ReactNode;
   children: ReactNode;
@@ -79,6 +82,7 @@ export function AppShell({
           onHeatChange={onHeatChange}
           inspector={inspector}
           onInspectorChange={onInspectorChange}
+          actions={actions}
         />
 
         {/* min-h-0 or a tall child stretches the flex item instead of scrolling.

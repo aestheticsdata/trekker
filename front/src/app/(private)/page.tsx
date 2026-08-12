@@ -2,6 +2,7 @@
 
 import { Explorer } from "@components/explorer/explorer";
 import { AppShell } from "@components/shell/app-shell";
+import { M2_ACTIONS } from "@components/shell/toolbar";
 import { Sidebar } from "@components/sidebar/sidebar";
 import { formatInstant, formatSize } from "@helpers/listing";
 import { fetchHealth } from "@lib/api/health";
@@ -41,6 +42,22 @@ export default function HomePage() {
   const [globMatches, setGlobMatches] = useState<number | null>(null);
   const [selection, setSelection] = useState<{ row: FileRow; path: string } | null>(null);
   const [manageHostsFor, setManageHostsFor] = useState<PaneIndex | null>(null);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
+
+  /**
+   * The toolbar's action row, with the one M2 has built wired up (TRE-21).
+   *
+   * The row is declared in the toolbar so the palette can share it, and each
+   * action stays disabled until its ticket lands — which is also the honest
+   * signal that `permissions` was inert until now. Replacing the entry rather
+   * than mutating the shared list keeps the default list a description of what
+   * exists rather than of what this page happens to enable.
+   */
+  const actions = M2_ACTIONS.map((action) =>
+    action.id === "chmod"
+      ? { ...action, unavailableReason: undefined, onSelect: () => setPermissionsOpen(true) }
+      : action,
+  );
 
   const { data: health } = useQuery({
     queryKey: [QUERY_KEYS.HEALTH],
@@ -111,6 +128,7 @@ export default function HomePage() {
       onHeatChange={(heat) => void setShared({ heat })}
       inspector={shared.insp}
       onInspectorChange={(insp) => void setShared({ insp })}
+      actions={actions}
       sidebar={
         <Sidebar
           hosts={hosts ?? []}
@@ -138,6 +156,8 @@ export default function HomePage() {
         onSelectionChange={setSelection}
         manageHostsFor={manageHostsFor}
         onManageHosts={setManageHostsFor}
+        permissionsOpen={permissionsOpen}
+        onPermissionsOpenChange={setPermissionsOpen}
       />
     </AppShell>
   );

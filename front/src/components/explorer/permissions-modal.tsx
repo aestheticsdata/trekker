@@ -152,7 +152,9 @@ export function PermissionsModal({
     },
   });
 
-  const subject = entries.length === 1 ? first.name : `${entries.length} entries`;
+  // `/` stats with an empty name — it is the one path that is all separator —
+  // so the header falls back to the path rather than rendering a blank.
+  const subject = entries.length === 1 ? first.name || joinPath(directory, "") : `${entries.length} entries`;
   const command = `chmod ${recursive ? "-R " : ""}${octal} ${entries.length > 2 ? `${entries.length} paths` : paths.join(" ")}`;
   const marked = SPECIAL.filter((special) => (bits & special.bit) !== 0);
 

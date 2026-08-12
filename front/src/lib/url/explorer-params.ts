@@ -105,7 +105,11 @@ export const explorerParams = {
   split: parseAsStringLiteral(SPLIT_MODES).withDefault("split"),
   view: parseAsStringLiteral(VIEW_MODES).withDefault("detail"),
   heat: parseAsFlag.withDefault(false),
-  insp: parseAsFlag.withDefault(false),
+  // Visible by default, as 2a draws it (`inspector: this.props.showInspector ??
+  // true`). It shipped hidden in TRE-17, which made the panel — and the only
+  // way into the permissions modal — reachable solely by a shortcut nobody had
+  // been told about.
+  insp: parseAsFlag.withDefault(true),
   // Typed a character at a time. Without this each keystroke is a URL write,
   // and on the App Router each write is three history calls (nuqs sets
   // rateLimitFactor 3 for exactly that reason). Debounced, the URL catches up
