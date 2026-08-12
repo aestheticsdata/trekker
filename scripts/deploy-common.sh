@@ -75,7 +75,8 @@ compute_release_metadata() {
   RELEASE_NAME="release-$(date +'%Y%m%d-%H%M%S')-${GIT_BRANCH}-${GIT_HASH}"
 }
 
-# Refuses to deploy a tree with uncommitted changes. pfa does not check this;
+# Refuses to deploy a tree with uncommitted changes. The sibling apps do not
+# check this;
 # here it is what makes every label this script writes true.
 #
 # rsync sends the working directory and skips .git, so uncommitted edits ship.

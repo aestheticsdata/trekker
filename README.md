@@ -134,7 +134,7 @@ boot rather than serve an endpoint that fails every request.
 
 ## Auth
 
-Session cookie on Redis plus a per-session CSRF token, same shape as pfa.
+Session cookie on Redis plus a per-session CSRF token, the same shape as its sibling apps.
 
 | Route | Auth |
 |---|---|
@@ -148,9 +148,9 @@ Session cookie on Redis plus a per-session CSRF token, same shape as pfa.
 
 Three things worth knowing:
 
-- **Sign-ups are closed unless `SIGNUPS_ENABLED` is exactly `"true"`.** pfa closes only on the
-  literal `"false"`, so a typo leaves registration open. On an app holding SSH credentials the
-  default has to be the other way round.
+- **Sign-ups are closed unless `SIGNUPS_ENABLED` is exactly `"true"`.** The version this was
+  taken from closes only on the literal `"false"`, so a typo leaves registration open. On an app
+  holding SSH credentials the default has to be the other way round.
 - **The recovery passphrase is generated, not chosen**, shown once at sign-up and kept only as a
   bcrypt hash. There is no email reset — an account with no passphrase can only be reset on the
   host. A successful recovery destroys every session the account has.
@@ -243,4 +243,5 @@ toggle (TRE-29), not as a generic denial.
 
 ## Tracking
 
-Tickets live in Spira under the `TRE` key. Code comments reference them by identifier.
+Tickets live in a self-hosted tracker under the `TRE` key. Code comments reference them by
+identifier.

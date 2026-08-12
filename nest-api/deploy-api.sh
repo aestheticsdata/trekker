@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploys the Trekker API. Same shape as pfa's: rsync into a fresh release
+# Deploys the Trekker API. Same shape as its sibling apps': rsync into a fresh release
 # directory, atomic switch keeping the previous version as a backup, install and
 # build on the server, pm2 reload, with automatic rollback if anything fails
 # after the switch.
@@ -19,7 +19,7 @@ API_ROOT="$TREKKER_REMOTE_ROOT"
 
 # The deployed unit is the whole pnpm workspace, not just nest-api/.
 #
-# pfa and bkmk ship one package because each of their halves is an independent
+# The sibling apps ship one package because each of their halves is an independent
 # pnpm root with its own lockfile. Trekker is a single workspace, so the
 # lockfile and the workspace manifest live at the repo root — send only
 # nest-api/ and `pnpm install --frozen-lockfile` has nothing to work from.

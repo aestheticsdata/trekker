@@ -30,12 +30,12 @@ transfers with per-file conflict resolution, permissions, and disk pressure at a
   environment-specific comes from env at runtime.
 - **Server-side is the authority.** Path safety, confirmation tokens, allowlists and quotas are
   enforced in the API. The UI's guards are ergonomics, never security.
-- **Match pfa.** Same stack, same layout, same naming, same auth. A reader of pfa should find
-  their way around Trekker without a map.
+- **Match the sibling apps.** Same stack, same layout, same naming, same auth. A reader of any
+  of them should find their way around Trekker without a map.
 
 ## 3. Stack and layout
 
-Mirrors `pfa`:
+Mirrors the sibling apps:
 
 ```
 trekker/
@@ -45,7 +45,7 @@ trekker/
   biome.json · README.md · DEPLOY.md
 ```
 
-Auth is pfa's, unchanged in shape: `express-session` on Redis, httpOnly cookie, per-session
+Auth is theirs, unchanged in shape: `express-session` on Redis, httpOnly cookie, per-session
 CSRF token compared with `timingSafeEqual`, `CsrfGuard` on every unsafe verb, gated signup.
 
 ## 4. The host driver

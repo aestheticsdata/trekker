@@ -51,7 +51,8 @@ export default function SignupPage() {
   // Closed, or not yet known: the form still renders, just inert. Removing it
   // would move every control on the screen and leave someone wondering whether
   // they are in the right place; disabling it says "not here, not now" while
-  // keeping the way back to sign in exactly where it was (bkmk does the same).
+  // keeping the way back to sign in exactly where it was (a sibling app does
+  // the same).
   const locked = isPending || open === false;
 
   const links = (

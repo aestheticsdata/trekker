@@ -6,7 +6,7 @@ import type { AuthUser } from "@auth/interfaces/authTypes";
 
 /**
  * Who is signed in, and the CSRF token that proves this tab is the one that
- * signed in (TRE-15 §3). Ported from pfa unchanged in shape.
+ * signed in (TRE-15 §3). Ported from a sibling app unchanged in shape.
  *
  * The token lives here and nowhere else — not in localStorage, not in a URL.
  * It is handed to the app by the server on sign-in and on every reload through

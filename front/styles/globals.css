@@ -5,11 +5,11 @@
  *
  * The mockup is inline styles with hard-coded hex, which is what a Claude
  * Design file is. Ported literally it becomes several hundred arbitrary
- * Tailwind values — the mess pfa spent an epic undoing. So the system is
+ * Tailwind values — the mess a sibling app spent an epic undoing. So the system is
  * extracted once, here, and every component is assembled from it.
  *
  * Dark only. There is no light theme and no toggle: the app is one surface
- * treatment, like pfa.
+ * treatment, like its siblings.
  */
 @theme {
   /* ---- surfaces --------------------------------------------------------

@@ -1,7 +1,7 @@
 import { AuthCard, AuthLinks } from "@components/auth/auth-card";
 
 /**
- * The legal notice, same rows as pfa's about page (TRE-15 §1).
+ * The legal notice, same rows as a sibling app's about page (TRE-15 §1).
  *
  * A server component: there is nothing here to interact with, so there is no
  * reason to ship it as JavaScript.

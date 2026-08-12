@@ -19,7 +19,7 @@ export default function Providers({
   initialUser?: AuthUser | null;
   initialCsrfToken?: string | null;
 }) {
-  // Unlike pfa, Trekker's data is a live filesystem: a listing goes stale the
+  // Unlike its siblings, Trekker's data is a live filesystem: a listing goes stale the
   // moment anything writes to that directory, including from another session.
   // So a short staleTime and refetch on focus, with explicit invalidation after
   // every mutation on top (TRE-16).

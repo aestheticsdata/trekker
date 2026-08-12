@@ -6,7 +6,7 @@ import { PrismaClient } from "../../generated/prisma/client";
 const CONNECT_TIMEOUT_MS = 10_000;
 
 /**
- * Prisma over the MariaDB driver adapter, same as pfa.
+ * Prisma over the MariaDB driver adapter, same as the sibling apps.
  *
  * The health check does not go through here on purpose — see DatabaseService.
  * A liveness probe that depends on the ORM being wired correctly cannot tell

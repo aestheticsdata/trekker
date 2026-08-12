@@ -10,7 +10,7 @@ export const EXPLORER_PATH = "/";
 
 /**
  * The one place a successful authentication becomes app state (TRE-15 §3).
- * Ported from pfa: put the user and the CSRF token into context, then leave
+ * Ported from a sibling app: put the user and the CSRF token into context, then leave
  * for the explorer unless we are already there.
  */
 const useCredentials = () => {

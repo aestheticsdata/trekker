@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { Request } from "express";
 
 /**
- * Per-session CSRF token, ported from pfa unchanged. The token lives in the
+ * Per-session CSRF token, ported from a sibling app unchanged. The token lives in the
  * session (server side, in Redis) and must be echoed in a header — a cookie
  * alone is not proof of intent, since the browser attaches it to any request.
  */

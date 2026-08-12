@@ -1,6 +1,6 @@
 # Deploying Trekker
 
-Same shape as pfa and bkmk: PM2 for the processes, nginx in front, one subdomain,
+The same shape as its sibling apps: PM2 for the processes, nginx in front, one subdomain,
 one deploy script per side. Each deploy rsyncs into a fresh release directory,
 builds on the server, switches atomically while keeping the previous version as a
 backup, reloads PM2, and rolls back on its own if anything fails after the switch.
@@ -14,7 +14,7 @@ backup, reloads PM2, and rolls back on its own if anything fails after the switc
 ## Where configuration lives
 
 **In production: `nest-api/ecosystem.config.js`, and nothing else.** There is no
-`.env` on the server. Same as pfa and bkmk.
+`.env` on the server. Same as the sibling apps.
 
 | File | Tracked? | Contents |
 |---|---|---|
@@ -446,6 +446,6 @@ pnpm --filter ./nest-api verify:secrets
 
 ## Database backup
 
-Not set up yet, and now overdue — there is a schema as of TRE-6. pfa's
+Not set up yet, and now overdue — there is a schema as of TRE-6. A sibling app's
 `db-backup` cron is the model to copy. Worth doing before the first migration
 that drops or rewrites a column.

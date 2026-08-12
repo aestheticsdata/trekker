@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploys the Trekker front. Same shape as pfa's: rsync into a release
+# Deploys the Trekker front. Same shape as its sibling apps': rsync into a release
 # directory, build on the server, atomic switch keeping the previous version as
 # a backup, pm2 reload, automatic rollback if anything fails after the switch.
 #

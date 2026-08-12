@@ -9,7 +9,7 @@ export type AuthenticatedRequest = Request & { user: SessionUser };
 
 /**
  * Lives in `users/` rather than beside the first feature that needed it, which
- * is where pfa ended up putting it. Every module from TRE-12 onwards depends on
+ * is where a sibling app ended up putting it. Every module from TRE-12 onwards depends on
  * this guard; it is not the file explorer's property.
  */
 @Injectable()
