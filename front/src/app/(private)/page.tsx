@@ -46,6 +46,22 @@ export default function HomePage() {
   const [permissionsOpen, setPermissionsOpen] = useState(false);
 
   /**
+   * Whether the layout has been moved by hand yet (TRE-62 §4).
+   *
+   * Panes open and collapse by animating their width, and that motion belongs
+   * to somebody pressing something. A cold open arrives at a layout it was
+   * given — from the URL, or from the restore a moment after first paint — and
+   * playing that back would have the explorer assemble itself on screen every
+   * time it is loaded. So the transition is armed by the first change that
+   * comes through a control, and stays armed from then on.
+   */
+  const [moved, setMoved] = useState(false);
+  const changeLayout = (patch: Partial<typeof shared>) => {
+    setMoved(true);
+    void setShared(patch);
+  };
+
+  /**
    * The toolbar's action row, with the one M2 has built wired up (TRE-21).
    *
    * The row is declared in the toolbar so the palette can share it, and each
@@ -140,14 +156,14 @@ export default function HomePage() {
       viewMode={shared.view}
       onViewModeChange={(view) => void setShared({ view })}
       splitMode={shared.split}
-      onSplitModeChange={(split) => void setShared({ split })}
+      onSplitModeChange={(split) => changeLayout({ split })}
       glob={shared.glob}
       onGlobChange={(glob) => void setShared({ glob })}
       globMatches={globMatches}
       heat={shared.heat}
       onHeatChange={(heat) => void setShared({ heat })}
       inspector={shared.insp}
-      onInspectorChange={(insp) => void setShared({ insp })}
+      onInspectorChange={(insp) => changeLayout({ insp })}
       actions={actions}
       sidebar={
         <Sidebar
@@ -172,7 +188,8 @@ export default function HomePage() {
         splitMode={shared.split}
         heat={shared.heat}
         inspector={shared.insp}
-        onInspectorChange={(insp) => void setShared({ insp })}
+        onInspectorChange={(insp) => changeLayout({ insp })}
+        animate={moved}
         onSelectionChange={setSelection}
         manageHostsFor={manageHostsFor}
         onManageHosts={setManageHostsFor}

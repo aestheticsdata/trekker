@@ -121,10 +121,12 @@ export function Inspector({
   return (
     <aside
       aria-label="Inspector"
-      // 218px, and gone below the inspector breakpoint: at that width the two
-      // panes are already the narrowest thing worth showing, and the toolbar's
-      // toggle goes with it rather than leaving a control with nothing to open.
-      className="bg-chrome border-line hidden w-54.5 flex-none flex-col border-l inspector:flex"
+      // 218px. Below the inspector breakpoint there is none at all — at that
+      // width the two panes are already the narrowest thing worth showing, and
+      // the toolbar's toggle goes with it rather than leaving a control with
+      // nothing to open. That gate now sits on the box that opens this one
+      // (TRE-62), which is where the width it would animate lives.
+      className="bg-chrome border-line flex w-inspector flex-none flex-col border-l"
     >
       <header className="bg-line text-brand flex h-6 flex-none items-center justify-between px-2.5 font-sans text-caps font-semibold tracking-[0.16em]">
         <span>INSPECTOR</span>

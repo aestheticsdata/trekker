@@ -12,6 +12,7 @@ import {
 } from "@components/explorer/pane-state";
 import { PermissionsModal } from "@components/explorer/permissions-modal";
 import { HostManager } from "@components/hosts/host-manager";
+import { CollapsiblePane } from "@components/ui/collapsible-pane";
 import { useToast } from "@components/ui/toast";
 import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
 import { fetchListing, fetchStat } from "@lib/api/fs";
@@ -68,6 +69,7 @@ export function Explorer({
   heat,
   inspector,
   onInspectorChange,
+  animate,
   onSelectionChange,
   manageHostsFor,
   onManageHosts,
@@ -91,6 +93,9 @@ export function Explorer({
   /** Whether the 218px panel is showing (TRE-17 §4). URL-backed, like the split. */
   inspector: boolean;
   onInspectorChange: (open: boolean) => void;
+  /** Whether a change to the split or the inspector is one somebody just made,
+   * and so worth animating (TRE-62 §4). False until the first one. */
+  animate: boolean;
   onSelectionChange: (selection: { row: FileRow; path: string } | null) => void;
   /** Which pane opened the host manager, if any — owned by the page so the
    * sidebar can open it too. */
@@ -421,44 +426,69 @@ export function Explorer({
     // inspector sits beside whatever that arrangement produced. Left flat, a
     // solo pane would stack the panel underneath itself rather than beside it.
     <div className="flex h-full min-h-0">
-      <div className={`flex min-h-0 min-w-0 flex-1 ${splitMode === "split" ? "flex-row" : "flex-col"}`}>
+      {/* A query container, so a pane that is collapsing can hold its width in
+          `cqw` (TRE-62): half of this row is what a pane in a split is, and a
+          percentage would resolve against the box that is animating. The row
+          also hands both panes one clock, since a split change is an arrival
+          and a departure at once — a pane arrives whenever the split goes on. */}
+      <div
+        className="pane-row @container flex min-h-0 min-w-0 flex-1"
+        data-motion={splitMode === "split" ? "open" : "close"}
+      >
         {([0, 1] as const).map((index) => {
-          const solo = splitMode !== "split";
           const shown = splitMode === "split" || (splitMode === "left" ? index === 0 : index === 1);
-          if (solo && !shown) return null;
-
           const pane = views[index];
           const view = rendered[index];
           return (
-            // biome-ignore lint/a11y/noStaticElementInteractions: a cache warm-up on hover, with no behaviour of its own
-            <div
+            <CollapsiblePane
               key={index}
-              className="flex min-h-0 min-w-0 flex-1"
-              onMouseOver={(event) => prefetchFromEvent(pane, view.rows, event.target)}
-              onFocus={(event) => prefetchFromEvent(pane, view.rows, event.target)}
+              open={shown}
+              // What this pane is worth when it is showing: half the row beside
+              // its neighbour, all of it alone. A pane on its way out keeps the
+              // one it had, which is why the wrapper holds it rather than
+              // reading this prop on the way down.
+              size={splitMode === "split" ? "50cqw" : "100cqw"}
+              fills
+              animate={animate}
             >
-              <Pane
-                pane={pane}
-                active={active === index}
-                host={hosts.find((host) => host.id === pane.hostId) ?? null}
-                rows={view.rows}
-                meta={view.listing.data?.meta ?? null}
-                // A disabled query never leaves `isPending`, so an unbound pane
-                // would shimmer for ever if that alone drove the skeleton.
-                loading={hostsPending || (pane.hostId !== null && view.listing.isPending)}
-                error={view.listing.error}
-                glob={index === active ? glob.trim() : ""}
-                hiddenByGlob={index === active ? view.hiddenByGlob : 0}
-                heat={heat}
-                now={now}
-                callbacks={callbacksFor(index)}
-              />
-            </div>
+              {/* biome-ignore lint/a11y/noStaticElementInteractions: a cache warm-up on hover, with no behaviour of its own */}
+              <div
+                className="flex min-h-0 min-w-0 flex-1"
+                onMouseOver={(event) => prefetchFromEvent(pane, view.rows, event.target)}
+                onFocus={(event) => prefetchFromEvent(pane, view.rows, event.target)}
+              >
+                <Pane
+                  pane={pane}
+                  active={active === index}
+                  host={hosts.find((host) => host.id === pane.hostId) ?? null}
+                  rows={view.rows}
+                  meta={view.listing.data?.meta ?? null}
+                  // A disabled query never leaves `isPending`, so an unbound pane
+                  // would shimmer for ever if that alone drove the skeleton.
+                  loading={hostsPending || (pane.hostId !== null && view.listing.isPending)}
+                  error={view.listing.error}
+                  glob={index === active ? glob.trim() : ""}
+                  hiddenByGlob={index === active ? view.hiddenByGlob : 0}
+                  heat={heat}
+                  now={now}
+                  callbacks={callbacksFor(index)}
+                />
+              </div>
+            </CollapsiblePane>
           );
         })}
       </div>
 
-      {inspector && (
+      <CollapsiblePane
+        open={inspector}
+        size="var(--spacing-inspector)"
+        animate={animate}
+        // The panel's own breakpoint, moved out to the box that has the width:
+        // below 1100px there is no inspector at all, and a wrapper animating
+        // open behind `display: none` would hand 218px to a panel that is not
+        // there. A resize across it is not an open, and animates nothing.
+        className="hidden inspector:flex"
+      >
         <Inspector
           host={hosts.find((host) => host.id === activePane.hostId) ?? null}
           path={activePane.path}
@@ -473,7 +503,7 @@ export function Explorer({
           onClose={() => onInspectorChange(false)}
           onEditPermissions={() => onPermissionsOpenChange(true)}
         />
-      )}
+      </CollapsiblePane>
 
       {permissionsTarget && (
         <PermissionsModal

@@ -184,6 +184,19 @@
   --animate-panel-out: panel-out 0.11s ease-in forwards;
   --animate-toast-in: toast-in 0.18s ease-out;
 
+  /* A pane is not one of those. It does not float above the layout, it *is*
+   * layout — it takes its width from the panes beside it — so fading one in
+   * would have it materialise while everything around it jumps sideways
+   * regardless. What changes is the space, so the space is what moves, from
+   * zero to full size and back, with the opacity never touched (TRE-62).
+   *
+   * Durations rather than keyframes: only the caller knows how wide a pane
+   * ends up. The pair keeps the asymmetry above — arriving is worth watching,
+   * leaving is not — and the same brevity, for the same reason.
+   */
+  --duration-pane-open: 0.14s;
+  --duration-pane-close: 0.11s;
+
   /* ---- radius ----------------------------------------------------------
    * Two values. This UI is nearly square and that is deliberate.
    *
@@ -210,6 +223,9 @@
   --spacing-tabstrip: 1.5rem; /* 24px */
   --spacing-pathrow: 1.625rem; /* 26px */
   --spacing-panefoot: 1.25rem; /* 20px */
+  /* The inspector's width (TRE-17). A token since TRE-62, because two boxes
+   * now need the same number: the panel, and the wrapper that opens it. */
+  --spacing-inspector: 13.625rem; /* 218px */
 }
 
 /*
@@ -304,6 +320,65 @@ body {
       background-color 100ms ease-out,
       border-color 100ms ease-out,
       color 100ms ease-out;
+  }
+}
+
+/*
+ * The one box in the app whose size is animated (TRE-62), driven by
+ * `CollapsiblePane`. Here rather than as utilities on the component for the
+ * same reason the control transition above is: the two directions differ, and
+ * a rule reads them as a pair where two conditional class strings would not.
+ *
+ * `display` is set here so a caller can still override it with a utility —
+ * the inspector is `hidden` below its breakpoint, and a wrapper that animated
+ * open behind `display: none` would hand 218px of empty space to a panel that
+ * is not there.
+ */
+@layer components {
+  .pane-collapse {
+    display: flex;
+    flex: none;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    transition-property: width;
+    transition-duration: var(--pane-duration, var(--duration-pane-open));
+    transition-timing-function: var(--pane-ease, ease-out);
+  }
+
+  .pane-collapse[data-axis="height"] {
+    transition-property: height;
+  }
+
+  .pane-collapse[data-open="false"] {
+    transition-duration: var(--pane-duration, var(--duration-pane-close));
+    transition-timing-function: var(--pane-ease, ease-in);
+  }
+
+  /*
+   * Panes that share a row move on one clock, which the row hands them.
+   *
+   * A split change is an arrival and a departure at once, and two boxes on two
+   * durations stop adding up to the row they are dividing: for a tenth of a
+   * second a strip of chrome shows between them, or one runs past the edge.
+   * On a single clock the two are exact mirrors and the sum is the row at
+   * every frame, whatever the curve. Which clock is the row's own business —
+   * something is arriving whenever the split is on, and leaving when it is not.
+   */
+  .pane-row[data-motion="open"] {
+    --pane-duration: var(--duration-pane-open);
+    --pane-ease: ease-out;
+  }
+
+  .pane-row[data-motion="close"] {
+    --pane-duration: var(--duration-pane-close);
+    --pane-ease: ease-in;
+  }
+
+  /* A layout nobody just asked for — a link that already said open, a restored
+   * session — arrives at its size rather than assembling itself on screen. */
+  .pane-collapse[data-animate="false"] {
+    transition-property: none;
   }
 }
 
