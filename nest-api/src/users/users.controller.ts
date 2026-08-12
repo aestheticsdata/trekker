@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Put, Req, Res, UseGuards } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { Audited, NotAudited } from "@audit/audited.decorator";
 import { LIMITS } from "@audit/limits";
@@ -7,6 +7,7 @@ import { clearCsrfToken, getOrCreateCsrfToken, rotateCsrfToken } from "@users/cs
 import { AddUserDto } from "@users/dto/add-user.dto";
 import { ChangePasswordDto } from "@users/dto/change-password.dto";
 import { RecoverDto } from "@users/dto/recover.dto";
+import { SaveLayoutDto } from "@users/dto/save-layout.dto";
 import { SignInDto } from "@users/dto/sign-in.dto";
 import { CsrfGuard } from "@users/guards/csrf.guard";
 import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/session-auth.guard";
@@ -26,6 +27,32 @@ export class UsersController {
   async me(@Req() req: Request): Promise<SignInResponse & { csrfToken: string }> {
     const response = await this.usersService.findById((req as AuthenticatedRequest).user.id);
     return { ...response, csrfToken: getOrCreateCsrfToken(req) };
+  }
+
+  /**
+   * The layout this account last had open (TRE-51). Null when it has never had
+   * one, which is what a new account and a cold open both see.
+   */
+  @Get("layout")
+  @UseGuards(SessionAuthGuard)
+  async layout(@Req() req: Request): Promise<{ layout: unknown }> {
+    return { layout: await this.usersService.lastLayout((req as AuthenticatedRequest).user.id) };
+  }
+
+  @Put("layout")
+  @UseGuards(SessionAuthGuard, CsrfGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @NotAudited(
+    "This fires on navigation — every path change, sort toggle and pane switch the account makes, " +
+      "debounced but still routinely. A row each would be the loudest thing in ActivityLog and " +
+      "would bury the operations the strip exists to show, which is the failure TRE-30 §2 names. " +
+      "It also destroys nothing and grants nothing: the column holds where a session was pointed, " +
+      "it is overwritten by the next write, and reading it back tells an attacker only what the " +
+      "account was already looking at. Where the account HAS been is the audit trail's job, and it " +
+      "records that already, per operation.",
+  )
+  async saveLayout(@Body() dto: SaveLayoutDto, @Req() req: Request): Promise<void> {
+    await this.usersService.saveLastLayout((req as AuthenticatedRequest).user.id, dto);
   }
 
   @Get("csrf")

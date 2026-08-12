@@ -9,6 +9,7 @@ import { fetchHealth } from "@lib/api/health";
 import { fetchHostSummary, fetchHosts } from "@lib/api/hosts";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { explorerParams, LEFT_KEYS, paneParams, RIGHT_KEYS } from "@lib/url/explorer-params";
+import { useSessionLayout } from "@lib/url/use-session-layout";
 import { useQuery } from "@tanstack/react-query";
 import { useQueryStates } from "nuqs";
 import { useState } from "react";
@@ -78,6 +79,25 @@ export default function HomePage() {
   const setPane = (pane: PaneIndex, patch: Partial<PaneUrl>) => {
     void (pane === 0 ? setLeft(patch) : setRight(patch));
   };
+
+  /**
+   * A bare URL reopens where this account left off (TRE-51). A URL carrying
+   * any parameter is a link and is left alone — the hook decides that on its
+   * first render, before nuqs has had a chance to write anything.
+   *
+   * Applied as a replace: the cold open is where the history starts, so the
+   * back button must not walk back to an explorer the user never saw.
+   */
+  useSessionLayout({
+    current: { ...shared, a: left, b: right },
+    applyLayout: (layout) => {
+      const { a, b, ...rest } = layout;
+      void setShared(rest, { history: "replace" });
+      void setLeft(a, { history: "replace" });
+      void setRight(b, { history: "replace" });
+    },
+    knownHostIds: hosts?.map((host) => host.id),
+  });
 
   // The chrome describes the active pane's host, which is now a real answer
   // rather than "the first one" — the sidebar can point each pane anywhere.

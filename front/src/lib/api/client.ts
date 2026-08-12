@@ -31,7 +31,7 @@ export class ApiError extends Error {
 }
 
 export interface RequestOptions {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   /** Required by the API for every unsafe verb. */
   csrfToken?: string | null;

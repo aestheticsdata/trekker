@@ -161,6 +161,31 @@ export class UsersService {
     });
   }
 
+  /**
+   * The layout this account last had open (TRE-51), or null when it has never
+   * had one. Null is not an error: it is what every account starts with and
+   * what a cold open falls back to.
+   */
+  async lastLayout(userId: string): Promise<unknown> {
+    const user = await this.prisma.users.findUnique({
+      where: { id: userId },
+      select: { lastLayout: true },
+    });
+    return user?.lastLayout ?? null;
+  }
+
+  /**
+   * Overwrites it. Last writer wins across tabs, deliberately — this is a seed
+   * for the next cold open, not shared state, and a lock would cost more than
+   * the thing being protected is worth.
+   */
+  async saveLastLayout(userId: string, layout: object): Promise<void> {
+    await this.prisma.users.update({
+      where: { id: userId },
+      data: { lastLayout: layout },
+    });
+  }
+
   async findById(userId: string): Promise<SignInResponse> {
     const user = await this.prisma.users.findUnique({ where: { id: userId } });
     if (!user) {

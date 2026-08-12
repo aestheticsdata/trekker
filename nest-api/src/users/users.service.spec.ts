@@ -114,6 +114,29 @@ describe("addUser and the owner slot", () => {
     await expect(new UsersService(prisma, redis).addUser(dto)).rejects.toMatchObject({ code: "P2002" });
   });
 
+  it("stores the layout it is handed, and reads back null when there is none", async () => {
+    // TRE-51. Null is the ordinary answer, not a failure: it is what every
+    // account has until it has had the explorer open once.
+    const writes: unknown[] = [];
+    const prisma = {
+      users: {
+        findUnique: ({ select }: { select?: Record<string, boolean> }) =>
+          Promise.resolve(select?.lastLayout ? { lastLayout: null } : null),
+        update: ({ data }: { data: unknown }) => {
+          writes.push(data);
+          return Promise.resolve({});
+        },
+      },
+    } as unknown as PrismaService;
+
+    const service = new UsersService(prisma, redis);
+    await expect(service.lastLayout("u1")).resolves.toBeNull();
+
+    const layout = { a: { host: null, path: "/", sort: "name", dir: 1 }, heat: true };
+    await service.saveLastLayout("u1", layout);
+    expect(writes).toEqual([{ lastLayout: layout }]);
+  });
+
   it("refuses an email that already exists before deciding any role", async () => {
     const prisma = {
       users: {

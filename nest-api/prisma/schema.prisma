@@ -123,6 +123,18 @@ model Users {
   /// timing, so the database refuses the second one.
   ownerSlot Boolean? @unique
 
+  /// Where this account was when it last had the explorer open, so a bare URL
+  /// reopens it (TRE-51). A footprint, not a saved view: `Views` holds the
+  /// named, deliberate ones, and a reserved row in that table would have to be
+  /// filtered out of the strip, the sidebar, the shortcut check and every
+  /// rename or delete path — one hidden row every future query has to remember
+  /// to exclude.
+  ///
+  /// Json because the shape belongs to the front and will move with it; nothing
+  /// queries into it. Null means the account has never had a layout worth
+  /// reopening, which is what a new account gets.
+  lastLayout Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -12,4 +12,6 @@ export const QUERY_KEYS = {
   /** What a recursive change would touch — asked only when the box is ticked. */
   ENTRY_COUNT: "entryCount",
   ACTIVITY: "activity",
+  /** The layout the account left, asked for only on a cold open (TRE-51). */
+  LAYOUT: "layout",
 } as const;
