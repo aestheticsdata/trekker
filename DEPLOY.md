@@ -115,13 +115,63 @@ it is listed here for the manual case).
 ./front/deploy-front.sh       # front only
 ```
 
-Each refuses to run on a dirty working tree — the deploy changelog is only
-meaningful if `HEAD` is a real commit. Override with `TREKKER_ALLOW_DIRTY=1` when
-you genuinely mean it.
+**Both refuse to run with uncommitted changes, and there is no override.**
+
+A deploy sends your files as they are on disk — `rsync` copies the working
+folder and skips `.git` — but three things take their commit from `HEAD`: the
+release directory name, the changelog on the server, and the report to Zeus. So
+deploying a dirty tree would label all three with a commit whose content is not
+what is running, and the version that *is* running would exist nowhere in git.
+"What is live?" would then have a confident wrong answer instead of no answer.
+
+Commit first. That is the whole rule.
 
 Each ends by checking the thing it just shipped actually answers: the API on
 `/api/health`, the front on `/`. A deploy that reports success while the service
 is down is the failure this prevents.
+
+### The gate
+
+Before a single byte is uploaded, both scripts run five checks and refuse to
+ship if any of them fails:
+
+| | |
+|---|---|
+| `pnpm lint` | biome on the front, eslint on the API |
+| `pnpm typecheck` | `tsc --noEmit` on both |
+| `pnpm test` | the API's jest suites |
+| `pnpm build` | both packages, exactly as the server will build them |
+| `pnpm scan:history` | `gitleaks` over **every commit**, not just the tree |
+
+This is where a CI job would normally live. Trekker has no CI and is not getting
+one, and for a fleet deployed from a laptop this is the better home anyway: CI
+gates what reaches the remote, and what reaches the *server* is this script.
+
+Everything runs locally and before anything touches the box, so a failure always
+means nothing was uploaded — never a deploy that had to roll back. The output
+names the check and repeats the command to run on its own.
+
+Two things worth knowing:
+
+- **A missing `gitleaks` is a refusal, not a pass.** The repo is public and holds
+  SSH credentials, so a sweep that cannot run is not a sweep that succeeded.
+  `brew install gitleaks`, or `TREKKER_ALLOW_UNSCANNED=1` if you have just swept
+  it another way.
+- **Deploying both halves does not run the suite twice.** A pass is recorded in
+  `.git/trekker-preflight` against the commit it passed for, and reused for 30
+  minutes. Since a deploy requires a clean tree, that commit always identifies
+  exactly what was checked.
+
+There is deliberately no flag that skips the whole gate. `rollback` runs none of
+it — it ships nothing new, and refusing to restore a known-good release because
+a test is red would be the failure mode upside down.
+
+To check the gate still refuses for the right reasons — it breaks each check in
+turn and puts the tree back:
+
+```bash
+pnpm verify:gate
+```
 
 ### Migrations
 

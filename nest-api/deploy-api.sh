@@ -67,7 +67,10 @@ deploy() {
   # different kind of failure from "you're not ready to ship", and hitting them
   # one at a time across two runs is needless.
   [ -f "$ECOSYSTEM_FILE" ] || die "Missing $ECOSYSTEM_FILE — copy ecosystem.config.example.js and fill it in. It is not committed."
-  check_tree_state
+  require_clean_tree
+  # Before the ERR trap below, and before anything reaches the server: a failing
+  # check must read as "nothing was uploaded", not as a deploy that rolled back.
+  run_preflight_checks
   compute_release_metadata
   zeus_init "api"
 

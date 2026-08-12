@@ -55,7 +55,10 @@ EOF
 
 deploy() {
   cd "$SCRIPT_DIR"
-  check_tree_state
+  require_clean_tree
+  # Before the ERR trap below, and before anything reaches the server: a failing
+  # check must read as "nothing was uploaded", not as a deploy that rolled back.
+  run_preflight_checks
   compute_release_metadata
   zeus_init "front"
 

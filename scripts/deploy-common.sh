@@ -74,17 +74,152 @@ compute_release_metadata() {
   RELEASE_NAME="release-$(date +'%Y%m%d-%H%M%S')-${GIT_BRANCH}-${GIT_HASH}"
 }
 
-# Refuses to deploy a dirty or unpushed tree. pfa does not check this; it is
-# cheap insurance against "which commit is actually live?" being unanswerable,
-# and the deploy changelog below is only meaningful if HEAD is real.
+# Refuses to deploy a tree with uncommitted changes. pfa does not check this;
+# here it is what makes every label this script writes true.
+#
+# rsync sends the working directory and skips .git, so uncommitted edits ship.
+# Meanwhile the release directory name, the changelog on the server and the
+# report to Zeus all take their commit from `git rev-parse HEAD` — so deploying
+# a dirty tree puts three confident labels on the box naming a commit whose
+# content is not what is running, and the version that IS running exists nowhere
+# in git. "What is live?" then has an answer that is wrong rather than missing,
+# which is the worse of the two.
+#
+# This had an override once. It was removed on purpose: a flag that makes the
+# records lie is not a convenience. Commit first — that is the whole of it.
 require_clean_tree() {
   if [ -n "$(git status --porcelain)" ]; then
-    die "Working tree is dirty. Commit or stash before deploying, or re-run with TREKKER_ALLOW_DIRTY=1."
+    die "Working tree has uncommitted changes.
+   A deploy ships your files as they are on disk, but labels the release, the
+   server changelog and the Zeus report with HEAD — so this would put the wrong
+   commit on all three. Commit or stash, then deploy."
   fi
 }
 
-check_tree_state() {
-  [ "${TREKKER_ALLOW_DIRTY:-0}" = "1" ] || require_clean_tree
+# ---------------------------------------------------------------------------
+# Pre-deploy checks (TRE-20 §5)
+#
+# These were specified as a GitHub Actions job. Trekker has no CI and is not
+# getting one, so they live here instead — which is the better home anyway: CI
+# gates what reaches the remote, this gates what reaches the server, and those
+# are only the same thing on a repo where nobody ever deploys from a laptop.
+#
+# Everything runs locally and before the first byte is uploaded. A check that
+# ran after the atomic switch would be a rollback trigger, not a gate.
+#
+# There is deliberately no flag to skip the whole thing. A `rollback` runs none
+# of it: it ships nothing new, and refusing to restore a known-good release
+# because a test is red would be the failure mode inverted.
+# ---------------------------------------------------------------------------
+
+# Where a passing run is recorded, so deploying both halves does not run the
+# whole suite twice. Inside .git, which is never rsynced and never committed.
+PREFLIGHT_MARKER="$REPO_ROOT/.git/trekker-preflight"
+# Long enough to cover deploying the API and then the front, short enough that
+# it is never the reason something stale ships.
+PREFLIGHT_TTL_SECONDS=1800
+
+# What the checks were run against. A clean tree is identified by its commit; a
+# dirty one cannot be identified at all, so it never matches and always re-runs.
+#
+# A deploy never sees the dirty case — `require_clean_tree` has already stopped
+# it. `pnpm verify:gate` does, since it runs the gate against a tree it has just
+# broken on purpose, and a marker written there would let a later deploy skip
+# checks that were never run on that code.
+preflight_fingerprint() {
+  if [ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]; then
+    printf 'dirty'
+  else
+    git -C "$REPO_ROOT" rev-parse HEAD
+  fi
+}
+
+preflight_already_passed() {
+  local fingerprint="$1" recorded when now
+
+  [ -f "$PREFLIGHT_MARKER" ] || return 1
+  [ "$fingerprint" != "dirty" ] || return 1
+
+  read -r recorded when < "$PREFLIGHT_MARKER" 2>/dev/null || return 1
+  [ "$recorded" = "$fingerprint" ] || return 1
+
+  now=$(date +%s)
+  [ $(( now - when )) -lt "$PREFLIGHT_TTL_SECONDS" ] || return 1
+}
+
+# `gitleaks git` walks every commit, which is the sweep that matters on a public
+# repo: a secret committed once and removed later is still published. Not having
+# the tool is not a pass — it is the check not running — so it refuses, names
+# the fix, and offers the same shape of override the dirty-tree check does.
+preflight_scanner_available() {
+  command -v gitleaks >/dev/null 2>&1 && return 0
+
+  if [ "${TREKKER_ALLOW_UNSCANNED:-0}" = "1" ]; then
+    log "⚠️  gitleaks not installed — history sweep SKIPPED by TREKKER_ALLOW_UNSCANNED=1"
+    return 1
+  fi
+
+  die "gitleaks is not installed, so the history sweep cannot run.
+     brew install gitleaks
+   This repo is public and holds SSH credentials; the sweep is the last gate
+   before a deploy. Override with TREKKER_ALLOW_UNSCANNED=1 if you have just
+   swept it another way."
+}
+
+run_preflight_checks() {
+  local fingerprint output status=0
+  fingerprint=$(preflight_fingerprint)
+
+  if preflight_already_passed "$fingerprint"; then
+    log "✅ Pre-deploy checks already passed for this commit — skipping"
+    return 0
+  fi
+
+  # `next build` generates .next/types/validator.ts, which imports every route
+  # file — and leaves it behind when a route is deleted, so the next
+  # `tsc --noEmit` fails on a page that no longer exists. Derived state, freely
+  # regenerated by the build below, and dropping it here is the difference
+  # between a gate that refuses for a real reason and one that refuses because
+  # of an artifact from an hour ago.
+  rm -rf "$REPO_ROOT/front/.next/types"
+
+  local -a names=("lint" "typecheck" "tests" "build")
+  local -a commands=("pnpm lint" "pnpm typecheck" "pnpm test" "pnpm build")
+
+  if preflight_scanner_available; then
+    names+=("secret sweep")
+    commands+=("pnpm scan:history")
+  fi
+
+  local index
+  for index in "${!names[@]}"; do
+    log "➡️  Pre-deploy: ${names[$index]}"
+    output=$(mktemp)
+
+    # Not `set -e`'s job: the ERR trap installed by deploy() would report a
+    # failed deploy to Zeus before this has said which check failed and why.
+    if ! ( cd "$REPO_ROOT" && eval "${commands[$index]}" ) > "$output" 2>&1; then
+      status=1
+      echo "--- ${commands[$index]} ---" >&2
+      tail -40 "$output" >&2
+      echo "---" >&2
+      rm -f "$output"
+      die "Pre-deploy check failed: ${names[$index]}. Nothing was uploaded.
+   Re-run it on its own with: ${commands[$index]}"
+    fi
+
+    rm -f "$output"
+  done
+
+  [ "$status" -eq 0 ] || return 1
+
+  # Recorded only for a clean tree: "dirty" identifies nothing, so a marker
+  # written for it would let the next deploy skip checks on different code.
+  if [ "$fingerprint" != "dirty" ]; then
+    printf '%s %s\n' "$fingerprint" "$(date +%s)" > "$PREFLIGHT_MARKER"
+  fi
+
+  log "✅ Pre-deploy checks passed"
 }
 
 # Prepends this deploy's commits (and TRE tickets) to the changelog kept on the

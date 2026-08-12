@@ -17,6 +17,14 @@ import {
  *
  * Keep this in sync with `ecosystem.config.example.js` — a variable added to
  * one and not the other is a review failure (TRE-5).
+ *
+ * Three variables in that file are deliberately not here, and the asymmetry is
+ * one-way: everything declared below must appear there, never the reverse.
+ * `NODE_ENV` is PM2's to set. `SHADOW_DATABASE_URL` belongs to
+ * `prisma migrate dev` and never exists in production. `TREKKER_MASTER_KEY` is
+ * checked by `secrets/master-key.ts`, which parses `<version>:<base64>` and
+ * measures the decoded length — a contract class-validator cannot express, and
+ * one that fails the boot just as loudly (TRE-8).
  */
 class EnvironmentVariables {
   /**
