@@ -7,8 +7,19 @@ import type { StoredLayout } from "@schemas/layout";
 
 /** Everything TRE-7 exposes, parsed on the way in. */
 
+/**
+ * `credentialCheck` on the two calls below: both answer 401 to mean the email,
+ * password or passphrase was wrong, not that a session ended, and an app that
+ * confused the two would answer a typo by signing the typist out (TRE-63).
+ *
+ * Anything added here that is session-guarded and can refuse the *content* of
+ * what it was sent — a change of password is the obvious one — belongs in the
+ * same category.
+ */
 export async function signIn(email: string, password: string): Promise<AuthResponse> {
-  return AuthResponseSchema.parse(await apiRequest("/users", { method: "POST", body: { email, password } }));
+  return AuthResponseSchema.parse(
+    await apiRequest("/users", { method: "POST", body: { email, password }, credentialCheck: true }),
+  );
 }
 
 export async function register(email: string, password: string, passphrase: string): Promise<RegisterResponse> {
@@ -18,7 +29,11 @@ export async function register(email: string, password: string, passphrase: stri
 }
 
 export async function recover(email: string, passphrase: string, newPassword: string): Promise<void> {
-  await apiRequest("/users/recover", { method: "POST", body: { email, passphrase, newPassword } });
+  await apiRequest("/users/recover", {
+    method: "POST",
+    body: { email, passphrase, newPassword },
+    credentialCheck: true,
+  });
 }
 
 export async function logout(csrfToken: string | null): Promise<void> {
