@@ -47,6 +47,16 @@ const devEnv = {
   // Set only during a rotation, to the key being retired. See DEPLOY.md.
   // TREKKER_MASTER_KEY_PREVIOUS: "",
 
+  // Signs expiring download links (TRE-66). Same format, DIFFERENT VALUE —
+  // generate a second one with the same command. It must never be the master
+  // key above: a signed link is a signing oracle by design, and one that shares
+  // its key with the credential store turns "sign this for me" into "decrypt
+  // every machine we own".
+  //   node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"
+  // There is no PREVIOUS for this one, on purpose: changing it invalidates
+  // every outstanding link, which is the only way to withdraw one.
+  TREKKER_DOWNLOAD_LINK_KEY: "REPLACE_ME",
+
   // Optional. Password for the account `pnpm seed` creates. Left unset, the
   // seed generates one and prints it.
   // SEED_PASSWORD: "",
@@ -85,6 +95,20 @@ const prodEnv = {
   // Set only during a rotation, to the key being retired. See DEPLOY.md.
   // TREKKER_MASTER_KEY_PREVIOUS: "",
 
+  // Signs expiring download links (TRE-66). Generate ON THE SERVER, with the
+  // same command as above, and make sure the two values DIFFER:
+  //   node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"
+  //
+  // Why it is its own key. A signed link lets any account ask this server to
+  // sign a message it chose and hand the result to somebody with no account.
+  // That is safe for a key which does nothing else and unsafe for one that also
+  // seals every stored SSH credential — single-purpose keys stay single-purpose.
+  //
+  // There is no PREVIOUS for this one, deliberately. Changing it invalidates
+  // every outstanding link at once, and that is how a link already forwarded to
+  // somebody is withdrawn.
+  TREKKER_DOWNLOAD_LINK_KEY: "REPLACE_ME",
+
   // SHADOW_DATABASE_URL does NOT belong here. It exists only for
   // `prisma migrate dev`, which needs a scratch database to replay migrations
   // in. Production runs `migrate deploy`, which does no replay and no diffing.
@@ -120,14 +144,23 @@ const prodEnv = {
   //
   // Declared but not yet attached — the operations they govern do not exist.
   // Each is removed from `TO_ATTACH` by the ticket named beside it:
-  //   TREKKER_LIMIT_DELETES_PER_MIN            TRE-25
-  //   TREKKER_LIMIT_DELETED_ENTRIES_PER_HOUR   TRE-25
   //   TREKKER_LIMIT_TRANSFERS_IN_FLIGHT        TRE-23
   //   TREKKER_LIMIT_HASHES_IN_FLIGHT           TRE-27
   //   TREKKER_LIMIT_ELEVATIONS_PER_5MIN        TRE-29
+  //
+  // Attached and overridable, all optional, defaults shown:
+  //   TREKKER_LIMIT_DELETES_PER_MIN            10       TRE-25
+  //   TREKKER_LIMIT_DELETED_ENTRIES_PER_HOUR   50000    TRE-25
+  //   TREKKER_LIMIT_DOWNLOADS_PER_MIN          120      TRE-26
+  //   TREKKER_LIMIT_UPLOADS_PER_MIN            30       TRE-65
+  //   TREKKER_LIMIT_UPLOAD_UNITS_PER_HOUR      800      TRE-65, in 64 MiB units
+  //   TREKKER_LIMIT_LINK_FETCHES_PER_MIN       60       TRE-66, keyed by IP
 
-  // Added by later tickets:
-  //   TREKKER_DOWNLOAD_LINK_KEY  TRE-26 — signs expiring download links.
+  // ---- transfers (TRE-26, TRE-65, TRE-66) ----------------------------------
+  //
+  // All optional, defaults shown. Set one only to override it.
+  //   TREKKER_UPLOAD_MAX_BYTES   10737418240   one file's ceiling, 10 GiB
+  //   TREKKER_LINK_TTL_SECONDS   900           default link life; capped at a day
 };
 
 module.exports = {

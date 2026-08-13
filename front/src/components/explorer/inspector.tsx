@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@auth/context/AuthContext";
+import { useToast } from "@components/ui/toast";
 import {
   ageDays,
   formatAge,
@@ -12,9 +14,12 @@ import {
   typeTag,
 } from "@helpers/listing";
 import { describeMode, permissionRows } from "@helpers/permissions";
+import { ApiError } from "@lib/api/client";
+import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
+import { mintLink } from "@lib/api/link";
 import { QUERY_KEYS } from "@lib/query/keys";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 
 import type { SortDirection, SortKey } from "@helpers/listing";
@@ -89,7 +94,59 @@ export function Inspector({
   /** Opens the permissions modal on whatever is selected (TRE-21). */
   onEditPermissions: () => void;
 }) {
+  const { csrfToken } = useAuth();
+  const { push } = useToast();
   const one = selected.length === 1 ? selected[0] : null;
+
+  /**
+   * The panel's own download (TRE-26), which needs no callback out of here.
+   *
+   * The toolbar's button has to ask the explorer because the selection lives
+   * there. This one is already looking at exactly one entry and knows its host
+   * and its path, so it starts the download itself — routing it up and back
+   * would add a prop to say something this component can already see.
+   */
+  const downloadOne = host && one ? () => startDownload(host.id, joinPath(path, one.name)) : null;
+
+  /**
+   * Minting a signed link (TRE-66), which ends in the clipboard.
+   *
+   * The URL *is* the grant — anything that can read it can fetch the file — so
+   * it is never rendered into the page. Showing it would put a working
+   * credential on screen for a shoulder, a screenshot or a screen share, and it
+   * would be shown for as long as the panel stayed open. Straight to the
+   * clipboard, and the toast says when it expires rather than what it is.
+   */
+  const link = useMutation({
+    mutationFn: () => mintLink(host?.id as string, joinPath(path, one?.name ?? ""), csrfToken),
+    throwOnError: false,
+    onSuccess: async (minted) => {
+      const expires = new Date(minted.expiresAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+      try {
+        await navigator.clipboard.writeText(minted.url);
+        push({ tone: "success", message: "Link copied", detail: `${minted.filename} · expires at ${expires}` });
+      } catch {
+        // Clipboard access is refused on an insecure origin and in some
+        // configurations. The link exists either way, so say so rather than
+        // reporting a failure that did not happen — and do not print the URL,
+        // for the reason above.
+        push({
+          tone: "warning",
+          message: "Link created, but not copied",
+          detail: "This browser refused clipboard access. Try again from a secure origin.",
+        });
+      }
+    },
+    onError: (error) => {
+      push({
+        tone: "danger",
+        message: "No link",
+        detail: error instanceof ApiError ? error.message : "The link could not be created.",
+      });
+    },
+  });
+
+  const signedLink = host && one && one.type === "file" ? () => link.mutate() : null;
 
   // One stat call serves two panels: the selected entry, or — with nothing
   // selected — the directory itself, whose mode and owner the listing does not
@@ -170,6 +227,9 @@ export function Inspector({
           items={folder.data?.meta.totalEntries ?? null}
           now={now}
           onEditPermissions={onEditPermissions}
+          onDownload={downloadOne}
+          onSignedLink={signedLink}
+          minting={link.isPending}
         />
       ) : (
         <SelectionPanel
@@ -258,6 +318,9 @@ function EntryPanel({
   items,
   now,
   onEditPermissions,
+  onDownload,
+  onSignedLink,
+  minting,
 }: {
   host: HostView;
   entry: FileRow;
@@ -267,6 +330,11 @@ function EntryPanel({
   items: number | null;
   now: number;
   onEditPermissions: () => void;
+  /** Starts the download (TRE-26). Null while there is no host to ask. */
+  onDownload: (() => void) | null;
+  /** Mints a signed link (TRE-66). Null for a directory — a link grants one file. */
+  onSignedLink: (() => void) | null;
+  minting: boolean;
 }) {
   const isLink = entry.type === "link";
 
@@ -321,7 +389,11 @@ function EntryPanel({
         <p className="text-ink-faint font-mono text-caption">checksums arrive in TRE-27</p>
       </section>
 
-      <Actions />
+      <Actions
+        onDownload={onDownload}
+        onSignedLink={onSignedLink}
+        minting={minting}
+      />
     </>
   );
 }
@@ -584,37 +656,56 @@ function Permissions({
 }
 
 /**
- * The four actions the mockup draws, none of which exist yet.
+ * The four actions the mockup draws. `download` is live as of TRE-26 and
+ * `signed link` as of TRE-66; the other two are still the bargain the toolbar
+ * strikes — visible and inert, because a bottom row that grows buttons over two
+ * milestones never looks finished.
  *
- * Visible and inert, the same bargain the toolbar strikes: the panel is how
- * anyone learns this app will hand out a signed link at all, and a bottom row
- * that grows buttons over two milestones never looks finished. The fill comes
- * back when the action does — a bright primary that does nothing is a worse
- * lie than a dim one.
+ * The fill comes back when the action does. A bright button that does nothing is
+ * a worse lie than a dim one, and the inverse is true too.
  */
-const ENTRY_ACTIONS: ReadonlyArray<{ label: string; reason: string; primary?: boolean }> = [
-  { label: "download", reason: "Downloads arrive in TRE-26", primary: true },
-  { label: "open in →", reason: "Read-only previews are not part of M1" },
-  { label: "extract", reason: "Archive extraction is not scheduled yet" },
-  { label: "signed link", reason: "Signed links arrive in TRE-26" },
+const ENTRY_ACTIONS: ReadonlyArray<{ id: string; label: string; reason?: string; primary?: boolean }> = [
+  { id: "download", label: "download", primary: true },
+  { id: "open", label: "open in →", reason: "Read-only previews are not part of M1" },
+  { id: "extract", label: "extract", reason: "Archive extraction is not scheduled yet" },
+  { id: "link", label: "signed link" },
 ];
 
-function Actions() {
+function Actions({
+  onDownload,
+  onSignedLink,
+  minting,
+}: {
+  onDownload: (() => void) | null;
+  onSignedLink: (() => void) | null;
+  minting: boolean;
+}) {
+  const handlers: Record<string, (() => void) | null> = { download: onDownload, link: onSignedLink };
+
   return (
     <div className="grid flex-none grid-cols-2 gap-1.5 px-2.5 pb-2.5">
-      {ENTRY_ACTIONS.map((action) => (
-        <button
-          key={action.label}
-          type="button"
-          disabled
-          title={action.reason}
-          className={`bg-line text-ink-dim cursor-not-allowed border py-1.5 text-center font-mono text-cmd ${
-            action.primary ? "border-accent-soft" : "border-line-strong"
-          }`}
-        >
-          {action.label}
-        </button>
-      ))}
+      {ENTRY_ACTIONS.map((action) => {
+        const press = handlers[action.id] ?? null;
+        const busy = action.id === "link" && minting;
+        return (
+          <button
+            key={action.id}
+            type="button"
+            disabled={press === null || busy}
+            onClick={press ?? undefined}
+            title={action.reason}
+            className={
+              press === null || busy
+                ? `bg-line text-ink-dim cursor-not-allowed border py-1.5 text-center font-mono text-cmd ${
+                    action.primary ? "border-accent-soft" : "border-line-strong"
+                  }`
+                : "bg-accent-soft text-on-accent border-accent-soft hover:bg-accent border py-1.5 text-center font-mono text-cmd font-medium"
+            }
+          >
+            {busy ? "signing…" : action.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

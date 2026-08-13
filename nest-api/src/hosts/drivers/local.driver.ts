@@ -26,6 +26,8 @@ import {
   kindFromMode,
   type MkdirOptions,
   PERMISSION_MASK,
+  rangeOf,
+  type ReadOptions,
   type WriteOptions,
 } from "@hosts/drivers/host-driver";
 import { type AllowedProgram, isAllowedProgram } from "@hosts/drivers/shell-quote";
@@ -117,11 +119,11 @@ export class LocalDriver implements HostDriver {
     }
   }
 
-  async createReadStream(path: string): Promise<Readable> {
+  async createReadStream(path: string, options: ReadOptions = {}): Promise<Readable> {
     // Opened eagerly so a missing or unreadable file is a rejected promise
     // rather than an 'error' event the caller has to remember to attach to.
     await this.assertReadable(path);
-    return createReadStream(path);
+    return createReadStream(path, rangeOf(options));
   }
 
   private async assertReadable(path: string): Promise<void> {

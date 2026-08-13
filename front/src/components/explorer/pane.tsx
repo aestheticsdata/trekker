@@ -4,6 +4,7 @@ import { pathOf } from "@components/explorer/pane-state";
 import { useRowWindow } from "@components/explorer/row-window";
 import { ageDays, ageIndex, breadcrumbs, formatAge, formatSize, formatTotal, typeTag } from "@helpers/listing";
 import { ApiError } from "@lib/api/client";
+import { useState } from "react";
 
 import type { PaneView } from "@components/explorer/pane-state";
 import type { Crumb, SortKey } from "@helpers/listing";
@@ -59,6 +60,8 @@ export interface PaneCallbacks {
   onRowClick: (name: string, modifiers: { extend: boolean; toggle: boolean }) => void;
   onHostMenu: () => void;
   onClearGlob: () => void;
+  /** Files dropped onto this pane, bound for the directory it is showing (TRE-65). */
+  onFilesDropped: (files: readonly File[]) => void;
 }
 
 export function Pane({
@@ -123,13 +126,38 @@ export function Pane({
   // size sitting on the same line must describe the same set of files.
   const shownBytes = rows.reduce((sum, row) => sum + row.size, 0);
 
+  /** Whether files are being dragged over this pane right now (TRE-65). */
+  const [dropping, setDropping] = useState(false);
+
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: focusing a pane is a pointer affordance; ⇥ is the keyboard route and lives in the explorer
     <div
       onMouseDown={callbacks.onFocus}
+      // Dragging files in (TRE-65). `dragOver` must preventDefault or the
+      // browser navigates to the dropped file instead — which loses the app and
+      // shows the user their own file, the least helpful possible outcome.
+      onDragOver={(event) => {
+        if (!carriesFiles(event.dataTransfer)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        if (!dropping) setDropping(true);
+      }}
+      // `relatedTarget` outside this pane, because dragging across a child
+      // fires `dragleave` on the parent and the highlight would flicker off
+      // every time the pointer crossed a row.
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false);
+      }}
+      onDrop={(event) => {
+        if (!carriesFiles(event.dataTransfer)) return;
+        event.preventDefault();
+        setDropping(false);
+        callbacks.onFocus();
+        callbacks.onFilesDropped([...event.dataTransfer.files]);
+      }}
       className={`border-line flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l-2 ${
         active ? "bg-pane-active" : "bg-pane"
-      }`}
+      } ${dropping ? "outline-accent -outline-offset-2 outline-2" : ""}`}
       // The active pane wears its host's colour. Without a host the class
       // above still supplies one, so the edge is never `currentColor`.
       style={active && host ? { borderLeftColor: host.colour } : undefined}
@@ -746,4 +774,17 @@ function ErrorState({ error, onUp }: { error: unknown; onUp: () => void }) {
       onUp={onUp}
     />
   );
+}
+
+/**
+ * Whether a drag is carrying files rather than something from inside the page.
+ *
+ * Checked on `dragover` as well as on `drop`, because the highlight is a
+ * promise: a pane that lights up for a dragged text selection is telling
+ * somebody it will accept something it is going to ignore. The `types` list is
+ * the only thing readable during a drag — the files themselves are not exposed
+ * until the drop, by design.
+ */
+function carriesFiles(transfer: DataTransfer | null): boolean {
+  return transfer !== null && [...transfer.types].includes("Files");
 }

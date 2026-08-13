@@ -136,6 +136,74 @@ export const LIMITS = {
    * so a refusal costs nothing.
    */
   entriesDeleted: rule("limit:rment", "deleted entries", 50_000, 3600, "TREKKER_LIMIT_DELETED_ENTRIES_PER_HOUR"),
+
+  /**
+   * Downloads (TRE-26), per request. The one limit here on a route that changes
+   * nothing.
+   *
+   * Per request rather than per byte, deliberately. A download can only take
+   * what the account could already open — the roots decided that long before
+   * this counter is asked — so there is no volume to ration that the roots have
+   * not already granted. What is worth bounding is the *rate*, because a
+   * session walking a fleet and pulling every directory it can reach is a
+   * script, and a script is what the number is chosen against: 120 a minute is
+   * far past a person clicking files and well short of one enumerating them.
+   *
+   * A byte budget belongs to TRE-66. Those URLs carry no session and can be
+   * forwarded to anyone, so "how much may this link move" stops being a
+   * question the roots have already answered.
+   *
+   * Spent inside `DownloadService.plan`, not by a route: the audit interceptor
+   * looks at the mutating verbs only, so a GET has nowhere to declare one.
+   */
+  download: rule("limit:dl", "downloads", 120, 60, "TREKKER_LIMIT_DOWNLOADS_PER_MIN"),
+
+  /**
+   * Uploads (TRE-65), per request. Harsher than the downloads above because
+   * this one writes: a download can only take what the roots already granted,
+   * while an upload consumes somebody's disk, and the two are not symmetrical
+   * however much the routes look it.
+   */
+  upload: rule("limit:up", "uploads", 30, 60, "TREKKER_LIMIT_UPLOADS_PER_MIN"),
+
+  /**
+   * Uploaded bytes (TRE-65), per hour, in 64 MiB units.
+   *
+   * The second limit this table needs and the reason is arithmetic: the
+   * per-request limit above allows thirty uploads a minute and the per-file
+   * ceiling allows ten gigabytes each, which multiplies to a number that fills
+   * any disk in the fleet within the hour. One of those two bounds has to be on
+   * volume or neither of them is.
+   *
+   * In units rather than bytes because a `max` counted in bytes would be a
+   * fourteen-digit number in this table, and because sixty-four megabytes is
+   * about a second of transfer — fine enough to be enforcement, coarse enough
+   * that a long upload is a handful of Redis calls rather than one per chunk.
+   *
+   * Spent inside `UploadService.receive`, from the bytes actually received. The
+   * declared `Content-Length` is never charged against it: a client that lies
+   * about the header would otherwise be able to exhaust somebody else's budget
+   * without sending anything.
+   */
+  uploadedBytes: rule("limit:upvol", "uploaded data", 800, 3600, "TREKKER_LIMIT_UPLOAD_UNITS_PER_HOUR"),
+
+  /**
+   * Signed-link fetches (TRE-66) — **the only rule here scoped to an IP.**
+   *
+   * Every other counter in this table is spent per user, and the comment on
+   * `pathRefusal` explains why: a per-session limit is no limit at all when
+   * signing in again mints a new one. A signed link has neither a session nor a
+   * user, which is the point of it, so the IP is the only handle there is.
+   *
+   * That makes it a weaker control than the rest and it is worth saying so:
+   * anyone with several addresses has several budgets. It is not an identity
+   * check. What it bounds is one stranger hammering one URL, and what actually
+   * makes the grant safe is its narrowness — one path, read only, expiring.
+   *
+   * Spent inside `LinkService.redeem`, before the token is even parsed, so
+   * guessing at tokens costs the guesser the same as using a real one.
+   */
+  signedLink: rule("limit:link", "signed-link fetches", 60, 60, "TREKKER_LIMIT_LINK_FETCHES_PER_MIN"),
 } as const satisfies Record<string, LimitRule>;
 
 /**

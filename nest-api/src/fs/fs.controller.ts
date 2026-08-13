@@ -1,5 +1,5 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Req, UseGuards } from "@nestjs/common";
-import type { Request } from "express";
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import type { Request, Response } from "express";
 import { Audited, NotAudited } from "@audit/audited.decorator";
 import { AuditService } from "@audit/audit.service";
 import { LIMITS } from "@audit/limits";
@@ -10,6 +10,9 @@ import { FsQueryDto } from "@fs/dto/fs-query.dto";
 import { RenameBatchDto } from "@fs/dto/rename-batch.dto";
 import { RenameDto } from "@fs/dto/rename.dto";
 import { type DeletePlan, type DeleteResult, DeleteService } from "@fs/delete.service";
+import { contentDisposition, DOWNLOAD_CONTENT_TYPE, DOWNLOAD_CSP, parseRange, rangeLength } from "@fs/download-headers";
+import { sendDownload } from "@fs/download-response";
+import { DownloadService } from "@fs/download.service";
 import type { FileRowDetail } from "@fs/file-row";
 import { type ListResult, FsService } from "@fs/fs.service";
 import {
@@ -22,6 +25,9 @@ import {
 } from "@fs/permissions.service";
 import type { RenamePlan } from "@fs/rename-plan";
 import { type RenameResult, RenameService } from "@fs/rename.service";
+import { UploadQueryDto } from "@fs/dto/upload.dto";
+import { receiveMultipart } from "@fs/upload-multipart";
+import { toRefusalException, type UploadOutcome, UploadService } from "@fs/upload.service";
 import { CsrfGuard } from "@users/guards/csrf.guard";
 import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/session-auth.guard";
 
@@ -50,6 +56,8 @@ export class FsController {
     private readonly permissions: PermissionsService,
     private readonly rename: RenameService,
     private readonly remove: DeleteService,
+    private readonly download: DownloadService,
+    private readonly upload: UploadService,
     private readonly audit: AuditService,
   ) {}
 
@@ -71,6 +79,140 @@ export class FsController {
   @Get("count")
   count(@Req() req: Request, @Query() query: FsQueryDto): Promise<CountResult> {
     return this.permissions.count(userIdOf(req), query.hostId, query.path);
+  }
+
+  /**
+   * A file, or a directory as a zip (TRE-26).
+   *
+   * The only route here that writes to the response itself, and the only one
+   * whose audit row is not the interceptor's doing. Both follow from it being a
+   * GET that streams: the interceptor watches the mutating verbs by design, and
+   * a body this size cannot be an object Nest serialises.
+   *
+   * No CSRF, and that is not an oversight — a GET is exempt on both sides
+   * (`SAFE_HTTP_METHODS`), which is what lets the front do this as an anchor.
+   * An anchor cannot set a header, so a download demanding one would be a
+   * download the browser's own Save-As could never perform.
+   *
+   * Everything that can refuse does so in `plan()`, before the response is
+   * touched. After the first byte there is no status line left to change.
+   */
+  @Get("download")
+  async downloadPath(@Req() req: Request, @Res() res: Response, @Query() query: FsQueryDto): Promise<void> {
+    const userId = userIdOf(req);
+    const plan = await this.download.plan(userId, query.hostId, query.path);
+
+    const headers: Record<string, string> = {
+      "Content-Type": DOWNLOAD_CONTENT_TYPE,
+      "Content-Disposition": contentDisposition(plan.filename),
+      // Neither of these is the control — the disposition and the opaque type
+      // are — but a sniffed type is how a `.txt` full of markup became a page
+      // often enough that the header exists.
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": DOWNLOAD_CSP,
+      // A file's bytes are the same bytes every time; an archive's are built
+      // fresh and differ run to run. Neither should sit in a shared cache.
+      "Cache-Control": "private, no-store",
+    };
+
+    if (plan.kind === "directory") {
+      // No length and no ranges: the archive is produced as it is sent, so its
+      // size is unknown until it is over. Saying `none` is better than staying
+      // silent — a client that assumes ranges work and asks for one gets a
+      // whole archive from byte zero and no explanation.
+      headers["Accept-Ranges"] = "none";
+      const opened = await this.download.open(userId, req.sessionID, query.hostId, query.path, plan, null);
+      return sendDownload(res, opened, { status: HttpStatus.OK, headers });
+    }
+
+    const size = plan.size ?? 0;
+    const verdict = parseRange(req.headers.range, size);
+
+    headers["Accept-Ranges"] = "bytes";
+
+    if (verdict.kind === "unsatisfiable") {
+      // 416 carries the size so the client can ask again correctly, which is
+      // the only useful thing this response has to say.
+      res.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE).setHeader("Content-Range", `bytes */${size}`);
+      res.end();
+      return;
+    }
+
+    const range = verdict.kind === "partial" ? verdict.range : null;
+    const expectBytes = range ? rangeLength(range) : size;
+    headers["Content-Length"] = String(expectBytes);
+    if (range) headers["Content-Range"] = `bytes ${range.start}-${range.end}/${size}`;
+
+    const opened = await this.download.open(userId, req.sessionID, query.hostId, query.path, plan, range);
+    return sendDownload(res, opened, {
+      status: range ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK,
+      headers,
+      expectBytes,
+    });
+  }
+
+  /**
+   * A file from the laptop onto a host (TRE-65).
+   *
+   * Destructive, and the flag is not a formality: `conflict=overwrite` replaces
+   * a file that was there, with no undo and no trash. The row therefore keeps
+   * the long retention and the route carries a limit, which is the pair
+   * `audit-coverage.spec.ts` enforces.
+   *
+   * The body is never parsed by Nest. `@Req()` hands over the raw request and
+   * busboy reads it a part at a time — see `upload-multipart.ts` for why multer
+   * is the wrong tool and why the destination arrives in the query string.
+   */
+  @Post("upload")
+  @UseGuards(CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  @Audited({
+    kind: "file.upload",
+    destructive: true,
+    limit: LIMITS.upload,
+    // From the query, not the body — there is no parsed body on this route, and
+    // `describe` runs before busboy has seen a byte of it.
+    describe: (request) => {
+      const query = request.query as { path?: string; conflict?: string };
+      return {
+        summary: `upload into ${query.path ?? "?"}`,
+        paths: query.path ? [query.path] : [],
+        payload: { conflict: query.conflict ?? "keepBoth" },
+      };
+    },
+  })
+  async uploadFiles(
+    @Req() req: Request,
+    @Query() query: UploadQueryDto,
+  ): Promise<{ results: UploadOutcome[]; uploaded: number; bytes: number; failed: number }> {
+    const userId = userIdOf(req);
+    const conflict = query.conflict ?? "keepBoth";
+    // Before the body is touched, which is the ordering the whole route is
+    // arranged around.
+    const { driver, real } = await this.upload.destination(userId, query.hostId, query.path);
+
+    const { outcomes, refusal } = await receiveMultipart(req, (filename, stream) =>
+      this.upload.receive(userId, driver, real, filename, stream, conflict),
+    );
+
+    const uploaded = outcomes.filter((outcome) => outcome.ok && outcome.code !== "ESKIPPED").length;
+    const bytes = outcomes.reduce((total, outcome) => total + outcome.bytes, 0);
+    const failed = outcomes.filter((outcome) => !outcome.ok).length;
+
+    this.audit.annotate(req, {
+      hostId: query.hostId,
+      summary: `uploaded ${count(uploaded, "file")} into ${query.path}`,
+      tag: count(uploaded, "file"),
+      bytes,
+      payload: { uploaded, failed, skipped: outcomes.filter((outcome) => outcome.code === "ESKIPPED").length },
+    });
+
+    // Thrown after the annotation, so the row records what did land before the
+    // request was cut off. A refusal that erased the successful half of its own
+    // request would be the log lying by omission.
+    if (refusal !== null) throw toRefusalException(refusal);
+
+    return { results: outcomes, uploaded, bytes, failed };
   }
 
   @Post("chmod")

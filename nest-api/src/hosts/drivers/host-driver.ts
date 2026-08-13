@@ -66,6 +66,24 @@ export interface WriteOptions {
   append?: boolean;
 }
 
+/**
+ * A byte window, for HTTP range requests (TRE-26 §1).
+ *
+ * `end` is **inclusive**, which is what `node:fs` and ssh2's SFTP both mean by
+ * it and also what `Range: bytes=0-99` means. Three definitions that agree is
+ * worth more than one that reads more naturally, because the off-by-one here
+ * shows up as a resumed download that is one byte short and nothing says so.
+ *
+ * Both drivers implement this natively — the range is applied by the reader, so
+ * a ranged read over SFTP transfers the requested window and not the file.
+ */
+export interface ReadOptions {
+  /** First byte, inclusive. */
+  start?: number;
+  /** Last byte, inclusive. Absent means "to the end". */
+  end?: number;
+}
+
 export interface MkdirOptions {
   recursive?: boolean;
   mode?: number;
@@ -79,7 +97,7 @@ export interface HostDriver {
   /** Resolves symlinks and `..` to an absolute real path. TRE-11 depends on this. */
   realpath(path: string): Promise<string>;
 
-  createReadStream(path: string): Promise<Readable>;
+  createReadStream(path: string, options?: ReadOptions): Promise<Readable>;
   createWriteStream(path: string, options?: WriteOptions): Promise<Writable>;
 
   mkdir(path: string, options?: MkdirOptions): Promise<void>;
@@ -98,6 +116,21 @@ export interface HostDriver {
 
   /** Releases anything the driver holds. The local driver holds nothing. */
   dispose(): Promise<void>;
+}
+
+/**
+ * `ReadOptions` as the two stream constructors want it.
+ *
+ * Keys are omitted rather than set to `undefined`: both `node:fs` and ssh2 read
+ * `options.start` with a `typeof`/`!= null` test in some places and a plain
+ * truthiness test in others, and a present-but-undefined key has been read as a
+ * zero often enough to be worth not finding out again.
+ */
+export function rangeOf(options: ReadOptions): { start?: number; end?: number } {
+  return {
+    ...(options.start === undefined ? {} : { start: options.start }),
+    ...(options.end === undefined ? {} : { end: options.end }),
+  };
 }
 
 /** Raw permission bits from a st_mode, e.g. 0o100644 → 0o644. */

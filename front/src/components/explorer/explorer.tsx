@@ -16,12 +16,14 @@ import { RenameModal } from "@components/explorer/rename-modal";
 import { HostManager } from "@components/hosts/host-manager";
 import { CollapsiblePane } from "@components/ui/collapsible-pane";
 import { useToast } from "@components/ui/toast";
+import { useUploads } from "@components/ui/uploads";
 import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
+import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { warmDirectory } from "@lib/query/warm-directory";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 
 import type { DeleteTargetSelection } from "@components/explorer/delete-modal";
 import type { PaneCallbacks } from "@components/explorer/pane";
@@ -83,6 +85,10 @@ export function Explorer({
   onRenameMode,
   deleteOpen,
   onDeleteOpenChange,
+  downloadRequested,
+  onDownloadRequestedChange,
+  uploadRequested,
+  onUploadRequestedChange,
 }: {
   hosts: readonly HostView[];
   /** True while the hosts query is in flight, so an unbound pane waits rather
@@ -126,10 +132,24 @@ export function Explorer({
   /** The toolbar's `rm` button (TRE-25). Owned by the page, like the two above. */
   deleteOpen: boolean;
   onDeleteOpenChange: (open: boolean) => void;
+  /**
+   * The toolbar's `download` button (TRE-26), owned by the page for the same
+   * reason as the three above — except that this one opens nothing, so it is a
+   * request rather than a state: the explorer starts the download and turns it
+   * off again, and the flag is never true across two renders.
+   */
+  downloadRequested: boolean;
+  onDownloadRequestedChange: (requested: boolean) => void;
+  /** The toolbar's `upload` button (TRE-65). A request, like the download. */
+  uploadRequested: boolean;
+  onUploadRequestedChange: (requested: boolean) => void;
 }) {
   const [memory, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
   const { push } = useToast();
+  const uploads = useUploads();
   const queryClient = useQueryClient();
+  /** The toolbar's `upload` button clicks this; nothing else touches it. */
+  const filePicker = useRef<HTMLInputElement>(null);
   /** Set once a host has been bound automatically, so it happens per pane once. */
   const [seeded, setSeeded] = useState<[boolean, boolean]>([false, false]);
 
@@ -215,7 +235,10 @@ export function Explorer({
   // outright while the panel is closed, since nothing else needs the rows.
   // Also computed while either modal is open: the toolbar's buttons need the
   // selection whether or not the panel that usually shows it is up.
-  const inspecting = inspector || permissionsOpen || renameMode !== null || deleteOpen ? new Set(activePane.sel) : null;
+  const inspecting =
+    inspector || permissionsOpen || renameMode !== null || deleteOpen || downloadRequested
+      ? new Set(activePane.sel)
+      : null;
   const inspected = inspecting ? activeView.rows.filter((row) => inspecting.has(row.name)) : [];
   const cursorRow = activeView.rows.find((row) => row.name === activePane.cur) ?? null;
   const cursorPath = cursorRow ? joinPath(activePane.path, cursorRow.name) : null;
@@ -316,6 +339,86 @@ export function Explorer({
   }, [deleteEmpty, onDeleteOpenChange, push]);
 
   /**
+   * What a download is aimed at (TRE-26).
+   *
+   * The selection, or the row under the cursor — the same rule the rename and
+   * the delete follow. One entry, though, where they take many: the route takes
+   * one path, because a file streams as itself and a directory streams as a zip
+   * and there is no third shape that is several of either. Several selected
+   * entries are answered with the way to get them, which is to download the
+   * directory holding them.
+   *
+   * It runs from an effect because the button is in the toolbar and the
+   * selection is here — the inversion the modals resolve the same way. The flag
+   * is cleared first so this cannot fire twice for one press.
+   */
+  const downloadEntries = inspected.length > 0 ? inspected : cursorRow ? [cursorRow] : [];
+  useEffect(() => {
+    if (!downloadRequested) return;
+    onDownloadRequestedChange(false);
+
+    if (activePane.hostId === null || downloadEntries.length === 0) {
+      push({ tone: "info", message: "Nothing to download", detail: "Select an entry, or put the cursor on one" });
+      return;
+    }
+    if (downloadEntries.length > 1) {
+      push({
+        tone: "info",
+        message: "One at a time",
+        detail: "A download takes one entry. Download the directory to get several as a zip.",
+      });
+      return;
+    }
+
+    // No success toast. The browser has a downloads list, a progress indicator
+    // and a Save-As of its own, and a toast saying "started" over the top of
+    // them is a second, worse copy of what the user is already looking at.
+    startDownload(activePane.hostId, joinPath(activePane.path, downloadEntries[0].name));
+  }, [downloadRequested, onDownloadRequestedChange, activePane, downloadEntries, push]);
+
+  /**
+   * Uploading into a pane (TRE-65).
+   *
+   * Two ways in and one implementation. The toolbar's button opens the file
+   * picker below, and a drop on a pane arrives with its files already chosen —
+   * both end here, aimed at the directory that pane is showing.
+   *
+   * Not at the selection: an upload goes *into* a place, and the only place a
+   * pane unambiguously names is the directory it is standing in. Dropping onto
+   * a highlighted folder row would be a nicer gesture and a worse promise —
+   * there is no way to show, mid-drag, which of the two it decided on.
+   */
+  const uploadInto = (pane: PaneIndex, files: readonly File[]) => {
+    const view = views[pane];
+    if (view.hostId === null) {
+      push({ tone: "info", message: "No host on that pane", detail: "Bind one from the sidebar first" });
+      return;
+    }
+    if (files.length === 0) return;
+
+    void uploads.start(view.hostId, view.path, files).then(() => {
+      // Once, at the end of the batch. Per file would re-list the directory
+      // fifty times for fifty files, and the intermediate listings are of a
+      // directory that is still being written into.
+      void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, view.hostId] });
+    });
+  };
+
+  useEffect(() => {
+    if (!uploadRequested) return;
+    onUploadRequestedChange(false);
+
+    if (activePane.hostId === null) {
+      push({ tone: "info", message: "No host on this pane", detail: "Bind one from the sidebar first" });
+      return;
+    }
+    // The picker is a hidden input rather than `showOpenFilePicker`, which
+    // exists in one browser engine. Clicking it from here keeps the user
+    // gesture alive, which is what a file dialogue needs.
+    filePicker.current?.click();
+  }, [uploadRequested, onUploadRequestedChange, activePane, push]);
+
+  /**
    * The one way a pane moves. Both writes are issued here — the reducer's
    * memory of where we were, and the URL's record of where we are — so they
    * cannot disagree.
@@ -388,6 +491,14 @@ export function Explorer({
           // single name to type. Either way the other form is one click away.
           onActiveChange(index);
           onRenameMode(renameEntries.length === 1 ? "name" : "pattern");
+          return true;
+        case "F3":
+          // F3 is "view" in the two-pane managers this app is shaped after, and
+          // there is nothing to view yet. Download is the nearest true thing —
+          // getting the file somewhere you can open it — and the toolbar button
+          // carries the same hint, so the two teach each other.
+          onActiveChange(index);
+          onDownloadRequestedChange(true);
           return true;
         case "F5":
         case "F6":
@@ -470,6 +581,7 @@ export function Explorer({
       }),
     onHostMenu: () => onManageHosts(index),
     onClearGlob: () => onGlobChange(""),
+    onFilesDropped: (files) => uploadInto(index, files),
   });
 
   // Pointing at a directory is a reliable signal that it is about to be
@@ -649,6 +761,22 @@ export function Explorer({
           onClose={() => onManageHosts(null)}
         />
       )}
+
+      {/* The toolbar's upload button, which is a file dialogue wearing a
+          button's clothes. Hidden rather than absent: `.click()` on an input
+          that is not in the document opens nothing. */}
+      <input
+        ref={filePicker}
+        type="file"
+        multiple
+        hidden
+        onChange={(event) => {
+          uploadInto(active, [...(event.target.files ?? [])]);
+          // Cleared so choosing the same file twice fires `change` twice. An
+          // input keeps its value, and the second attempt would be silent.
+          event.target.value = "";
+        }}
+      />
     </div>
   );
 }

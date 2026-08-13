@@ -47,6 +47,18 @@ export default function HomePage() {
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [renameMode, setRenameMode] = useState<RenameMode | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  /**
+   * A request, not a state (TRE-26).
+   *
+   * The other three flags open a modal that stays open. This one asks the
+   * explorer to start a download and is turned off again the moment it has,
+   * because the explorer is where the selection lives and the toolbar button is
+   * up here — the same inversion the modals already resolve this way, for an
+   * action that has no dialogue of its own.
+   */
+  const [downloadRequested, setDownloadRequested] = useState(false);
+  /** The same shape, for the toolbar's `upload` button (TRE-65). */
+  const [uploadRequested, setUploadRequested] = useState(false);
 
   /**
    * Whether the layout has been moved by hand yet (TRE-62 §4).
@@ -79,6 +91,8 @@ export default function HomePage() {
     // The button is labelled `regex rename`, so it opens the pattern whatever
     // is selected. F2 is the one that opens a single name.
     rename: () => setRenameMode("pattern"),
+    download: () => setDownloadRequested(true),
+    upload: () => setUploadRequested(true),
     rm: () => setDeleteOpen(true),
   };
   const actions = M2_ACTIONS.map((action) =>
@@ -208,6 +222,10 @@ export default function HomePage() {
         onRenameMode={setRenameMode}
         deleteOpen={deleteOpen}
         onDeleteOpenChange={setDeleteOpen}
+        downloadRequested={downloadRequested}
+        onDownloadRequestedChange={setDownloadRequested}
+        uploadRequested={uploadRequested}
+        onUploadRequestedChange={setUploadRequested}
       />
     </AppShell>
   );

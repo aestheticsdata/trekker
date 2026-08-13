@@ -360,6 +360,11 @@ beforeAll(async () => {
   // SecretStoreService reads this in onModuleInit, and HostsModule pulls it in.
   process.env.TREKKER_MASTER_KEY ??= `1:${Buffer.alloc(32, 7).toString("base64")}`;
   delete process.env.TREKKER_MASTER_KEY_PREVIOUS;
+  // LinkKeyService reads this in its own onModuleInit (TRE-66). A different
+  // fill byte than the master key above, deliberately: these two must never be
+  // the same value, and a test that set them equal would be describing the
+  // arrangement this ticket exists to prevent.
+  process.env.TREKKER_DOWNLOAD_LINK_KEY ??= `1:${Buffer.alloc(32, 9).toString("base64")}`;
 
   const moduleRef = await Test.createTestingModule({
     // AppModule itself is deliberately not imported: it calls loadEnv(), which
@@ -579,6 +584,14 @@ const PUBLIC_ROUTES = [
   "POST /api/users/add", // registration, gated by SignupGuard instead
   "POST /api/users/logout", // ending a session you do not have is a no-op, not an error
   "POST /api/users/recover", // whoever needs this cannot sign in by definition
+  // TRE-66. The only route here that serves a file to a stranger, and the only
+  // one whose openness is the feature rather than a consequence of there being
+  // no session yet. What stands in for the guard is the token: an HMAC over the
+  // host, the path, the expiry and the issuing account, checked before anything
+  // else happens, rate limited by IP, and granting read of exactly one file for
+  // fifteen minutes. Adding a second route to this controller without that
+  // check would be the mistake this line exists to make visible.
+  "GET /api/link/:token",
 ];
 
 /** Mutating routes that do not demand a CSRF token, and why. */

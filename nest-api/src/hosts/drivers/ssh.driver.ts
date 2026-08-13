@@ -10,6 +10,8 @@ import {
   kindFromMode,
   type MkdirOptions,
   PERMISSION_MASK,
+  rangeOf,
+  type ReadOptions,
   type WriteOptions,
 } from "@hosts/drivers/host-driver";
 import type { HostConnectionSpec, Lease, PoolSettings, SshConnectionPool } from "@hosts/drivers/ssh-connection.pool";
@@ -167,10 +169,13 @@ export class SshDriver implements HostDriver {
    * — a read that closed its slot early would let a seventh concurrent transfer
    * start while six are still moving bytes.
    */
-  async createReadStream(path: string): Promise<Readable> {
+  async createReadStream(path: string, options: ReadOptions = {}): Promise<Readable> {
     const lease = await this.pool.acquire(this.spec);
     try {
-      const stream = lease.sftp.createReadStream(path);
+      // The window is applied by the reader, so a ranged read moves the window
+      // and not the file — which is the whole point of supporting it over a
+      // link where the bytes are the expensive part.
+      const stream = lease.sftp.createReadStream(path, rangeOf(options));
       holdUntilClosed(stream, lease);
       return stream;
     } catch (error) {

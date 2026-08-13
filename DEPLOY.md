@@ -163,14 +163,18 @@ the fix.
 
 `ecosystem.config.js` needs every variable the API reads, `PORT` included;
 `env.validation.ts` refuses to boot without them and names the one that is
-missing. Two of them are generated rather than chosen, both **on the server**,
+missing. Three of them are generated rather than chosen, all **on the server**,
 then pasted into this file — it is untracked and never committed, and the deploy
 copies it up:
 
 ```bash
 openssl rand -base64 48                                                          # SESSION_SECRET
 node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"  # TREKKER_MASTER_KEY
+node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"  # TREKKER_DOWNLOAD_LINK_KEY
 ```
+
+Run that last command **twice** and use two different values. The two keys must
+never be equal — see [Two keys, never one](#two-keys-never-one).
 
 `FRONTEND_URL` is the real subdomain, not a placeholder — it is what the API
 allows as an origin.
@@ -384,6 +388,31 @@ told why the path refuses instead of getting the uniform refusal.
 **What this protects against is database disclosure, not host compromise.**
 Anyone who owns the API host reads the key out of the process environment and
 it is over. That is the accepted limit, not an oversight.
+
+### Two keys, never one
+
+`TREKKER_DOWNLOAD_LINK_KEY` signs the expiring download links of TRE-66. Same
+format, same generation command, and it **must be a different value** from
+`TREKKER_MASTER_KEY`.
+
+The reason is what a signed link is. Any signed-in account can ask the server to
+sign a message it chose — a host, a path, an expiry — and hand the result to
+somebody with no account at all. That is a signing oracle, and it is perfectly
+safe for a key that does nothing else. It is not safe for the key that seals
+every stored SSH credential in the install: sharing one key between "sign this
+for me" and "decrypt every machine we own" is how a convenience becomes a
+compromise. Single-purpose keys stay single-purpose.
+
+The API refuses to boot without it, exactly as it does for the master key, and
+names the variable. **An install upgrading past TRE-66 must add this variable to
+`ecosystem.config.js` on the server before the API is restarted**, or the
+restart fails and PM2 keeps trying.
+
+There is no `_PREVIOUS` for this one and the absence is deliberate. A credential
+has to survive a rotation; a link must not. Changing this value invalidates
+every outstanding link at once, and that is the only way to withdraw one that
+has already been forwarded — the tokens are stateless by design, so there is no
+per-link revocation to reach for instead.
 
 ### File modes
 

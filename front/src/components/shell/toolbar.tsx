@@ -40,6 +40,8 @@ export const M2_ACTIONS: readonly ToolbarAction[] = [
   { id: "compare", label: "compare", hint: "⇄", unavailableReason: "Pane comparison arrives in TRE-28" },
   { id: "chmod", label: "permissions", unavailableReason: "chmod and chown arrive in TRE-21" },
   { id: "rename", label: "regex rename", hint: "F2", unavailableReason: "Regex rename arrives in TRE-22" },
+  { id: "download", label: "download", hint: "F3", unavailableReason: "Downloads arrive in TRE-26" },
+  { id: "upload", label: "upload", hint: "↑", unavailableReason: "Uploads arrive in TRE-65" },
   { id: "rm", label: "rm", hint: "⌦", danger: true },
 ];
 

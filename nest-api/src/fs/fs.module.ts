@@ -1,19 +1,46 @@
 import { Module } from "@nestjs/common";
 import { DeleteService } from "@fs/delete.service";
+import { DownloadService } from "@fs/download.service";
 import { FsController } from "@fs/fs.controller";
 import { FsService } from "@fs/fs.service";
 import { IdResolverService } from "@fs/id-resolver.service";
 import { PermissionsService } from "@fs/permissions.service";
+import { LinkController } from "@fs/link.controller";
+import { LinkService } from "@fs/link.service";
 import { RenameService } from "@fs/rename.service";
+import { UploadService } from "@fs/upload.service";
 
 /**
  * HostsModule is @Global, so HostDriverFactory and PathGuardService inject
  * here without being imported. AuditModule is @Global for the same reason,
- * which is what lets the controller annotate its own rows (TRE-30).
+ * which is what lets the controller annotate its own rows (TRE-30). So is
+ * SecretStoreModule, which is where the link-signing key comes from (TRE-66).
+ *
+ * `LinkController` is a second controller in this module rather than a route on
+ * the first, because its GET carries no session guard and `FsController` puts
+ * one on the class.
  */
 @Module({
-  controllers: [FsController],
-  providers: [FsService, IdResolverService, PermissionsService, RenameService, DeleteService],
-  exports: [FsService, IdResolverService, PermissionsService, RenameService, DeleteService],
+  controllers: [FsController, LinkController],
+  providers: [
+    FsService,
+    IdResolverService,
+    PermissionsService,
+    RenameService,
+    DeleteService,
+    DownloadService,
+    UploadService,
+    LinkService,
+  ],
+  exports: [
+    FsService,
+    IdResolverService,
+    PermissionsService,
+    RenameService,
+    DeleteService,
+    DownloadService,
+    UploadService,
+    LinkService,
+  ],
 })
 export class FsModule {}
