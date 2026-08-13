@@ -44,6 +44,7 @@ export default function HomePage() {
   const [selection, setSelection] = useState<{ row: FileRow; path: string } | null>(null);
   const [manageHostsFor, setManageHostsFor] = useState<PaneIndex | null>(null);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
 
   /**
    * Whether the layout has been moved by hand yet (TRE-62 §4).
@@ -62,18 +63,21 @@ export default function HomePage() {
   };
 
   /**
-   * The toolbar's action row, with the one M2 has built wired up (TRE-21).
+   * The toolbar's action row, with the ones M2 has built wired up (TRE-21,
+   * TRE-22).
    *
    * The row is declared in the toolbar so the palette can share it, and each
    * action stays disabled until its ticket lands — which is also the honest
-   * signal that `permissions` was inert until now. Replacing the entry rather
-   * than mutating the shared list keeps the default list a description of what
+   * signal for the four that are still inert. Replacing the entry rather than
+   * mutating the shared list keeps the default list a description of what
    * exists rather than of what this page happens to enable.
    */
+  const OPENERS: Record<string, () => void> = {
+    chmod: () => setPermissionsOpen(true),
+    rename: () => setRenameOpen(true),
+  };
   const actions = M2_ACTIONS.map((action) =>
-    action.id === "chmod"
-      ? { ...action, unavailableReason: undefined, onSelect: () => setPermissionsOpen(true) }
-      : action,
+    action.id in OPENERS ? { ...action, unavailableReason: undefined, onSelect: OPENERS[action.id] } : action,
   );
 
   const { data: health } = useQuery({
@@ -195,6 +199,8 @@ export default function HomePage() {
         onManageHosts={setManageHostsFor}
         permissionsOpen={permissionsOpen}
         onPermissionsOpenChange={setPermissionsOpen}
+        renameOpen={renameOpen}
+        onRenameOpenChange={setRenameOpen}
       />
     </AppShell>
   );

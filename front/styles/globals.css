@@ -52,6 +52,10 @@
   --color-ink-dim: #6fb2c9;
   --color-ink-faint: #4d7f99;
   --color-ink-link: #3e8fae;
+  /* One step below faint, and the last one that is still a colour rather than
+   * the background. For marks that must be present without being read — the
+   * inert arrow beside a name a pattern does not change (TRE-22). */
+  --color-ink-ghost: #33495c;
 
   /* On the light panes, where the same hierarchy runs the other way.
    * `strong` is a directory name, `data` a size, `dim` a mode or an owner,
@@ -84,6 +88,10 @@
   --color-danger: #7f2f2f;
   --color-danger-mid: #aa3333;
   --color-danger-soft: #e39a9a;
+  /* The fill behind a refusal that occupies a box of its own rather than a
+   * line of red text — 2a's error panel in the rename modal. Dark enough to sit
+   * under `danger-soft` at full contrast, red enough to read as a stop. */
+  --color-danger-wash: #2a1218;
   --color-success: #7fd6a8;
 
   /* ---- age ramp ---------------------------------------------------------

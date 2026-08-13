@@ -99,6 +99,20 @@ export const LIMITS = {
    * times someone may aim that, and 20 a minute is far past deliberate use.
    */
   permissionChange: rule("limit:perm", "permission changes", 20, 60, "TREKKER_LIMIT_PERMISSION_CHANGES_PER_MIN"),
+
+  /**
+   * Renames (TRE-22), single and by pattern, on one budget.
+   *
+   * Per request, like the permission changes above and for the same reason:
+   * one batch may rename a thousand entries, and what this bounds is how often
+   * someone may aim one. Higher than 20 because a single rename is also an
+   * ordinary editing gesture — F2, type, enter — and a person tidying a
+   * directory does that a dozen times in a minute without meaning anything by it.
+   *
+   * It is here rather than in `TO_ATTACH` because the routes it governs land in
+   * the same change. There is no window where this is a promise.
+   */
+  rename: rule("limit:mv", "renames", 60, 60, "TREKKER_LIMIT_RENAMES_PER_MIN"),
 } as const satisfies Record<string, LimitRule>;
 
 /**

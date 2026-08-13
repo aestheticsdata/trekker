@@ -72,6 +72,9 @@ export type ExplorerAction =
   /** ⌘A. Carries the names for the same reason `click` does — the pane knows
    * what is on screen, the reducer does not. */
   | { type: "selectAll"; pane: PaneIndex; names: readonly string[] }
+  /** After an operation renamed or removed what was selected (TRE-22): the
+   * names no longer describe anything, and the cursor's does not either. */
+  | { type: "selectNone"; pane: PaneIndex }
   | { type: "cursor"; pane: PaneIndex; name: string | null };
 
 export function explorerReducer(state: ExplorerState, action: ExplorerAction): ExplorerState {
@@ -139,6 +142,11 @@ function paneReducer(pane: PaneMemory, action: ExplorerAction): PaneMemory {
       if (action.names.length === 0) return pane;
       return { ...pane, sel: [...action.names], cur: pane.cur ?? action.names[0] };
     }
+
+    case "selectNone":
+      // The cursor goes with it. Its name is one of the ones that just changed,
+      // and the effect that seeds a cursor puts it back on the first row.
+      return pane.sel.length === 0 && pane.cur === null ? pane : { ...pane, sel: [], cur: null };
 
     case "cursor":
       return pane.cur === action.name ? pane : { ...pane, cur: action.name };

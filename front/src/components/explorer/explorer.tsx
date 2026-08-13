@@ -11,6 +11,7 @@ import {
   upTarget,
 } from "@components/explorer/pane-state";
 import { PermissionsModal } from "@components/explorer/permissions-modal";
+import { RenameModal } from "@components/explorer/rename-modal";
 import { HostManager } from "@components/hosts/host-manager";
 import { CollapsiblePane } from "@components/ui/collapsible-pane";
 import { useToast } from "@components/ui/toast";
@@ -24,6 +25,7 @@ import { useEffect, useReducer, useState } from "react";
 import type { PaneCallbacks } from "@components/explorer/pane";
 import type { PaneIndex, PaneView } from "@components/explorer/pane-state";
 import type { PermissionsTarget } from "@components/explorer/permissions-modal";
+import type { RenameTarget } from "@components/explorer/rename-modal";
 import type { SplitMode } from "@components/shell/toolbar";
 import type { SortKey } from "@helpers/listing";
 import type { FileRow } from "@lib/api/fs";
@@ -75,6 +77,8 @@ export function Explorer({
   onManageHosts,
   permissionsOpen,
   onPermissionsOpenChange,
+  renameOpen,
+  onRenameOpenChange,
 }: {
   hosts: readonly HostView[];
   /** True while the hosts query is in flight, so an unbound pane waits rather
@@ -105,6 +109,10 @@ export function Explorer({
    * the host manager is: the button lives up there, the selection lives here. */
   permissionsOpen: boolean;
   onPermissionsOpenChange: (open: boolean) => void;
+  /** The toolbar's `regex rename` button, and F2 (TRE-22). Owned by the page
+   * for the same reason `permissions` is. */
+  renameOpen: boolean;
+  onRenameOpenChange: (open: boolean) => void;
 }) {
   const [memory, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
   const { push } = useToast();
@@ -192,9 +200,9 @@ export function Explorer({
   // Indexed, not searched: `sel.includes` once per row is a hundred million
   // comparisons when ⌘A has selected ten thousand of them (TRE-19 §2). Skipped
   // outright while the panel is closed, since nothing else needs the rows.
-  // Also computed while the permissions modal is open: the toolbar's button
-  // needs the selection whether or not the panel that usually shows it is up.
-  const inspecting = inspector || permissionsOpen ? new Set(activePane.sel) : null;
+  // Also computed while either modal is open: the toolbar's buttons need the
+  // selection whether or not the panel that usually shows it is up.
+  const inspecting = inspector || permissionsOpen || renameOpen ? new Set(activePane.sel) : null;
   const inspected = inspecting ? activeView.rows.filter((row) => inspecting.has(row.name)) : [];
   const cursorRow = activeView.rows.find((row) => row.name === activePane.cur) ?? null;
   const cursorPath = cursorRow ? joinPath(activePane.path, cursorRow.name) : null;
@@ -236,6 +244,38 @@ export function Explorer({
               entries: [directoryStat.data],
             }
           : null;
+
+  /**
+   * What the rename modal is aimed at (TRE-22).
+   *
+   * The selection when there is one, and the row under the cursor when there is
+   * not — which is what F2 means everywhere else and what the mockup's own
+   * shortcut hint promises. Unlike the permissions modal it never falls back to
+   * the directory the pane is showing: renaming the directory you are standing
+   * in leaves the pane pointing at a path that no longer exists, and that is a
+   * navigation decision this ticket has no business making.
+   */
+  const renameEntries = inspected.length > 0 ? inspected : cursorRow ? [cursorRow] : [];
+  const renameTarget: RenameTarget | null =
+    !renameOpen || activePane.hostId === null || renameEntries.length === 0
+      ? null
+      : { hostId: activePane.hostId, directory: activePane.path, entries: renameEntries };
+
+  // A target of nothing renders nothing, which would leave the flag on and the
+  // toolbar's button dead until something else turned it off. The button cannot
+  // know — it is up in the shell and the selection is down here — so the answer
+  // is given once the pane knows its own contents, and not while it is still
+  // loading them, or opening on a cold pane would close itself.
+  const renameEmpty =
+    renameOpen &&
+    !hostsPending &&
+    !activeView.listing.isPending &&
+    (activePane.hostId === null || renameTarget === null);
+  useEffect(() => {
+    if (!renameEmpty) return;
+    onRenameOpenChange(false);
+    push({ tone: "info", message: "Nothing to rename", detail: "Select an entry, or put the cursor on one" });
+  }, [renameEmpty, onRenameOpenChange, push]);
 
   /**
    * The one way a pane moves. Both writes are issued here — the reducer's
@@ -300,6 +340,13 @@ export function Explorer({
           return true;
         }
         case "F2":
+          // Aimed at the pane the key was pressed in, which is the active one —
+          // stated anyway, because the target below reads `activePane` and the
+          // two must not be able to disagree. An empty pane is handled where
+          // the toolbar's button lands too, rather than twice.
+          onActiveChange(index);
+          onRenameOpenChange(true);
+          return true;
         case "F5":
         case "F6":
         case "Delete":
@@ -514,6 +561,23 @@ export function Explorer({
             // inspector reads its own stat for the selected entry.
             void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, permissionsTarget.hostId] });
             void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.ENTRY, permissionsTarget.hostId] });
+          }}
+        />
+      )}
+
+      {renameTarget && (
+        <RenameModal
+          target={renameTarget}
+          onClose={() => onRenameOpenChange(false)}
+          onApplied={() => {
+            // The listing carries the names, and the inspector's stat is keyed
+            // by a path that may no longer exist.
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, renameTarget.hostId] });
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.ENTRY, renameTarget.hostId] });
+            // The selection is a list of names, and those names are what just
+            // changed (TRE-16 §3). Leaving it would highlight rows that are
+            // gone and hand the next action a stale list.
+            dispatch({ type: "selectNone", pane: active });
           }}
         />
       )}

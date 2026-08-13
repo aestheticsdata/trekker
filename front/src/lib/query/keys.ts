@@ -11,6 +11,12 @@ export const QUERY_KEYS = {
   ENTRY: "entry",
   /** What a recursive change would touch — asked only when the box is ticked. */
   ENTRY_COUNT: "entryCount",
+  /**
+   * What a rename pattern would produce (TRE-22). Keyed by the pattern itself,
+   * so backspacing to something already typed redraws from cache instead of
+   * asking the server to compile it again.
+   */
+  RENAME_PREVIEW: "renamePreview",
   ACTIVITY: "activity",
   /** The layout the account left, asked for only on a cold open (TRE-51). */
   LAYOUT: "layout",

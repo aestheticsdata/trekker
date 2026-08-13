@@ -3,6 +3,7 @@ import { FsController } from "@fs/fs.controller";
 import { FsService } from "@fs/fs.service";
 import { IdResolverService } from "@fs/id-resolver.service";
 import { PermissionsService } from "@fs/permissions.service";
+import { RenameService } from "@fs/rename.service";
 
 /**
  * HostsModule is @Global, so HostDriverFactory and PathGuardService inject
@@ -11,7 +12,7 @@ import { PermissionsService } from "@fs/permissions.service";
  */
 @Module({
   controllers: [FsController],
-  providers: [FsService, IdResolverService, PermissionsService],
-  exports: [FsService, IdResolverService, PermissionsService],
+  providers: [FsService, IdResolverService, PermissionsService, RenameService],
+  exports: [FsService, IdResolverService, PermissionsService, RenameService],
 })
 export class FsModule {}
