@@ -113,6 +113,29 @@ export const LIMITS = {
    * the same change. There is no window where this is a promise.
    */
   rename: rule("limit:mv", "renames", 60, 60, "TREKKER_LIMIT_RENAMES_PER_MIN"),
+
+  /**
+   * Deletes (TRE-25), per request. Ten a minute: harsher than the renames above
+   * because this is the operation with no undo, and nobody deletes deliberately
+   * ten times in a minute.
+   */
+  fileDelete: rule("limit:rm", "deletions", 10, 60, "TREKKER_LIMIT_DELETES_PER_MIN"),
+
+  /**
+   * Deleted entries (TRE-25), per hour — the one rule in this table spent in
+   * something other than requests.
+   *
+   * `fileDelete` above bounds how often someone may aim a delete; this bounds
+   * how much it may take. They are different questions: ten requests a minute
+   * is a reasonable ceiling on gestures and a catastrophic one on entries, and
+   * a session that has removed fifty thousand files in an hour is either a
+   * migration nobody told us about or a session that is not being driven by its
+   * owner.
+   *
+   * Spent inside `DeleteService.remove`, in units, before anything is removed,
+   * so a refusal costs nothing.
+   */
+  entriesDeleted: rule("limit:rment", "deleted entries", 50_000, 3600, "TREKKER_LIMIT_DELETED_ENTRIES_PER_HOUR"),
 } as const satisfies Record<string, LimitRule>;
 
 /**
@@ -124,11 +147,6 @@ export const LIMITS = {
  * destructive operation is rate limited" becomes true on paper only.
  */
 export const TO_ATTACH = {
-  fileDelete: { rule: rule("limit:rm", "deletions", 10, 60, "TREKKER_LIMIT_DELETES_PER_MIN"), ticket: "TRE-25" },
-  entriesDeleted: {
-    rule: rule("limit:rment", "deleted entries", 50_000, 3600, "TREKKER_LIMIT_DELETED_ENTRIES_PER_HOUR"),
-    ticket: "TRE-25",
-  },
   transferJobs: { rule: rule("limit:xfer", "transfers", 5, 0, "TREKKER_LIMIT_TRANSFERS_IN_FLIGHT"), ticket: "TRE-23" },
   hashJobs: { rule: rule("limit:hash", "checksum jobs", 3, 0, "TREKKER_LIMIT_HASHES_IN_FLIGHT"), ticket: "TRE-27" },
   elevation: {

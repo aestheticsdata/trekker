@@ -46,6 +46,7 @@ export default function HomePage() {
   const [manageHostsFor, setManageHostsFor] = useState<PaneIndex | null>(null);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [renameMode, setRenameMode] = useState<RenameMode | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   /**
    * Whether the layout has been moved by hand yet (TRE-62 §4).
@@ -78,6 +79,7 @@ export default function HomePage() {
     // The button is labelled `regex rename`, so it opens the pattern whatever
     // is selected. F2 is the one that opens a single name.
     rename: () => setRenameMode("pattern"),
+    rm: () => setDeleteOpen(true),
   };
   const actions = M2_ACTIONS.map((action) =>
     action.id in OPENERS ? { ...action, unavailableReason: undefined, onSelect: OPENERS[action.id] } : action,
@@ -204,6 +206,8 @@ export default function HomePage() {
         onPermissionsOpenChange={setPermissionsOpen}
         renameMode={renameMode}
         onRenameMode={setRenameMode}
+        deleteOpen={deleteOpen}
+        onDeleteOpenChange={setDeleteOpen}
       />
     </AppShell>
   );

@@ -17,6 +17,12 @@ export const QUERY_KEYS = {
    * asking the server to compile it again.
    */
   RENAME_PREVIEW: "renamePreview",
+  /**
+   * What a delete would take (TRE-25). Asked once when the modal opens and
+   * never refetched: the number being confirmed must not change under the
+   * cursor while it is being typed.
+   */
+  DELETE_PLAN: "deletePlan",
   ACTIVITY: "activity",
   /** The layout the account left, asked for only on a cold open (TRE-51). */
   LAYOUT: "layout",

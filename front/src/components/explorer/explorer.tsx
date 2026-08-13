@@ -1,5 +1,6 @@
 "use client";
 
+import { DeleteModal } from "@components/explorer/delete-modal";
 import { Inspector } from "@components/explorer/inspector";
 import { Pane } from "@components/explorer/pane";
 import {
@@ -22,6 +23,7 @@ import { warmDirectory } from "@lib/query/warm-directory";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useState } from "react";
 
+import type { DeleteTargetSelection } from "@components/explorer/delete-modal";
 import type { PaneCallbacks } from "@components/explorer/pane";
 import type { PaneIndex, PaneView } from "@components/explorer/pane-state";
 import type { PermissionsTarget } from "@components/explorer/permissions-modal";
@@ -79,6 +81,8 @@ export function Explorer({
   onPermissionsOpenChange,
   renameMode,
   onRenameMode,
+  deleteOpen,
+  onDeleteOpenChange,
 }: {
   hosts: readonly HostView[];
   /** True while the hosts query is in flight, so an unbound pane waits rather
@@ -119,6 +123,9 @@ export function Explorer({
    */
   renameMode: RenameMode | null;
   onRenameMode: (mode: RenameMode | null) => void;
+  /** The toolbar's `rm` button (TRE-25). Owned by the page, like the two above. */
+  deleteOpen: boolean;
+  onDeleteOpenChange: (open: boolean) => void;
 }) {
   const [memory, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
   const { push } = useToast();
@@ -208,7 +215,7 @@ export function Explorer({
   // outright while the panel is closed, since nothing else needs the rows.
   // Also computed while either modal is open: the toolbar's buttons need the
   // selection whether or not the panel that usually shows it is up.
-  const inspecting = inspector || permissionsOpen || renameMode !== null ? new Set(activePane.sel) : null;
+  const inspecting = inspector || permissionsOpen || renameMode !== null || deleteOpen ? new Set(activePane.sel) : null;
   const inspected = inspecting ? activeView.rows.filter((row) => inspecting.has(row.name)) : [];
   const cursorRow = activeView.rows.find((row) => row.name === activePane.cur) ?? null;
   const cursorPath = cursorRow ? joinPath(activePane.path, cursorRow.name) : null;
@@ -282,6 +289,31 @@ export function Explorer({
     onRenameMode(null);
     push({ tone: "info", message: "Nothing to rename", detail: "Select an entry, or put the cursor on one" });
   }, [renameEmpty, onRenameMode, push]);
+
+  /**
+   * What the delete modal is aimed at (TRE-25).
+   *
+   * The same rule as the rename above, and deliberately so: the selection, or
+   * the row under the cursor. It never falls back to the directory the pane is
+   * standing in — that is the one target where a mistake takes the pane's own
+   * ground with it.
+   */
+  const deleteEntries = inspected.length > 0 ? inspected : cursorRow ? [cursorRow] : [];
+  const deleteTarget: DeleteTargetSelection | null =
+    !deleteOpen || activePane.hostId === null || deleteEntries.length === 0
+      ? null
+      : { hostId: activePane.hostId, directory: activePane.path, entries: deleteEntries };
+
+  const deleteEmpty =
+    deleteOpen &&
+    !hostsPending &&
+    !activeView.listing.isPending &&
+    (activePane.hostId === null || deleteTarget === null);
+  useEffect(() => {
+    if (!deleteEmpty) return;
+    onDeleteOpenChange(false);
+    push({ tone: "info", message: "Nothing to delete", detail: "Select an entry, or put the cursor on one" });
+  }, [deleteEmpty, onDeleteOpenChange, push]);
 
   /**
    * The one way a pane moves. Both writes are issued here — the reducer's
@@ -588,6 +620,21 @@ export function Explorer({
             // The selection is a list of names, and those names are what just
             // changed (TRE-16 §3). Leaving it would highlight rows that are
             // gone and hand the next action a stale list.
+            dispatch({ type: "selectNone", pane: active });
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteModal
+          target={deleteTarget}
+          onClose={() => onDeleteOpenChange(false)}
+          onApplied={() => {
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, deleteTarget.hostId] });
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.ENTRY, deleteTarget.hostId] });
+            // The selection names entries that no longer exist. Leaving it would
+            // hand the next action a list of ghosts — and the next action might
+            // be this one again.
             dispatch({ type: "selectNone", pane: active });
           }}
         />

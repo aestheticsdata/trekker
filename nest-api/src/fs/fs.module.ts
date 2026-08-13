@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { DeleteService } from "@fs/delete.service";
 import { FsController } from "@fs/fs.controller";
 import { FsService } from "@fs/fs.service";
 import { IdResolverService } from "@fs/id-resolver.service";
@@ -12,7 +13,7 @@ import { RenameService } from "@fs/rename.service";
  */
 @Module({
   controllers: [FsController],
-  providers: [FsService, IdResolverService, PermissionsService, RenameService],
-  exports: [FsService, IdResolverService, PermissionsService, RenameService],
+  providers: [FsService, IdResolverService, PermissionsService, RenameService, DeleteService],
+  exports: [FsService, IdResolverService, PermissionsService, RenameService, DeleteService],
 })
 export class FsModule {}

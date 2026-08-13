@@ -5,9 +5,11 @@ import { AuditService } from "@audit/audit.service";
 import { LIMITS } from "@audit/limits";
 import { ChangeModeDto } from "@fs/dto/change-mode.dto";
 import { ChangeOwnerDto } from "@fs/dto/change-owner.dto";
+import { DeleteDto, DeletePlanDto } from "@fs/dto/delete.dto";
 import { FsQueryDto } from "@fs/dto/fs-query.dto";
 import { RenameBatchDto } from "@fs/dto/rename-batch.dto";
 import { RenameDto } from "@fs/dto/rename.dto";
+import { type DeletePlan, type DeleteResult, DeleteService } from "@fs/delete.service";
 import type { FileRowDetail } from "@fs/file-row";
 import { type ListResult, FsService } from "@fs/fs.service";
 import {
@@ -47,6 +49,7 @@ export class FsController {
     private readonly fs: FsService,
     private readonly permissions: PermissionsService,
     private readonly rename: RenameService,
+    private readonly remove: DeleteService,
     private readonly audit: AuditService,
   ) {}
 
@@ -230,6 +233,55 @@ export class FsController {
       hostId: dto.hostId,
       summary: `renamed ${count(result.renamed, "entry", "entries")} in ${result.directory}`,
       payload: { renamed: result.renamed, stranded: result.stranded },
+    });
+    return result;
+  }
+
+  /**
+   * What a delete would take (TRE-25 §3). A POST for its body, like
+   * `rename/preview`, and exempt for the same reason: it removes nothing.
+   *
+   * It walks and it validates as a *write*, so a plan is never shown for
+   * something the delete itself would refuse — a confirmation dialogue for an
+   * operation that cannot happen is worse than the refusal.
+   */
+  @Post("delete/plan")
+  @UseGuards(CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  @NotAudited("Walks and reports. Removes nothing; the delete that follows is the audited event.")
+  plan(@Req() req: Request, @Body() dto: DeletePlanDto): Promise<DeletePlan> {
+    return this.remove.plan(userIdOf(req), dto.hostId, dto.paths);
+  }
+
+  @Post("delete")
+  @UseGuards(CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  @Audited({
+    kind: "file.delete",
+    destructive: true,
+    limit: LIMITS.fileDelete,
+    // The full path list, always. This is the one operation whose damage cannot
+    // be read back off the filesystem afterwards — there is nothing left to
+    // look at — so the row has to carry what was there before it ran. The
+    // interceptor writes it before the handler, which is what makes it survive
+    // a delete that fails halfway.
+    describe: (request) => {
+      const body = request.body as { paths?: string[] };
+      const paths = body.paths ?? [];
+      return {
+        summary: `delete ${count(paths.length, "entry", "entries")}${paths.length === 1 ? ` · ${basename(paths[0])}` : ""}`,
+        tag: count(paths.length, "entry", "entries"),
+        paths,
+      };
+    },
+  })
+  async deletePaths(@Req() req: Request, @Body() dto: DeleteDto): Promise<DeleteResult> {
+    const result = await this.remove.remove(userIdOf(req), dto.hostId, dto.paths, dto.confirmation);
+
+    this.audit.annotate(req, {
+      hostId: dto.hostId,
+      summary: `deleted ${count(result.entriesRemoved, "entry", "entries")}, ${result.bytesFreed} bytes`,
+      payload: { entriesRemoved: result.entriesRemoved, bytesFreed: result.bytesFreed, failed: result.failed },
     });
     return result;
   }

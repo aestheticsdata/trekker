@@ -40,7 +40,7 @@ export const M2_ACTIONS: readonly ToolbarAction[] = [
   { id: "compare", label: "compare", hint: "⇄", unavailableReason: "Pane comparison arrives in TRE-28" },
   { id: "chmod", label: "permissions", unavailableReason: "chmod and chown arrive in TRE-21" },
   { id: "rename", label: "regex rename", hint: "F2", unavailableReason: "Regex rename arrives in TRE-22" },
-  { id: "rm", label: "rm", hint: "⌦", danger: true, unavailableReason: "Delete arrives in TRE-25" },
+  { id: "rm", label: "rm", hint: "⌦", danger: true },
 ];
 
 /** The listing columns the glob sits beside. Placeholder until TRE-16's table owns them. */
