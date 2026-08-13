@@ -25,7 +25,7 @@ import { useEffect, useReducer, useState } from "react";
 import type { PaneCallbacks } from "@components/explorer/pane";
 import type { PaneIndex, PaneView } from "@components/explorer/pane-state";
 import type { PermissionsTarget } from "@components/explorer/permissions-modal";
-import type { RenameTarget } from "@components/explorer/rename-modal";
+import type { RenameMode, RenameTarget } from "@components/explorer/rename-modal";
 import type { SplitMode } from "@components/shell/toolbar";
 import type { SortKey } from "@helpers/listing";
 import type { FileRow } from "@lib/api/fs";
@@ -77,8 +77,8 @@ export function Explorer({
   onManageHosts,
   permissionsOpen,
   onPermissionsOpenChange,
-  renameOpen,
-  onRenameOpenChange,
+  renameMode,
+  onRenameMode,
 }: {
   hosts: readonly HostView[];
   /** True while the hosts query is in flight, so an unbound pane waits rather
@@ -109,10 +109,16 @@ export function Explorer({
    * the host manager is: the button lives up there, the selection lives here. */
   permissionsOpen: boolean;
   onPermissionsOpenChange: (open: boolean) => void;
-  /** The toolbar's `regex rename` button, and F2 (TRE-22). Owned by the page
-   * for the same reason `permissions` is. */
-  renameOpen: boolean;
-  onRenameOpenChange: (open: boolean) => void;
+  /**
+   * Which rename form is open, or null for none (TRE-22). Owned by the page for
+   * the same reason `permissions` is.
+   *
+   * A mode rather than a boolean because the two entry points promise different
+   * things: the toolbar's button is labelled `regex rename` and must open the
+   * pattern, F2 on one entry means "rename this" and must open the name.
+   */
+  renameMode: RenameMode | null;
+  onRenameMode: (mode: RenameMode | null) => void;
 }) {
   const [memory, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
   const { push } = useToast();
@@ -202,7 +208,7 @@ export function Explorer({
   // outright while the panel is closed, since nothing else needs the rows.
   // Also computed while either modal is open: the toolbar's buttons need the
   // selection whether or not the panel that usually shows it is up.
-  const inspecting = inspector || permissionsOpen || renameOpen ? new Set(activePane.sel) : null;
+  const inspecting = inspector || permissionsOpen || renameMode !== null ? new Set(activePane.sel) : null;
   const inspected = inspecting ? activeView.rows.filter((row) => inspecting.has(row.name)) : [];
   const cursorRow = activeView.rows.find((row) => row.name === activePane.cur) ?? null;
   const cursorPath = cursorRow ? joinPath(activePane.path, cursorRow.name) : null;
@@ -257,25 +263,25 @@ export function Explorer({
    */
   const renameEntries = inspected.length > 0 ? inspected : cursorRow ? [cursorRow] : [];
   const renameTarget: RenameTarget | null =
-    !renameOpen || activePane.hostId === null || renameEntries.length === 0
+    renameMode === null || activePane.hostId === null || renameEntries.length === 0
       ? null
       : { hostId: activePane.hostId, directory: activePane.path, entries: renameEntries };
 
-  // A target of nothing renders nothing, which would leave the flag on and the
-  // toolbar's button dead until something else turned it off. The button cannot
+  // A target of nothing renders nothing, which would leave the mode set and the
+  // toolbar's button dead until something else cleared it. The button cannot
   // know — it is up in the shell and the selection is down here — so the answer
   // is given once the pane knows its own contents, and not while it is still
   // loading them, or opening on a cold pane would close itself.
   const renameEmpty =
-    renameOpen &&
+    renameMode !== null &&
     !hostsPending &&
     !activeView.listing.isPending &&
     (activePane.hostId === null || renameTarget === null);
   useEffect(() => {
     if (!renameEmpty) return;
-    onRenameOpenChange(false);
+    onRenameMode(null);
     push({ tone: "info", message: "Nothing to rename", detail: "Select an entry, or put the cursor on one" });
-  }, [renameEmpty, onRenameOpenChange, push]);
+  }, [renameEmpty, onRenameMode, push]);
 
   /**
    * The one way a pane moves. Both writes are issued here — the reducer's
@@ -344,8 +350,12 @@ export function Explorer({
           // stated anyway, because the target below reads `activePane` and the
           // two must not be able to disagree. An empty pane is handled where
           // the toolbar's button lands too, rather than twice.
+          //
+          // One entry opens on the name, because that is what F2 means in every
+          // file manager. A selection opens on the pattern, because there is no
+          // single name to type. Either way the other form is one click away.
           onActiveChange(index);
-          onRenameOpenChange(true);
+          onRenameMode(renameEntries.length === 1 ? "name" : "pattern");
           return true;
         case "F5":
         case "F6":
@@ -565,10 +575,11 @@ export function Explorer({
         />
       )}
 
-      {renameTarget && (
+      {renameTarget && renameMode && (
         <RenameModal
           target={renameTarget}
-          onClose={() => onRenameOpenChange(false)}
+          initialMode={renameMode}
+          onClose={() => onRenameMode(null)}
           onApplied={() => {
             // The listing carries the names, and the inspector's stat is keyed
             // by a path that may no longer exist.

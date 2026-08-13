@@ -16,6 +16,7 @@ import { useState } from "react";
 
 import type { PaneUrl } from "@components/explorer/explorer";
 import type { PaneIndex } from "@components/explorer/pane-state";
+import type { RenameMode } from "@components/explorer/rename-modal";
 import type { SelectionSummary } from "@components/shell/status-bar";
 import type { FileRow } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
@@ -44,7 +45,7 @@ export default function HomePage() {
   const [selection, setSelection] = useState<{ row: FileRow; path: string } | null>(null);
   const [manageHostsFor, setManageHostsFor] = useState<PaneIndex | null>(null);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameMode, setRenameMode] = useState<RenameMode | null>(null);
 
   /**
    * Whether the layout has been moved by hand yet (TRE-62 §4).
@@ -74,7 +75,9 @@ export default function HomePage() {
    */
   const OPENERS: Record<string, () => void> = {
     chmod: () => setPermissionsOpen(true),
-    rename: () => setRenameOpen(true),
+    // The button is labelled `regex rename`, so it opens the pattern whatever
+    // is selected. F2 is the one that opens a single name.
+    rename: () => setRenameMode("pattern"),
   };
   const actions = M2_ACTIONS.map((action) =>
     action.id in OPENERS ? { ...action, unavailableReason: undefined, onSelect: OPENERS[action.id] } : action,
@@ -199,8 +202,8 @@ export default function HomePage() {
         onManageHosts={setManageHostsFor}
         permissionsOpen={permissionsOpen}
         onPermissionsOpenChange={setPermissionsOpen}
-        renameOpen={renameOpen}
-        onRenameOpenChange={setRenameOpen}
+        renameMode={renameMode}
+        onRenameMode={setRenameMode}
       />
     </AppShell>
   );

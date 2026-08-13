@@ -27,13 +27,23 @@ import type { RenameMapping, RenamePlan } from "@lib/api/rename";
  * both about the same danger. Collisions are marked per row and refuse the CTA:
  * the mockup's `applyRename` maps names through `String.replace` and writes
  * them back, which for two entries landing on one name is a file that stops
- * existing. And a single selected entry gets a name field instead of a pattern,
- * because writing a regex to rename one file is a ceremony nobody wants and
- * the API has a route that does not ask for one.
+ * existing. And there is a plain name field beside the pattern, because writing
+ * a regex to rename one file is a ceremony nobody wants and the API has a route
+ * that does not ask for one.
+ *
+ * **Which of the two opens is the caller's decision, not the selection's.** F2
+ * on one entry means "rename this", so it opens on the name; the toolbar's
+ * button says `regex rename`, so it opens on the pattern whatever is selected.
+ * Deciding from the selection instead — as this first shipped — makes the
+ * toolbar button open a form that is not the one it is labelled with, and
+ * leaves the pattern unreachable for a single file.
  *
  * Every preview on screen came from the server. Nothing in this file computes
  * a new name — see the note in `lib/api/rename.ts`.
  */
+
+/** Which form the modal shows. `name` needs exactly one entry; `pattern` never does. */
+export type RenameMode = "name" | "pattern";
 
 /** Long enough that a pattern is not compiled on every keystroke of it. */
 const PREVIEW_DEBOUNCE_MS = 180;
@@ -48,10 +58,14 @@ export interface RenameTarget {
 
 export function RenameModal({
   target,
+  initialMode,
   onClose,
   onApplied,
 }: {
   target: RenameTarget;
+  /** What the caller asked for. A `name` request over several entries opens on
+   * the pattern anyway — there is no single name to type. */
+  initialMode: RenameMode;
   onClose: () => void;
   onApplied: () => void;
 }) {
@@ -67,6 +81,7 @@ export function RenameModal({
       {(close) => (
         <RenamePanel
           target={target}
+          initialMode={initialMode}
           subject={subject}
           close={close}
           onApplied={onApplied}
@@ -78,11 +93,13 @@ export function RenameModal({
 
 function RenamePanel({
   target,
+  initialMode,
   subject,
   close,
   onApplied,
 }: {
   target: RenameTarget;
+  initialMode: RenameMode;
   subject: string;
   close: () => void;
   onApplied: () => void;
@@ -91,14 +108,19 @@ function RenamePanel({
   const { push } = useToast();
   const { hostId, directory, entries } = target;
 
-  const single = entries.length === 1 ? entries[0] : null;
+  const only = entries.length === 1 ? entries[0] : null;
   const paths = entries.map((entry) => joinPath(directory, entry.name));
+
+  // A `name` request with nothing single to name falls through to the pattern
+  // rather than rendering a field with no subject.
+  const [mode, setMode] = useState<RenameMode>(() => (initialMode === "name" && only ? "name" : "pattern"));
+  const single = mode === "name" ? only : null;
 
   const [pattern, setPattern] = useState("");
   const [replacement, setReplacement] = useState("");
   const [global, setGlobal] = useState(true);
   const [ignoreCase, setIgnoreCase] = useState(false);
-  const [name, setName] = useState(() => single?.name ?? "");
+  const [name, setName] = useState(() => only?.name ?? "");
   const [failure, setFailure] = useState<string | null>(null);
 
   const settledPattern = useDebounced(pattern, PREVIEW_DEBOUNCE_MS);
@@ -202,11 +224,38 @@ function RenamePanel({
   return (
     <>
       <header className="bg-line border-line-strong flex h-topbar flex-none items-center gap-2.25 border-b px-3">
-        <span className="text-ink font-mono text-xs font-semibold tracking-label">
-          {single ? "rename" : "regex rename"}
-        </span>
+        <span className="text-ink font-mono text-xs font-semibold tracking-label">rename</span>
         <span className="text-ink-muted min-w-0 truncate font-mono text-cmd">{subject}</span>
         <div className="flex-1" />
+        {/* Both forms, always visible, so neither entry point is a dead end:
+            the toolbar's `regex rename` opens on the pattern and the name is
+            one click away, and F2 on one entry does the reverse. */}
+        <fieldset
+          aria-label="Rename by"
+          className="border-line-strong flex h-5 flex-none overflow-hidden rounded-sm border"
+        >
+          {(["name", "pattern"] as const).map((option) => {
+            const active = mode === option;
+            // A name field over a multiple selection has no subject to show, so
+            // the cell says why it is inert rather than simply not responding.
+            const disabled = option === "name" && only === null;
+            return (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={active}
+                disabled={disabled}
+                title={disabled ? "One entry at a time — the pattern renames a selection" : undefined}
+                onClick={() => setMode(option)}
+                className={`border-line-strong flex items-center border-l px-2.25 font-mono text-2xs first:border-l-0 disabled:opacity-40 ${
+                  active ? "bg-accent-soft text-on-accent font-medium" : "text-ink-muted"
+                }`}
+              >
+                {option}
+              </button>
+            );
+          })}
+        </fieldset>
         <button
           type="button"
           onClick={close}
