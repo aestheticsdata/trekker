@@ -104,6 +104,17 @@ export interface HostDriver {
   rename(from: string, to: string): Promise<void>;
   chmod(path: string, mode: number): Promise<void>;
   chown(path: string, uid: number, gid: number): Promise<void>;
+  /**
+   * Access and modification times, in milliseconds — the unit everything else
+   * on this interface uses, converted per driver rather than at each call site.
+   *
+   * Added for TRE-23, which has to preserve an mtime across a copy. It is the
+   * one attribute a stream cannot carry: the bytes arrive identical and the
+   * file is stamped with the moment they landed, so a directory copied to a
+   * backup host looks entirely new and every "what changed" question about it
+   * answers wrong from then on.
+   */
+  utimes(path: string, atimeMs: number, mtimeMs: number): Promise<void>;
   unlink(path: string): Promise<void>;
   rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
 

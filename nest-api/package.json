@@ -100,6 +100,7 @@
       "^@health/(.*)$": "<rootDir>/health/$1",
       "^@hosts/(.*)$": "<rootDir>/hosts/$1",
       "^@secrets/(.*)$": "<rootDir>/secrets/$1",
+      "^@transfers/(.*)$": "<rootDir>/transfers/$1",
       "^@users/(.*)$": "<rootDir>/users/$1"
     },
     "collectCoverageFrom": [

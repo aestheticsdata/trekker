@@ -59,6 +59,14 @@ export default function HomePage() {
   const [downloadRequested, setDownloadRequested] = useState(false);
   /** The same shape, for the toolbar's `upload` button (TRE-65). */
   const [uploadRequested, setUploadRequested] = useState(false);
+  /**
+   * Which transfer modal is open, or null for none (TRE-24).
+   *
+   * An operation rather than a boolean, for the reason `renameMode` is one: the
+   * two buttons promise different things and the modal has to know which. F5
+   * and the `copy` button mean copy; F6 and `move` mean move.
+   */
+  const [transferMode, setTransferMode] = useState<"copy" | "move" | null>(null);
 
   /**
    * Whether the layout has been moved by hand yet (TRE-62 §4).
@@ -87,6 +95,8 @@ export default function HomePage() {
    * exists rather than of what this page happens to enable.
    */
   const OPENERS: Record<string, () => void> = {
+    copy: () => setTransferMode("copy"),
+    move: () => setTransferMode("move"),
     chmod: () => setPermissionsOpen(true),
     // The button is labelled `regex rename`, so it opens the pattern whatever
     // is selected. F2 is the one that opens a single name.
@@ -226,6 +236,8 @@ export default function HomePage() {
         onDownloadRequestedChange={setDownloadRequested}
         uploadRequested={uploadRequested}
         onUploadRequestedChange={setUploadRequested}
+        transferMode={transferMode}
+        onTransferMode={setTransferMode}
       />
     </AppShell>
   );

@@ -13,6 +13,7 @@ import {
 } from "@components/explorer/pane-state";
 import { PermissionsModal } from "@components/explorer/permissions-modal";
 import { RenameModal } from "@components/explorer/rename-modal";
+import { TransferModal } from "@components/explorer/transfer-modal";
 import { HostManager } from "@components/hosts/host-manager";
 import { CollapsiblePane } from "@components/ui/collapsible-pane";
 import { useToast } from "@components/ui/toast";
@@ -30,6 +31,7 @@ import type { PaneCallbacks } from "@components/explorer/pane";
 import type { PaneIndex, PaneView } from "@components/explorer/pane-state";
 import type { PermissionsTarget } from "@components/explorer/permissions-modal";
 import type { RenameMode, RenameTarget } from "@components/explorer/rename-modal";
+import type { TransferTarget } from "@components/explorer/transfer-modal";
 import type { SplitMode } from "@components/shell/toolbar";
 import type { SortKey } from "@helpers/listing";
 import type { FileRow } from "@lib/api/fs";
@@ -89,6 +91,8 @@ export function Explorer({
   onDownloadRequestedChange,
   uploadRequested,
   onUploadRequestedChange,
+  transferMode,
+  onTransferMode,
 }: {
   hosts: readonly HostView[];
   /** True while the hosts query is in flight, so an unbound pane waits rather
@@ -143,6 +147,14 @@ export function Explorer({
   /** The toolbar's `upload` button (TRE-65). A request, like the download. */
   uploadRequested: boolean;
   onUploadRequestedChange: (requested: boolean) => void;
+  /**
+   * Which transfer modal is open, or null for none (TRE-24). An operation
+   * rather than a boolean, for the reason `renameMode` is one: F5 and the
+   * `copy` button mean copy, F6 and `move` mean move, and the modal's own
+   * heading and CTA say which.
+   */
+  transferMode: "copy" | "move" | null;
+  onTransferMode: (mode: "copy" | "move" | null) => void;
 }) {
   const [memory, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
   const { push } = useToast();
@@ -236,7 +248,7 @@ export function Explorer({
   // Also computed while either modal is open: the toolbar's buttons need the
   // selection whether or not the panel that usually shows it is up.
   const inspecting =
-    inspector || permissionsOpen || renameMode !== null || deleteOpen || downloadRequested
+    inspector || permissionsOpen || renameMode !== null || deleteOpen || downloadRequested || transferMode !== null
       ? new Set(activePane.sel)
       : null;
   const inspected = inspecting ? activeView.rows.filter((row) => inspecting.has(row.name)) : [];
@@ -337,6 +349,47 @@ export function Explorer({
     onDeleteOpenChange(false);
     push({ tone: "info", message: "Nothing to delete", detail: "Select an entry, or put the cursor on one" });
   }, [deleteEmpty, onDeleteOpenChange, push]);
+
+  /**
+   * What a transfer is aimed at (TRE-24 §1).
+   *
+   * The active pane's selection is the source and the *other* pane's directory
+   * is the destination, which is what F5 and F6 have meant in two-pane file
+   * managers for thirty years and what makes the second pane worth having. The
+   * selection follows the same rule as the rename and the delete: what is
+   * selected, else the row under the cursor.
+   *
+   * Never the directory the pane is standing in, for a reason those two share
+   * and this one sharpens: a transfer aimed at the current directory would copy
+   * a pane onto its own neighbour on a keypress meant for one file.
+   */
+  const otherPane = views[active === 0 ? 1 : 0];
+  const transferEntries = inspected.length > 0 ? inspected : cursorRow ? [cursorRow] : [];
+  const transferTarget: TransferTarget | null =
+    transferMode === null || activePane.hostId === null || otherPane.hostId === null || transferEntries.length === 0
+      ? null
+      : {
+          operation: transferMode,
+          srcHostId: activePane.hostId,
+          srcPaths: transferEntries.map((entry) => joinPath(activePane.path, entry.name)),
+          dstHostId: otherPane.hostId,
+          dstPath: otherPane.path,
+        };
+
+  // Answered once the pane knows its own contents, and not while it is still
+  // loading them — the same shape the rename and delete use, and for the same
+  // reason: the toolbar button is up in the shell and cannot see any of this.
+  const transferEmpty =
+    transferMode !== null && !hostsPending && !activeView.listing.isPending && transferTarget === null;
+  useEffect(() => {
+    if (!transferEmpty) return;
+    onTransferMode(null);
+    push(
+      otherPane.hostId === null
+        ? { tone: "info", message: "No host on the other pane", detail: "A transfer needs somewhere to go" }
+        : { tone: "info", message: "Nothing to transfer", detail: "Select an entry, or put the cursor on one" },
+    );
+  }, [transferEmpty, otherPane.hostId, onTransferMode, push]);
 
   /**
    * What a download is aimed at (TRE-26).
@@ -502,8 +555,23 @@ export function Explorer({
           return true;
         case "F5":
         case "F6":
+          // The pane the key was pressed in becomes the source, and the other
+          // one is the destination — which is why the active pane is named
+          // before the modal opens, exactly as F2 does.
+          onActiveChange(index);
+          onTransferMode(event.key === "F5" ? "copy" : "move");
+          return true;
         case "Delete":
-          push({ tone: "info", message: "Not yet", detail: "File operations arrive in M2" });
+          // `⌦`, not `⌫` — that one goes up a directory, three lines above.
+          // Forward delete is `fn`+`⌫` on a Mac keyboard, which is exactly the
+          // amount of deliberate a destructive default should cost (TRE-67).
+          //
+          // Nothing else is needed here: `deleteEntries` resolves the target on
+          // the same rule the rename does, and the `deleteEmpty` effect answers
+          // an empty pane where the toolbar's button lands too, rather than
+          // twice in two voices.
+          onActiveChange(index);
+          onDeleteOpenChange(true);
           return true;
         default:
           return false;
@@ -747,6 +815,22 @@ export function Explorer({
             // The selection names entries that no longer exist. Leaving it would
             // hand the next action a list of ghosts — and the next action might
             // be this one again.
+            dispatch({ type: "selectNone", pane: active });
+          }}
+        />
+      )}
+
+      {transferTarget && (
+        <TransferModal
+          target={transferTarget}
+          hosts={hosts}
+          onClose={() => onTransferMode(null)}
+          onStarted={() => {
+            // The panes are refreshed when the job *finishes*, not now — that
+            // is `TransferProvider`'s doing, because the transfer outlives this
+            // component. What is cleared here is the selection: a move is about
+            // to take those names away, and handing the next action a list of
+            // ghosts is the mistake the delete modal already avoids this way.
             dispatch({ type: "selectNone", pane: active });
           }}
         />

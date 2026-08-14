@@ -144,7 +144,6 @@ const prodEnv = {
   //
   // Declared but not yet attached — the operations they govern do not exist.
   // Each is removed from `TO_ATTACH` by the ticket named beside it:
-  //   TREKKER_LIMIT_TRANSFERS_IN_FLIGHT        TRE-23
   //   TREKKER_LIMIT_HASHES_IN_FLIGHT           TRE-27
   //   TREKKER_LIMIT_ELEVATIONS_PER_5MIN        TRE-29
   //
@@ -155,12 +154,33 @@ const prodEnv = {
   //   TREKKER_LIMIT_UPLOADS_PER_MIN            30       TRE-65
   //   TREKKER_LIMIT_UPLOAD_UNITS_PER_HOUR      800      TRE-65, in 64 MiB units
   //   TREKKER_LIMIT_LINK_FETCHES_PER_MIN       60       TRE-66, keyed by IP
+  //   TREKKER_LIMIT_TRANSFERS_PER_MIN          20       TRE-23, copies+moves+retries
+  //
+  // `TREKKER_LIMIT_TRANSFERS_IN_FLIGHT` is gone rather than renamed, and the
+  // difference matters if you had set it: it named an in-flight cap, which a
+  // window counter cannot express. That question moved to the queue settings
+  // below and is now `TREKKER_TRANSFERS_IN_FLIGHT`. What stayed on this list is
+  // the rate, which is a different bound with a different number.
 
-  // ---- transfers (TRE-26, TRE-65, TRE-66) ----------------------------------
+  // ---- transfers (TRE-23, TRE-26, TRE-65, TRE-66) --------------------------
   //
   // All optional, defaults shown. Set one only to override it.
   //   TREKKER_UPLOAD_MAX_BYTES   10737418240   one file's ceiling, 10 GiB
   //   TREKKER_LINK_TTL_SECONDS   900           default link life; capped at a day
+  //
+  // The transfer queue (TRE-23 §6). Not rate limits — a queued transfer is the
+  // right answer to a busy server and a 429 is not, so these hold jobs back
+  // rather than refusing them.
+  //   TREKKER_TRANSFERS_IN_FLIGHT   3     how many jobs run at once
+  //   TREKKER_TRANSFERS_PER_HOST    2     how many may touch one host at once.
+  //                                       Keep it below the SSH pool's six, or a
+  //                                       transfer takes every connection and
+  //                                       browsing that host stops answering.
+  //
+  // An optional ceiling on how fast a transfer moves bytes, per running job.
+  // Unset means unlimited, which is right on a LAN and wrong on a link somebody
+  // else is also using.
+  //   TREKKER_TRANSFER_MAX_BYTES_PER_SEC    e.g. "10485760" for 10 MB/s
 };
 
 module.exports = {

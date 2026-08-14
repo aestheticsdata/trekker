@@ -98,3 +98,67 @@ function normalise(path: string): string {
 export function isMountPoint(path: string, points: ReadonlySet<string>): boolean {
   return points.has(normalise(path));
 }
+
+/**
+ * Which filesystem a path is on, named by the mount point holding it (TRE-23 §4).
+ *
+ * The longest mount point that is an ancestor wins: `/` and `/var` are both
+ * ancestors of `/var/log/app`, and the answer is `/var`. Getting that backwards
+ * would report every path on the machine as being on the root filesystem, which
+ * turns a cross-device move into a `rename` that fails with EXDEV — the failure
+ * this function exists to see coming.
+ *
+ * Returns null when nothing contains the path, which cannot happen on a machine
+ * whose `df` was readable: `/` is always there. Null is the honest answer for
+ * the case where it was not.
+ */
+export function mountPointFor(path: string, points: ReadonlySet<string>): string | null {
+  const target = normalise(path);
+  let best: string | null = null;
+
+  for (const point of points) {
+    if (target !== point && !target.startsWith(point === "/" ? "/" : `${point}/`)) continue;
+    if (best === null || point.length > best.length) best = point;
+  }
+
+  return best;
+}
+
+/**
+ * `-k` on top of `-P`, so the fourth column is kibibytes on every system this
+ * runs on. Plain `-P` is 512-byte blocks by POSIX and 1024 on some GNU builds
+ * that honour `POSIXLY_CORRECT` differently — a factor of two in the number a
+ * transfer is refused against is not a thing to leave to the host's mood.
+ */
+const DF_FREE_ARGS = ["-Pk"] as const;
+
+/**
+ * Bytes available at a path, or null when `df` could not answer (TRE-23 §5).
+ *
+ * Null rather than zero, and the caller must tell them apart: zero means the
+ * disk is full and the transfer is refused, null means the question could not
+ * be asked and the transfer proceeds. Collapsing the two would either block
+ * every transfer to a host without `df` or start every transfer onto a full one.
+ *
+ * The path is passed to `df` rather than parsed out of the whole table, so the
+ * kernel resolves which filesystem holds it. That is the same answer
+ * `mountPointFor` computes and it is arrived at by a different route, which is
+ * worth having: `df` with no argument omits filesystems it cannot stat.
+ */
+export async function readFreeBytes(driver: HostDriver, path: string): Promise<number | null> {
+  try {
+    const result = await driver.exec("df", [...DF_FREE_ARGS, path], { timeoutMs: DF_TIMEOUT_MS });
+
+    for (const line of result.stdout.split("\n")) {
+      const fields = DF_LINE.exec(line.trimEnd());
+      // The header's sixth field is "Mounted on", which does not start with `/`.
+      if (!fields || !fields[6].startsWith("/")) continue;
+      const kib = Number.parseInt(fields[4], 10);
+      if (Number.isNaN(kib) || kib < 0) return null;
+      return kib * 1024;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}

@@ -11,6 +11,7 @@ import { loadEnv } from "@config/load-env";
 import { RedisModule } from "@redis/redis.module";
 import { HostsModule } from "@hosts/hosts.module";
 import { SecretStoreModule } from "@secrets/secret-store.module";
+import { TransfersModule } from "@transfers/transfers.module";
 import { UsersModule } from "@users/users.module";
 import { PrismaModule } from "./prisma/prisma.module";
 
@@ -41,6 +42,7 @@ loadEnv();
     HostsModule,
     BookmarksModule,
     FsModule,
+    TransfersModule,
     HealthModule,
     UsersModule,
   ],

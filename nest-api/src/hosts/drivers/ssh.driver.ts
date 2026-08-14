@@ -258,6 +258,24 @@ export class SshDriver implements HostDriver {
     );
   }
 
+  /**
+   * SFTP v3 carries times as whole seconds — there is no sub-second field in
+   * the protocol — so the millisecond precision this interface speaks in is
+   * floored on the way out. A copy between two hosts therefore agrees to the
+   * second, which is as much as SFTP can promise.
+   */
+  async utimes(path: string, atimeMs: number, mtimeMs: number): Promise<void> {
+    return this.withSftp(
+      (lease) =>
+        new Promise<void>((resolve, reject) => {
+          lease.sftp.utimes(path, Math.floor(atimeMs / 1000), Math.floor(mtimeMs / 1000), (error) =>
+            error ? reject(fromSftpError(error, path)) : resolve(),
+          );
+        }),
+      path,
+    );
+  }
+
   async unlink(path: string): Promise<void> {
     return this.withSftp(
       (lease) =>

@@ -25,6 +25,7 @@
       "@health/*": ["./src/health/*"],
       "@hosts/*": ["./src/hosts/*"],
       "@secrets/*": ["./src/secrets/*"],
+      "@transfers/*": ["./src/transfers/*"],
       "@users/*": ["./src/users/*"]
     },
     "incremental": true,

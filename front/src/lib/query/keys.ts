@@ -23,6 +23,18 @@ export const QUERY_KEYS = {
    * cursor while it is being typed.
    */
   DELETE_PLAN: "deletePlan",
+  /**
+   * The transfer queue (TRE-24). Server state, not component state — which is
+   * what makes the widget survive a page reload, and what the SSE feed
+   * reconciles against every time it reconnects.
+   */
+  TRANSFERS: "transfers",
+  /**
+   * What a transfer would do (TRE-24). Asked when the modal opens and never
+   * refetched: the operator is answering a list of conflicts, and a list that
+   * changed under the cursor would scatter those answers across a different one.
+   */
+  TRANSFER_PLAN: "transferPlan",
   ACTIVITY: "activity",
   /** The layout the account left, asked for only on a cold open (TRE-51). */
   LAYOUT: "layout",

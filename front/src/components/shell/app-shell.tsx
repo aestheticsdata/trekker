@@ -4,6 +4,7 @@ import { StatusBar } from "@components/shell/status-bar";
 import { Toolbar } from "@components/shell/toolbar";
 import { TopBar } from "@components/shell/top-bar";
 import { ToastProvider } from "@components/ui/toast";
+import { TransferProvider } from "@components/ui/transfers";
 import { UploadProvider } from "@components/ui/uploads";
 
 import type { SelectionSummary } from "@components/shell/status-bar";
@@ -67,40 +68,46 @@ export function AppShell({
           with one (TRE-65). Outside everything else, because an upload outlives
           the pane it was dropped on. */}
       <UploadProvider>
-        <TooNarrowNotice />
+        {/* Inside the uploads for one reason: both need the toasts, and a
+            finished transfer raises one. Outside the shell because a transfer
+            outlives every pane, modal and navigation below it — it is server
+            state, and this provider is only the window onto it (TRE-24 §3). */}
+        <TransferProvider>
+          <TooNarrowNotice />
 
-        <div className="flex h-screen flex-col max-usable:hidden">
-          <TopBar
-            host={host}
-            stats={stats}
-            views={views}
-          />
-          <Toolbar
-            viewMode={viewMode}
-            onViewModeChange={onViewModeChange}
-            splitMode={splitMode}
-            onSplitModeChange={onSplitModeChange}
-            glob={glob}
-            onGlobChange={onGlobChange}
-            globMatches={globMatches ?? null}
-            heat={heat}
-            onHeatChange={onHeatChange}
-            inspector={inspector}
-            onInspectorChange={onInspectorChange}
-            actions={actions}
-          />
+          <div className="flex h-screen flex-col max-usable:hidden">
+            <TopBar
+              host={host}
+              stats={stats}
+              views={views}
+            />
+            <Toolbar
+              viewMode={viewMode}
+              onViewModeChange={onViewModeChange}
+              splitMode={splitMode}
+              onSplitModeChange={onSplitModeChange}
+              glob={glob}
+              onGlobChange={onGlobChange}
+              globMatches={globMatches ?? null}
+              heat={heat}
+              onHeatChange={onHeatChange}
+              inspector={inspector}
+              onInspectorChange={onInspectorChange}
+              actions={actions}
+            />
 
-          {/* min-h-0 or a tall child stretches the flex item instead of scrolling.
+            {/* min-h-0 or a tall child stretches the flex item instead of scrolling.
             The sidebar sits inside this row rather than beside the whole app:
             it belongs between the toolbar and the status bar, as the mockup
             draws it, and it goes with the panes below the `panes:` breakpoint. */}
-          <div className="flex min-h-0 flex-1 overflow-hidden">
-            <div className="hidden panes:flex">{sidebar}</div>
-            <main className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
-          </div>
+            <div className="flex min-h-0 flex-1 overflow-hidden">
+              <div className="hidden panes:flex">{sidebar}</div>
+              <main className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
+            </div>
 
-          <StatusBar selection={selection} />
-        </div>
+            <StatusBar selection={selection} />
+          </div>
+        </TransferProvider>
       </UploadProvider>
     </ToastProvider>
   );

@@ -10,6 +10,7 @@ import { FsModule } from "@fs/fs.module";
 import { HostsModule } from "@hosts/hosts.module";
 import { RedisService } from "@redis/redis.service";
 import { SecretStoreModule } from "@secrets/secret-store.module";
+import { TransfersModule } from "@transfers/transfers.module";
 import { SESSION_COOKIE_NAME, SESSION_TTL_SECONDS } from "@users/session.constants";
 import { UsersModule } from "@users/users.module";
 import { PrismaService } from "./prisma/prisma.service";
@@ -211,6 +212,23 @@ class FakePrisma {
     },
   };
 
+  /**
+   * Only the one query the transfer queue makes at boot (TRE-23).
+   *
+   * `TransferQueueService.onApplicationBootstrap` looks for jobs a restart
+   * interrupted, and `app.init()` below runs it. Nothing in these sweeps
+   * reaches a transfer handler — the guards refuse first, which is the whole
+   * claim — so this is the only shape that is implemented, and any other one
+   * fails loudly rather than answering "no rows" to a question it did not
+   * understand.
+   */
+  readonly transferJobs = {
+    findMany: ({ where }: { where?: { status?: { in?: string[] } } }) => {
+      if (!Array.isArray(where?.status?.in)) return unsupported("transferJobs.findMany", where);
+      return Promise.resolve([]);
+    },
+  };
+
   readonly activityLog = {
     create: ({ data, select }: { data: Record<string, unknown>; select?: { id?: true } }) => {
       const row: ActivityRow = {
@@ -379,6 +397,7 @@ beforeAll(async () => {
       HostsModule,
       BookmarksModule,
       FsModule,
+      TransfersModule,
       UsersModule,
     ],
   }).compile();

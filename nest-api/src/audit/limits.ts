@@ -9,10 +9,11 @@
  * script.
  *
  * **Some of these have nothing to limit yet, and that is deliberate.** The
- * operations they name arrive in TRE-23, TRE-25, TRE-27 and TRE-29. They are
- * declared now because the limit and the operation should land together rather
- * than the limit being remembered afterwards, and because `TO_ATTACH` below
- * turns "remembered afterwards" into a listed obligation instead of a hope.
+ * operations they name arrive in TRE-27 and TRE-29. They are declared now
+ * because the limit and the operation should land together rather than the
+ * limit being remembered afterwards, and because `TO_ATTACH` below turns
+ * "remembered afterwards" into a listed obligation instead of a hope. It works:
+ * TRE-23 and TRE-25 were both on that list and both came off it.
  *
  * **And one of them limits nothing, ever.** `pathRefusal` counts and reports;
  * it refuses nobody. It keeps its place here because it is still a threshold
@@ -204,6 +205,32 @@ export const LIMITS = {
    * guessing at tokens costs the guesser the same as using a real one.
    */
   signedLink: rule("limit:link", "signed-link fetches", 60, 60, "TREKKER_LIMIT_LINK_FETCHES_PER_MIN"),
+
+  /**
+   * Transfers started (TRE-23), per minute — copies, moves and retries on one
+   * budget, because they are one capability and a retry re-runs the same work.
+   *
+   * **This entry changed meaning when it moved out of `TO_ATTACH`, and that is
+   * worth writing down.** It was declared there as an in-flight cap: `max: 5`,
+   * `windowSeconds: 0`, "how many jobs may run at once". That is not something
+   * this table can express. Every rule here is a fixed window on a Redis
+   * counter, and a window of zero seconds is a key that expires instantly — the
+   * counter would reset between the check and the next request and refuse
+   * nobody, ever. Worse, it would refuse nobody while sitting in the live table
+   * looking exactly like a rule that works, which is the failure the
+   * "no unspent limit" test in `audit-coverage.spec.ts` exists to catch.
+   *
+   * So the two questions were separated. **How often may somebody start one**
+   * is a rate and lives here. **How many may run at once** is a queue depth and
+   * lives in `TransferQueueService` as `MAX_IN_FLIGHT`, enforced by not
+   * dequeuing a seventh job rather than by refusing a request — a queued
+   * transfer is the right answer to a busy server, and a 429 is not.
+   *
+   * Twenty a minute: far past deliberate use, and deliberately above the
+   * in-flight cap so that a person queueing several directories in a row meets
+   * the queue rather than this.
+   */
+  transferJobs: rule("limit:xfer", "transfers started", 20, 60, "TREKKER_LIMIT_TRANSFERS_PER_MIN"),
 } as const satisfies Record<string, LimitRule>;
 
 /**
@@ -215,7 +242,6 @@ export const LIMITS = {
  * destructive operation is rate limited" becomes true on paper only.
  */
 export const TO_ATTACH = {
-  transferJobs: { rule: rule("limit:xfer", "transfers", 5, 0, "TREKKER_LIMIT_TRANSFERS_IN_FLIGHT"), ticket: "TRE-23" },
   hashJobs: { rule: rule("limit:hash", "checksum jobs", 3, 0, "TREKKER_LIMIT_HASHES_IN_FLIGHT"), ticket: "TRE-27" },
   elevation: {
     rule: rule("limit:sudo", "elevation attempts", 5, 300, "TREKKER_LIMIT_ELEVATIONS_PER_5MIN"),

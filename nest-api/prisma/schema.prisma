@@ -78,8 +78,20 @@ enum TransferItemStatus {
   FAILED
 }
 
-/// What to do when the destination already exists. `ASK` is the initial state:
-/// the job stalls on that item until the user answers.
+/// What to do when the destination already exists.
+///
+/// `ASK` is the initial state and means *undecided* — the plan found nothing at
+/// the destination, so nobody was asked anything. TRE-23 settled what happens
+/// when an item carrying it turns out to have a conflict after all, which is
+/// only possible when the destination changed between planning and running: the
+/// item is **skipped and the reason recorded**. It does not stall waiting for an
+/// answer. A job that pauses mid-flight for input is a job that sits half-done
+/// while nobody is looking at the tab it would have asked in, and the decisions
+/// it would ask for were all taken before it started.
+///
+/// `RESUME` is produced by nothing today. It is the answer for continuing a
+/// partially-written file, and TRE-23 writes to a temporary name and renames
+/// into place — so there is never a partial file under a real name to resume.
 enum ConflictDecision {
   ASK
   OVERWRITE
@@ -309,6 +321,14 @@ model TransferJobs {
   bytesTotal BigInt @default(0)
   bytesDone  BigInt @default(0)
 
+  /// Item counts, carried on the job rather than counted from `TransferItems`.
+  /// The progress feed emits several times a second per running job and a
+  /// `COUNT(*) ... GROUP BY status` over ten thousand rows for each tick is a
+  /// query nobody needs to run: these two numbers are what the bar is drawn
+  /// from, and the rows are what explains them afterwards.
+  itemsTotal Int @default(0)
+  itemsDone  Int @default(0)
+
   startedAt  DateTime?
   finishedAt DateTime?
   error      String?   @db.Text
@@ -324,6 +344,14 @@ model TransferJobs {
   @@index([userId, createdAt(sort: Desc)])
 }
 
+/// One entry of a transfer, walked before the job starts and never re-walked.
+///
+/// These rows are the plan, not a log of it. Everything the runner needs to
+/// place an entry at the destination is here — what it is, how big, what mode
+/// and mtime to stamp on it, what to do if something is already in the way — so
+/// an API restart resumes from the table rather than walking the source again
+/// (TRE-23 §1). A re-walk would also be a different tree: the point of deciding
+/// the conflicts up front is that the set does not change underneath.
 model TransferItems {
   id     String @id @default(uuid(7)) @db.Char(36)
   jobId  String @db.Char(36)
@@ -331,9 +359,23 @@ model TransferItems {
   name   String @db.VarChar(700)
   bytes  BigInt @default(0)
 
+  /// `file`, `directory` or `symlink`, from the walk. The runner branches on it
+  /// three ways and none of them is the default, so it is not nullable.
+  kind String @db.VarChar(16)
+  /// Permission bits and modification time to stamp on the copy, captured by
+  /// the walk that produced this row. Nullable because the walk records what it
+  /// saw, and an entry it could not stat contributes no bits rather than zeroes
+  /// — a copy made 0o000 by a stat that failed is worse than one left default.
+  mode    Int?
+  mtimeMs BigInt?
+
   conflict ConflictDecision   @default(ASK)
   status   TransferItemStatus @default(PENDING)
-  error    String?            @db.Text
+  /// What it ended up called, when that is not `name` — a `keepBoth` decision
+  /// lands as `report (2).txt`, and a UI that did not say so leaves somebody
+  /// looking for a file that is right there under a name they never chose.
+  finalName String? @db.VarChar(700)
+  error     String? @db.Text
 
   job TransferJobs @relation(fields: [jobId], references: [id], onDelete: Cascade)
 

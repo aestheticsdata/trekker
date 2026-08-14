@@ -35,8 +35,8 @@ export interface ToolbarAction {
 
 /** Everything M2 owns, declared once so the toolbar and the palette agree. */
 export const M2_ACTIONS: readonly ToolbarAction[] = [
-  { id: "copy", label: "copy", hint: "F5", unavailableReason: "Transfers arrive in TRE-23" },
-  { id: "move", label: "move", hint: "F6", unavailableReason: "Transfers arrive in TRE-23" },
+  { id: "copy", label: "copy", hint: "F5" },
+  { id: "move", label: "move", hint: "F6" },
   { id: "compare", label: "compare", hint: "⇄", unavailableReason: "Pane comparison arrives in TRE-28" },
   { id: "chmod", label: "permissions", unavailableReason: "chmod and chown arrive in TRE-21" },
   { id: "rename", label: "regex rename", hint: "F2", unavailableReason: "Regex rename arrives in TRE-22" },

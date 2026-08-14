@@ -99,7 +99,7 @@ describe("deleting a host", () => {
         dstPath: "/srv/backup",
         operation: "COPY",
         status: "DONE",
-        items: { create: [{ name: "app.tar.gz", bytes: 1024n, status: "DONE" }] },
+        items: { create: [{ name: "app.tar.gz", kind: "file", bytes: 1024n, status: "DONE" }] },
       },
     });
 

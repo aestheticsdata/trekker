@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
 import {
+  access,
   constants as FS,
   lstat,
   mkdir,
@@ -12,6 +13,7 @@ import {
   rmdir,
   stat,
   unlink,
+  utimes,
 } from "node:fs/promises";
 import { chmod, chown } from "node:fs/promises";
 import { join } from "node:path";
@@ -31,6 +33,13 @@ import {
   type WriteOptions,
 } from "@hosts/drivers/host-driver";
 import { type AllowedProgram, isAllowedProgram } from "@hosts/drivers/shell-quote";
+
+/**
+ * What `assertReadable` asks `access` about. Its own name because the answer
+ * it gives is the whole difference between a refusal at open time and an
+ * `ErrnoException` escaping the driver from inside a stream.
+ */
+export const LOCAL_READ_FLAGS = FS.R_OK;
 
 const DEFAULT_EXEC_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -126,12 +135,30 @@ export class LocalDriver implements HostDriver {
     return createReadStream(path, rangeOf(options));
   }
 
+  /**
+   * That the file is there, is not a directory, and can actually be opened.
+   *
+   * The third check was missing until TRE-23 and the gap had teeth: `stat`
+   * succeeds on a file whose mode is `0o000` — statting needs permission on the
+   * *directory*, not on the file — so the eager open this method exists to
+   * perform was not eager at all for the one failure it matters most for. The
+   * EACCES surfaced later, from inside the stream, as a raw
+   * `NodeJS.ErrnoException` that never went through `fromNodeError`. Callers
+   * above the driver are promised they will never see one of those, and a
+   * transfer that met it reported "The host refused" instead of naming the
+   * permission.
+   *
+   * `access(R_OK)` answers the question the caller is actually asking. It is
+   * checked against the real uid, which is the account the API runs as and the
+   * one that will do the reading.
+   */
   private async assertReadable(path: string): Promise<void> {
     try {
       const info = await stat(path);
       if (info.isDirectory()) {
         throw new DriverError("EISDIR", `Is a directory: ${path}`, path);
       }
+      await access(path, LOCAL_READ_FLAGS);
     } catch (error) {
       throw error instanceof DriverError ? error : fromNodeError(error, path);
     }
@@ -175,6 +202,19 @@ export class LocalDriver implements HostDriver {
   async chown(path: string, uid: number, gid: number): Promise<void> {
     try {
       await chown(path, uid, gid);
+    } catch (error) {
+      throw fromNodeError(error, path);
+    }
+  }
+
+  /**
+   * `Date` objects rather than seconds: node accepts both, and a number here is
+   * read as seconds — passing milliseconds would stamp files in the year 56000
+   * with no error to notice.
+   */
+  async utimes(path: string, atimeMs: number, mtimeMs: number): Promise<void> {
+    try {
+      await utimes(path, new Date(atimeMs), new Date(mtimeMs));
     } catch (error) {
       throw fromNodeError(error, path);
     }
@@ -266,5 +306,3 @@ export class LocalDriver implements HostDriver {
     // Nothing held open.
   }
 }
-
-export const LOCAL_READ_FLAGS = FS.R_OK;
