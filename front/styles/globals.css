@@ -284,12 +284,6 @@ body {
   overflow: hidden;
 }
 
-/* A focus ring that survives on both the dark chrome and the light panes. */
-:focus-visible {
-  outline: 1px solid var(--color-accent-soft);
-  outline-offset: 1px;
-}
-
 /*
  * Anything clickable says so. Tailwind's preflight resets buttons to the
  * browser default cursor, which is an arrow — so every control in this app
