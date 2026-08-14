@@ -84,6 +84,13 @@ e2e/.auth/
 
 # generated
 generated/
+# Written and re-added by `next dev` (Next 16), not by anyone working here —
+# see node_modules/next/dist/server/lib/generate-agent-files.js. Ignored rather
+# than committed: they are the framework's notes to an agent, they come back on
+# their own after every `pnpm dev`, and this repo keeps its instructions in
+# CLAUDE.md at the root.
+front/AGENTS.md
+front/CLAUDE.md
 
 # editors and OS
 .DS_Store
