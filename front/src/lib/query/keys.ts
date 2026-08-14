@@ -3,9 +3,15 @@
 // panes, a chmod refreshing one directory) never relies on magic strings
 // scattered across hooks.
 export const QUERY_KEYS = {
-  HEALTH: "health",
   HOSTS: "hosts",
   HOST_SUMMARY: "hostSummary",
+  /**
+   * The active host's live numbers (TRE-73). Its own key rather than part of the
+   * summary's: the summary is asked for every host in the sidebar and this is
+   * asked for one, on a shorter interval, and each answer costs the server a
+   * second of sampling.
+   */
+  HOST_METRICS: "hostMetrics",
   BOOKMARKS: "bookmarks",
   DIRECTORY: "directory",
   ENTRY: "entry",

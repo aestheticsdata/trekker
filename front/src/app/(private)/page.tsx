@@ -5,8 +5,7 @@ import { AppShell } from "@components/shell/app-shell";
 import { M2_ACTIONS } from "@components/shell/toolbar";
 import { Sidebar } from "@components/sidebar/sidebar";
 import { formatInstant, formatSize } from "@helpers/listing";
-import { fetchHealth } from "@lib/api/health";
-import { fetchHostSummary, fetchHosts } from "@lib/api/hosts";
+import { fetchHostMetrics, fetchHostSummary, fetchHosts } from "@lib/api/hosts";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { explorerParams, LEFT_KEYS, paneParams, RIGHT_KEYS } from "@lib/url/explorer-params";
 import { useSessionLayout } from "@lib/url/use-session-layout";
@@ -127,13 +126,6 @@ export default function HomePage() {
     action.id in OPENERS ? { ...action, unavailableReason: undefined, onSelect: OPENERS[action.id] } : action,
   );
 
-  const { data: health } = useQuery({
-    queryKey: [QUERY_KEYS.HEALTH],
-    queryFn: fetchHealth,
-    refetchInterval: 5000,
-    throwOnError: false,
-  });
-
   const { data: hosts, isPending: hostsPending } = useQuery({
     queryKey: [QUERY_KEYS.HOSTS],
     queryFn: fetchHosts,
@@ -183,6 +175,24 @@ export default function HomePage() {
     throwOnError: false,
   });
 
+  /**
+   * The live numbers, on their own query (TRE-73).
+   *
+   * Polled faster than the summary and never for more than one host: each answer
+   * costs the server two readings a second apart, and the sparkline only grows
+   * a bar when one is taken. Twenty bars at this interval is five minutes of
+   * load behind the number.
+   */
+  const { data: metrics } = useQuery({
+    queryKey: [QUERY_KEYS.HOST_METRICS, activeHost?.id],
+    queryFn: () => fetchHostMetrics(activeHost?.id as string),
+    enabled: Boolean(activeHost),
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    retry: false,
+    throwOnError: false,
+  });
+
   return (
     <AppShell
       host={
@@ -197,10 +207,10 @@ export default function HomePage() {
       }
       stats={{
         uptime: summary?.uptimeSeconds != null ? formatUptime(summary.uptimeSeconds) : null,
-        cpu: null,
-        ram: summary?.memory ? formatMemory(summary.memory) : null,
-        io: health ? "ok" : null,
-        load: summary?.load ? [summary.load.fifteen, summary.load.five, summary.load.one] : [],
+        cpu: metrics?.cpuPercent != null ? `${metrics.cpuPercent}%` : null,
+        ram: metrics?.memory ? formatMemory(metrics.memory) : null,
+        io: metrics?.io ? formatThroughput(metrics.io.bytesPerSec) : null,
+        load: metrics?.history ?? [],
       }}
       views={[]}
       selection={selection ? summarise(selection) : null}
@@ -291,8 +301,25 @@ function formatUptime(seconds: number): string {
   return `${Math.floor(seconds / 86400)}d`;
 }
 
-/** How much is in use, which is the question the bar answers. */
+/**
+ * "9.4/32" — what is in use over what the machine has, in GiB, written as mockup
+ * 2a writes it. No unit on either half: the pair is the unit, and the second
+ * number is what makes the first mean anything.
+ */
 function formatMemory({ totalKb, availableKb }: { totalKb: number; availableKb: number }): string {
   if (totalKb <= 0) return "—";
-  return `${Math.round(((totalKb - availableKb) / totalKb) * 100)}%`;
+  const total = totalKb / 1_048_576;
+  const used = (totalKb - availableKb) / 1_048_576;
+  // A decimal on the total only where rounding would take it away: a 512 MiB
+  // container reading "0.3/0.5" is honest, "0.3/1" is generous and "0.3/0" is
+  // neither.
+  return `${used.toFixed(1)}/${total >= 10 ? Math.round(total) : total.toFixed(1)}`;
+}
+
+/** The file table's own ladder (`formatSize`), per second. */
+function formatThroughput(bytesPerSec: number): string {
+  if (bytesPerSec >= 1_073_741_824) return `${(bytesPerSec / 1_073_741_824).toFixed(1)} GB/s`;
+  if (bytesPerSec >= 1_048_576) return `${Math.round(bytesPerSec / 1_048_576)} MB/s`;
+  if (bytesPerSec >= 1024) return `${Math.round(bytesPerSec / 1024)} kB/s`;
+  return `${Math.round(bytesPerSec)} B/s`;
 }

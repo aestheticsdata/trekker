@@ -4,6 +4,7 @@ import type { CreateHostDto } from "@hosts/dto/create-host.dto";
 import type { UpdateHostDto } from "@hosts/dto/update-host.dto";
 import type { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
 import type { SshConnectionPool } from "@hosts/drivers/ssh-connection.pool";
+import type { HostMetricsService } from "@hosts/host-metrics.service";
 import type { HostSummaryService } from "@hosts/host-summary.service";
 import type { SecretStoreService } from "@secrets/secret-store.service";
 import type { PrismaService } from "../prisma/prisma.service";
@@ -90,6 +91,7 @@ function prismaFor() {
     {} as unknown as SshConnectionPool,
     {} as unknown as HostDriverFactory,
     {} as unknown as HostSummaryService,
+    {} as unknown as HostMetricsService,
   );
 
   return { service, rootWrites, created: () => rootWrites.filter((write) => write.kind === "create") };

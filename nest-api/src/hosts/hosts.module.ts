@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
 import { DEFAULT_POOL_SETTINGS, SshConnectionPool } from "@hosts/drivers/ssh-connection.pool";
 import { HostKeyService } from "@hosts/host-key.service";
+import { HostMetricsService } from "@hosts/host-metrics.service";
 import { HostSummaryService } from "@hosts/host-summary.service";
 import { HostsController } from "@hosts/hosts.controller";
 import { HostsService } from "@hosts/hosts.service";
@@ -31,9 +32,24 @@ import { Global, Module } from "@nestjs/common";
     },
     PathGuardService,
     HostSummaryService,
+    // Built by hand: its one constructor argument is the gap between the two
+    // readings a rate needs, which a test shortens to nothing. Left to the
+    // container, that `number` is a token Nest looks for a provider of.
+    {
+      provide: HostMetricsService,
+      useFactory: () => new HostMetricsService(),
+    },
     HostKeyService,
     HostsService,
   ],
-  exports: [HostDriverFactory, SshConnectionPool, PathGuardService, HostsService, HostSummaryService, HostKeyService],
+  exports: [
+    HostDriverFactory,
+    SshConnectionPool,
+    PathGuardService,
+    HostsService,
+    HostSummaryService,
+    HostMetricsService,
+    HostKeyService,
+  ],
 })
 export class HostsModule {}

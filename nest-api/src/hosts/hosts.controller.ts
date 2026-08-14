@@ -12,6 +12,7 @@ import { CreateHostDto } from "@hosts/dto/create-host.dto";
 import { TestHostDto } from "@hosts/dto/test-host.dto";
 import { UpdateHostDto } from "@hosts/dto/update-host.dto";
 import { HostKeyService } from "@hosts/host-key.service";
+import type { HostMetrics } from "@hosts/host-metrics.service";
 import type { HostSummary } from "@hosts/host-summary.service";
 import { HostsService, type HostView } from "@hosts/hosts.service";
 import {
@@ -94,6 +95,16 @@ export class HostsController {
   @Get(":id/summary")
   summary(@Req() req: Request, @Param("id") id: string): Promise<HostSummary> {
     return this.hosts.summary(userIdOf(req), id);
+  }
+
+  /**
+   * What the host is doing right now (TRE-73). Slower than `/summary` by design:
+   * cpu and io are rates, so answering means reading the counters twice a second
+   * apart. The service coalesces, so a burst of tabs still costs one sample.
+   */
+  @Get(":id/metrics")
+  metrics(@Req() req: Request, @Param("id") id: string): Promise<HostMetrics> {
+    return this.hosts.hostMetrics(userIdOf(req), id);
   }
 
   @Post()

@@ -104,12 +104,35 @@ export interface HostSummary {
   remoteUser: string | null;
 }
 
+/**
+ * What a host is doing right now (TRE-73) — the top bar's cpu, ram, io and load.
+ *
+ * Separate from the summary, and asked for separately, because it is a slower
+ * question: cpu and io are rates, so the server reads the counters twice a
+ * second apart before it can answer. The summary describes every host in the
+ * sidebar; this describes the one the panes are pointed at.
+ */
+export interface HostMetrics {
+  /** Every core aggregated, 0-100. */
+  cpuPercent: number | null;
+  memory: { totalKb: number; availableKb: number } | null;
+  /** Reads and writes together. */
+  io: { bytesPerSec: number } | null;
+  load: { one: number; five: number; fifteen: number } | null;
+  /** Recent 1-minute load, oldest first — the sparkline's samples. */
+  history: number[];
+}
+
 export async function fetchHosts(): Promise<HostView[]> {
   return (await apiRequest("/hosts")) as HostView[];
 }
 
 export async function fetchHostSummary(id: string): Promise<HostSummary> {
   return (await apiRequest(`/hosts/${id}/summary`)) as HostSummary;
+}
+
+export async function fetchHostMetrics(id: string): Promise<HostMetrics> {
+  return (await apiRequest(`/hosts/${id}/metrics`)) as HostMetrics;
 }
 
 export async function createHost(input: HostInput, csrfToken: string | null): Promise<HostView> {
