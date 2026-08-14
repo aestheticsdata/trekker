@@ -137,8 +137,8 @@ export function Explorer({
    * the same reason `permissions` is.
    *
    * A mode rather than a boolean because the two entry points promise different
-   * things: the toolbar's button is labelled `regex rename` and must open the
-   * pattern, F2 on one entry means "rename this" and must open the name.
+   * things: the toolbar's button must open the pattern, which nothing else
+   * reaches, F2 on one entry means "rename this" and must open the name.
    */
   renameMode: RenameMode | null;
   onRenameMode: (mode: RenameMode | null) => void;

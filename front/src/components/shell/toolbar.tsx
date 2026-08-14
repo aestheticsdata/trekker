@@ -46,7 +46,11 @@ export const M2_ACTIONS: readonly ToolbarAction[] = [
   { id: "duplicate", label: "duplicate", hint: "⌘D" },
   { id: "compare", label: "compare", hint: "⇄", unavailableReason: "Pane comparison arrives in TRE-28" },
   { id: "chmod", label: "permissions", unavailableReason: "chmod and chown arrive in TRE-21" },
-  { id: "rename", label: "regex rename", hint: "F2", unavailableReason: "Regex rename arrives in TRE-22" },
+  // `rename`, not `regex rename`: the long label pushed `rm` off the right edge
+  // at a 12px `--ui-base`, and the modal's own name/pattern switch says the
+  // regex is there better than a toolbar label can. This buys the row six
+  // characters, it does not teach it to overflow — that is TRE-72.
+  { id: "rename", label: "rename", hint: "F2", unavailableReason: "Regex rename arrives in TRE-22" },
   { id: "download", label: "download", hint: "F3", unavailableReason: "Downloads arrive in TRE-26" },
   { id: "upload", label: "upload", hint: "↑", unavailableReason: "Uploads arrive in TRE-65" },
   { id: "rm", label: "rm", hint: "⌦", danger: true },

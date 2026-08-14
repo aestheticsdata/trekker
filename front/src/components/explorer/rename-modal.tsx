@@ -33,9 +33,8 @@ import type { RenameMapping, RenamePlan } from "@lib/api/rename";
  *
  * **Which of the two opens is the caller's decision, not the selection's.** F2
  * on one entry means "rename this", so it opens on the name; the toolbar's
- * button says `regex rename`, so it opens on the pattern whatever is selected.
- * Deciding from the selection instead — as this first shipped — makes the
- * toolbar button open a form that is not the one it is labelled with, and
+ * button is the only way to the pattern, so it opens there whatever is
+ * selected. Deciding from the selection instead — as this first shipped —
  * leaves the pattern unreachable for a single file.
  *
  * Every preview on screen came from the server. Nothing in this file computes
@@ -228,8 +227,8 @@ function RenamePanel({
         <span className="text-ink-muted min-w-0 truncate font-mono text-cmd">{subject}</span>
         <div className="flex-1" />
         {/* Both forms, always visible, so neither entry point is a dead end:
-            the toolbar's `regex rename` opens on the pattern and the name is
-            one click away, and F2 on one entry does the reverse. */}
+            the toolbar's `rename` opens on the pattern and the name is one
+            click away, and F2 on one entry does the reverse. */}
         <fieldset
           aria-label="Rename by"
           className="border-line-strong flex h-5 flex-none overflow-hidden rounded-sm border"

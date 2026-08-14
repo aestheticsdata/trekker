@@ -116,8 +116,8 @@ export default function HomePage() {
     move: () => setTransferMode("move"),
     duplicate: () => setDuplicateRequested(true),
     chmod: () => setPermissionsOpen(true),
-    // The button is labelled `regex rename`, so it opens the pattern whatever
-    // is selected. F2 is the one that opens a single name.
+    // The toolbar button opens the pattern whatever is selected — it is the
+    // only way to reach it. F2 is the one that opens a single name.
     rename: () => setRenameMode("pattern"),
     download: () => setDownloadRequested(true),
     upload: () => setUploadRequested(true),
