@@ -11,9 +11,11 @@ import {
   basename,
   creationOrder,
   joinPath,
+  landingFor,
   MAX_KEEP_BOTH_ATTEMPTS,
   numberedName,
   type PlannedItem,
+  readLandingNames,
   settlementOrder,
 } from "@transfers/transfer-plan";
 import { TransferEventsService } from "@transfers/transfer-events.service";
@@ -234,6 +236,7 @@ export class TransferRunnerService {
       srcPath: string;
       dstPath: string;
       operation: string;
+      options: unknown;
       bytesTotal: bigint;
       itemsTotal: number;
       items: ItemRow[];
@@ -265,9 +268,22 @@ export class TransferRunnerService {
     const planned = items.map(toPlanned);
     const byName = new Map(planned.map((item, index) => [item.name, items[index]]));
 
+    /**
+     * Where an item lands, which is where it came from unless the job was
+     * queued as a duplicate (TRE-69 §2). Every destination path below goes
+     * through this and every *source* path deliberately does not: an item's
+     * name is what it is called at the source, and only the arrival changes.
+     */
+    const landing = readLandingNames(job.options);
+    const land = (name: string): string => landingFor(name, landing);
+
     if (
       job.operation === "MOVE" &&
       job.srcHostId === job.dstHostId &&
+      // A duplicate is a copy, so this branch is never reached with a landing
+      // map — stated rather than assumed, because the fast path renames each
+      // top-level entry by the name it already has.
+      Object.keys(landing).length === 0 &&
       (await this.renameInPlace(dstDriver, source.realPath, destination.realPath, planned, items, state))
     ) {
       return;
@@ -287,7 +303,7 @@ export class TransferRunnerService {
       for (const item of creationOrder(planned)) {
         this.checkCancelled(signal);
         await this.settleItem(byName.get(item.name) as ItemRow, () =>
-          dstDriver.mkdir(joinPath(destination.realPath, item.name), { recursive: true }),
+          dstDriver.mkdir(joinPath(destination.realPath, land(item.name)), { recursive: true }),
         );
         state.itemsDone += 1;
       }
@@ -302,6 +318,7 @@ export class TransferRunnerService {
           source.realPath,
           destination.realPath,
           item,
+          land(item.name),
           byName.get(item.name) as ItemRow,
           state,
           signal,
@@ -311,11 +328,11 @@ export class TransferRunnerService {
 
       for (const item of settlementOrder(planned)) {
         this.checkCancelled(signal);
-        await this.stamp(dstDriver, joinPath(destination.realPath, item.name), item);
+        await this.stamp(dstDriver, joinPath(destination.realPath, land(item.name)), item);
       }
 
       if (job.operation === "MOVE") {
-        await this.removeSources(srcDriver, dstDriver, source.realPath, destination.realPath, job.id, signal);
+        await this.removeSources(srcDriver, dstDriver, source.realPath, destination.realPath, job.id, land, signal);
       }
     } finally {
       clearInterval(ticker);
@@ -418,13 +435,15 @@ export class TransferRunnerService {
     sourceRoot: string,
     destinationRoot: string,
     item: PlannedItem,
+    /** The item's name at the destination — its own, unless this is a duplicate. */
+    landed: string,
     row: ItemRow,
     state: { bytesDone: number },
     signal: AbortSignal,
   ): Promise<void> {
     const from = joinPath(sourceRoot, item.name);
-    const directory = joinPath(destinationRoot, parentOfName(item.name));
-    const name = basename(item.name);
+    const directory = joinPath(destinationRoot, parentOfName(landed));
+    const name = basename(landed);
     const partial = joinPath(directory, partialName(randomBytes(9).toString("hex")));
 
     let target: Writable | null = null;
@@ -587,6 +606,8 @@ export class TransferRunnerService {
     sourceRoot: string,
     destinationRoot: string,
     jobId: string,
+    /** Where each item landed, for the verification below. Identity for a move. */
+    land: (name: string) => string,
     signal: AbortSignal,
   ): Promise<void> {
     const done = await this.prisma.transferItems.findMany({
@@ -607,8 +628,9 @@ export class TransferRunnerService {
           continue;
         }
 
-        const landedAs = item.finalName ?? basename(item.name);
-        const to = joinPath(joinPath(destinationRoot, parentOfName(item.name)), landedAs);
+        const landed = land(item.name);
+        const landedAs = item.finalName ?? basename(landed);
+        const to = joinPath(joinPath(destinationRoot, parentOfName(landed)), landedAs);
         const there = await dstDriver.stat(to).catch(() => null);
 
         if (there === null || there.size !== Number(item.bytes)) {

@@ -64,6 +64,20 @@ export interface WriteOptions {
   mode?: number;
   /** Append instead of truncating. */
   append?: boolean;
+  /**
+   * Fail if the path already exists, rather than truncating it (TRE-69).
+   *
+   * Both drivers resolved this interface to `flags: append ? "a" : "w"` until
+   * TRE-69, and `"w"` is `O_CREAT|O_TRUNC`: a route that meant "make an empty
+   * file called config.yml" would have *emptied* the config.yml already there,
+   * successfully and with nothing to notice. On a host reached over SSH that is
+   * unrecoverable, so the flag exists rather than a check before the open —
+   * a check is a race and `O_EXCL` is not.
+   *
+   * Ignored when `append` is set; the two ask for opposite things and appending
+   * to a file that must not exist is not a request anything here makes.
+   */
+  exclusive?: boolean;
 }
 
 /**
@@ -127,6 +141,48 @@ export interface HostDriver {
 
   /** Releases anything the driver holds. The local driver holds nothing. */
   dispose(): Promise<void>;
+}
+
+/**
+ * The three ways a file may be opened for writing, named.
+ *
+ * `node:fs` and ssh2 both take the same POSIX-ish flag strings, which is the
+ * only reason one table can serve both — and the whole of the difference
+ * between them is one character in a string literal. `"w"` truncates and
+ * `"wx"` refuses; a typo between the two is a file emptied on somebody else's
+ * machine with nothing in the response to say so.
+ */
+export const OPEN_FLAGS = {
+  /** Create it, and empty it if it is already there. */
+  TRUNCATE: "w",
+  /** Create it, and fail if it is already there — `O_EXCL` (TRE-69). */
+  EXCLUSIVE: "wx",
+  /** Create it, and write past whatever is already in it. */
+  APPEND: "a",
+} as const;
+
+/**
+ * `WriteOptions` as the two stream constructors want it — the sibling of
+ * `rangeOf` below, and here for the same reason.
+ *
+ * Both drivers resolve the same options object, so the resolution is done once
+ * rather than written out twice: two copies of this expression are two places
+ * for `exclusive` to be forgotten, and the transport where it is forgotten is
+ * the transport that quietly truncates.
+ *
+ * `append` wins over `exclusive`. They ask for opposite things — one keeps what
+ * is there, the other insists nothing is — and nothing in this application ever
+ * sets both; the order is stated so that a caller which somehow does gets the
+ * conservative half.
+ */
+export type WriteFlag = (typeof OPEN_FLAGS)[keyof typeof OPEN_FLAGS];
+
+// Narrowed to the three literals rather than widened to `string`, because that
+// is what ssh2's own `OpenMode` is: a `string` here compiles on the local side
+// and fails on the remote one, which is the wrong half to find out from.
+export function writeFlags(options: WriteOptions): WriteFlag {
+  if (options.append) return OPEN_FLAGS.APPEND;
+  return options.exclusive ? OPEN_FLAGS.EXCLUSIVE : OPEN_FLAGS.TRUNCATE;
 }
 
 /**

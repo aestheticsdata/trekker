@@ -1,4 +1,7 @@
 import "reflect-metadata";
+import { mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Global, type INestApplication, Module, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { hashSync } from "bcryptjs";
@@ -169,12 +172,27 @@ class FakePrisma {
       return Promise.resolve(this.hostRows.filter((row) => row.userId === where.userId));
     },
 
-    findFirst: ({ where }: { where: { id?: string; userId?: string } }) => {
+    findFirst: ({
+      where,
+      include,
+    }: {
+      where: { id?: string; userId?: string };
+      include?: { roots?: boolean; user?: unknown };
+    }) => {
       if (typeof where?.userId !== "string") return unsupported("hosts.findFirst", where);
       const row = this.hostRows.find(
         (candidate) => candidate.userId === where.userId && (where.id === undefined || candidate.id === where.id),
       );
-      return Promise.resolve(row ?? null);
+      if (!row) return Promise.resolve(null);
+
+      // `PathGuardService` reads the owning account's role off the same query
+      // it makes for the roots (TRE-48), so anything that reaches the guard's
+      // own lookup needs it answered. Attached only when it was asked for:
+      // `HostsService` uses this method too, and a `user` key nobody requested
+      // would ride out in a host response.
+      if (!include?.user) return Promise.resolve(row);
+      const owner = this.userRows.find((candidate) => candidate.id === row.userId);
+      return Promise.resolve({ ...row, user: { role: owner?.role ?? "MEMBER" } });
     },
   };
 
@@ -784,6 +802,123 @@ describe("with a session and a CSRF token", () => {
       .set("Cookie", cookie)
       .set("x-csrf-token", "")
       .expect(403);
+  });
+});
+
+/**
+ * TRE-69, over a socket rather than through the service.
+ *
+ * `create.spec.ts` drives `CreateService` directly and proves what lands on
+ * disk. What it cannot reach is the layer these two routes actually meet: the
+ * validation pipe that has to refuse a name before the guard is asked, the
+ * status a create answers with, and the audit row the interceptor writes on the
+ * way in. Those are properties of the *route*, and TRE-56's point is that a
+ * property of a route is checked by asking the route.
+ *
+ * Bob, not Alice: Alice is the install's owner and browses without the roots
+ * binding her (TRE-48), so a create of hers would prove nothing about them.
+ */
+describe("creating an entry", () => {
+  let directory: string;
+
+  beforeEach(async () => {
+    // Resolved, because the guard compares resolved paths and macOS hands out
+    // a `/var` temp directory that is really `/private/var`.
+    directory = await realpath(await mkdtemp(join(tmpdir(), "trekker-http-")));
+    prisma.hostRows.push({
+      id: "host-bob",
+      userId: "user-bob",
+      slug: "bobs-box",
+      label: "Bob's box",
+      transport: "LOCAL",
+      address: null,
+      port: 22,
+      username: null,
+      colour: "#876730",
+      homePath: directory,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      credential: null,
+      knownKeys: [],
+      roots: [{ path: directory, access: "WRITE" }],
+    });
+  });
+
+  afterEach(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  /** One create, as Bob, with a fresh session and its token. */
+  async function post(path: string, name: string, at = directory) {
+    const { cookie, csrfToken } = await signIn(BOB);
+    return request(server as never)
+      .post(path)
+      .set("Cookie", cookie)
+      .set("x-csrf-token", csrfToken)
+      .send({ hostId: "host-bob", path: at, name });
+  }
+
+  it("answers 201 with the entry it made", async () => {
+    const response = await post("/api/fs/mkdir", "reports");
+
+    expect(response.status).toBe(201);
+    expect(body(response).name).toBe("reports");
+    expect(body(response).type).toBe("dir");
+    expect((await stat(join(directory, "reports"))).isDirectory()).toBe(true);
+  });
+
+  it("answers 409 on a name that is taken", async () => {
+    expect((await post("/api/fs/mkdir", "reports")).status).toBe(201);
+    expect((await post("/api/fs/mkdir", "reports")).status).toBe(409);
+  });
+
+  it("refuses a name that is trying to be a path, before the guard is asked", async () => {
+    // 400 from the pipe, not 403 from the guard: the distinction is the point.
+    // A name is not a path, and the layer that says so is the DTO.
+    for (const name of ["../escape", "a/b", "..", ".", "", " x", "x "]) {
+      expect((await post("/api/fs/mkdir", name)).status).toBe(400);
+    }
+    expect(await readdir(directory)).toEqual([]);
+  });
+
+  it("refuses a directory outside the roots", async () => {
+    const outside = await realpath(await mkdtemp(join(tmpdir(), "trekker-outside-")));
+    try {
+      expect((await post("/api/fs/mkdir", "x", outside)).status).toBe(403);
+      expect(await readdir(outside)).toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("cannot empty a file that is already there", async () => {
+    // The ticket, at the outermost layer it can be asked at.
+    await writeFile(join(directory, "config.yml"), "port: 6800\n");
+
+    expect((await post("/api/fs/create", "config.yml")).status).toBe(409);
+    expect(await readFile(join(directory, "config.yml"), "utf8")).toBe("port: 6800\n");
+  });
+
+  it("writes a row saying what was made", async () => {
+    expect((await post("/api/fs/mkdir", "reports")).status).toBe(201);
+
+    const row = prisma.activityRows.find((activity) => activity.kind === "file.mkdir");
+    expect(row?.summary).toContain("reports");
+    expect(row?.outcome).toBe("success");
+  });
+
+  it("writes a row even when the name was already taken", async () => {
+    // The interceptor writes before the handler, which is what makes a refused
+    // attempt leave a trace. A log that only records what succeeded answers the
+    // wrong question.
+    expect((await post("/api/fs/mkdir", "reports")).status).toBe(201);
+    expect((await post("/api/fs/mkdir", "reports")).status).toBe(409);
+
+    const rows = prisma.activityRows.filter((activity) => activity.kind === "file.mkdir");
+    expect(rows).toHaveLength(2);
+    // `refused`, not `failure`: a taken name is an answer the interceptor
+    // classifies with every other 4xx, and nothing on this route went wrong.
+    expect(rows.map((activity) => activity.outcome).sort()).toEqual(["refused", "success"]);
   });
 });
 

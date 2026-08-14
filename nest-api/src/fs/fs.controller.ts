@@ -5,6 +5,8 @@ import { AuditService } from "@audit/audit.service";
 import { LIMITS } from "@audit/limits";
 import { ChangeModeDto } from "@fs/dto/change-mode.dto";
 import { ChangeOwnerDto } from "@fs/dto/change-owner.dto";
+import { CreateEntryDto } from "@fs/dto/create-entry.dto";
+import { CreateService } from "@fs/create.service";
 import { DeleteDto, DeletePlanDto } from "@fs/dto/delete.dto";
 import { FsQueryDto } from "@fs/dto/fs-query.dto";
 import { RenameBatchDto } from "@fs/dto/rename-batch.dto";
@@ -32,8 +34,8 @@ import { CsrfGuard } from "@users/guards/csrf.guard";
 import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/session-auth.guard";
 
 /**
- * Reading the filesystem (TRE-13), changing what it permits (TRE-21) and
- * changing what things are called (TRE-22).
+ * Reading the filesystem (TRE-13), changing what it permits (TRE-21), changing
+ * what things are called (TRE-22) and making new ones (TRE-69).
  *
  * The reads carry the session guard alone, matching how UsersController treats
  * its GETs. The writes add CSRF and `@Audited`: they are the routes in this
@@ -55,6 +57,7 @@ export class FsController {
     private readonly fs: FsService,
     private readonly permissions: PermissionsService,
     private readonly rename: RenameService,
+    private readonly create: CreateService,
     private readonly remove: DeleteService,
     private readonly download: DownloadService,
     private readonly upload: UploadService,
@@ -213,6 +216,73 @@ export class FsController {
     if (refusal !== null) throw toRefusalException(refusal);
 
     return { results: outcomes, uploaded, bytes, failed };
+  }
+
+  /**
+   * One new directory (TRE-69 §1).
+   *
+   * The two creates below are the only routes here that answer 201 rather than
+   * 200, and they earn it: each one puts a resource on another machine and
+   * hands back what it is. Everything else in this controller changes something
+   * that was already there, which is why the rest pin themselves to 200 against
+   * Nest's POST default.
+   *
+   * Not destructive — `mkdir` refuses an existing name rather than replacing
+   * one — so the coverage spec does not require a limit. It carries one anyway;
+   * see `LIMITS.entryCreate`.
+   */
+  @Post("mkdir")
+  @UseGuards(CsrfGuard)
+  @HttpCode(HttpStatus.CREATED)
+  @Audited({
+    kind: "file.mkdir",
+    limit: LIMITS.entryCreate,
+    describe: (request) => {
+      const body = request.body as { hostId?: string; path?: string; name?: string };
+      return {
+        summary: `mkdir ${body.name ?? "?"} in ${body.path ?? "?"}`,
+        hostId: body.hostId,
+        // The containing directory, not the new path: this is what the guard
+        // adjudicated, and it is the path that existed when the row was written.
+        paths: body.path ? [body.path] : [],
+        payload: { name: body.name },
+      };
+    },
+  })
+  async makeDirectory(@Req() req: Request, @Body() dto: CreateEntryDto): Promise<FileRowDetail> {
+    const entry = await this.create.mkdir(userIdOf(req), dto.hostId, dto.path, dto.name);
+    this.audit.annotate(req, { hostId: dto.hostId, payload: { created: entry.path, mode: entry.mode } });
+    return entry;
+  }
+
+  /**
+   * One new empty file (TRE-69 §1).
+   *
+   * Exclusive, and that is the whole ticket: the driver opens with `O_EXCL`, so
+   * this route cannot empty a file that is already under the name it was given.
+   * A create that lost that race would answer 200 having destroyed the thing
+   * the operator was about to open.
+   */
+  @Post("create")
+  @UseGuards(CsrfGuard)
+  @HttpCode(HttpStatus.CREATED)
+  @Audited({
+    kind: "file.create",
+    limit: LIMITS.entryCreate,
+    describe: (request) => {
+      const body = request.body as { hostId?: string; path?: string; name?: string };
+      return {
+        summary: `create ${body.name ?? "?"} in ${body.path ?? "?"}`,
+        hostId: body.hostId,
+        paths: body.path ? [body.path] : [],
+        payload: { name: body.name },
+      };
+    },
+  })
+  async makeFile(@Req() req: Request, @Body() dto: CreateEntryDto): Promise<FileRowDetail> {
+    const entry = await this.create.createFile(userIdOf(req), dto.hostId, dto.path, dto.name);
+    this.audit.annotate(req, { hostId: dto.hostId, payload: { created: entry.path, mode: entry.mode } });
+    return entry;
   }
 
   @Post("chmod")

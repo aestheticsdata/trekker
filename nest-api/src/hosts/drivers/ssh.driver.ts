@@ -12,6 +12,7 @@ import {
   PERMISSION_MASK,
   rangeOf,
   type ReadOptions,
+  writeFlags,
   type WriteOptions,
 } from "@hosts/drivers/host-driver";
 import type { HostConnectionSpec, Lease, PoolSettings, SshConnectionPool } from "@hosts/drivers/ssh-connection.pool";
@@ -188,7 +189,11 @@ export class SshDriver implements HostDriver {
     const lease = await this.pool.acquire(this.spec);
     try {
       const stream = lease.sftp.createWriteStream(path, {
-        flags: options.append ? "a" : "w",
+        // The same resolution the local driver uses, from the same function.
+        // ssh2 maps `EXCLUSIVE` to WRITE|CREAT|EXCL, which is the promise
+        // `O_EXCL` makes on the other side: the server refuses rather than
+        // truncating (TRE-69).
+        flags: writeFlags(options),
         mode: options.mode ?? 0o644,
       });
       holdUntilClosed(stream, lease);

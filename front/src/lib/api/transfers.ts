@@ -58,6 +58,8 @@ export interface TransferPlan {
   skippedLinks: number;
   truncated: boolean;
   ceiling: number;
+  /** What each selected entry is called on arrival. Empty unless duplicating. */
+  landAs: Record<string, string>;
 }
 
 export interface TransferView {
@@ -109,6 +111,16 @@ export interface TransferRequest {
   dstHostId: string;
   dstPath: string;
   operation: TransferOperation;
+  /**
+   * Land every entry under a free name instead of merging with what is there
+   * (TRE-69 §2) — what `duplicate` means, and the only way to copy a directory
+   * into the directory it already sits in.
+   *
+   * A flag, not a name: the server lists the destination and picks the free
+   * name itself, from the same `numberedName` a `keepBoth` conflict uses. This
+   * side does not compute `report (2).txt` any more than it computes a conflict.
+   */
+  duplicate?: boolean;
 }
 
 export async function planTransfer(request: TransferRequest, csrfToken: string | null): Promise<TransferPlan> {

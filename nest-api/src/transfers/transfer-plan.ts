@@ -158,6 +158,88 @@ export const MAX_KEEP_BOTH_ATTEMPTS = 1000;
 /** `report.txt` → `report (2).txt`. Re-exported so callers need one import. */
 export { numberedName };
 
+/* ---- landing under a different name (TRE-69) ----------------------------- */
+
+/**
+ * What each selected entry is called when it arrives, keyed by what it is
+ * called now. Empty for every ordinary transfer, which is the case worth
+ * protecting: `landingFor` returns its argument unchanged when the map has
+ * nothing to say, so a copy between two panes takes exactly the path it always
+ * did.
+ *
+ * It exists for `duplicate` (TRE-69 §2), which is a copy of a selection into
+ * the directory it already sits in — and that is the one destination where
+ * every entry collides with itself. Answering that with the per-item conflict
+ * strategy is not enough: `isConflict` treats a directory arriving on a
+ * directory as a *merge*, deliberately and correctly for a normal copy, so a
+ * `keepBoth` duplicate of `logs/` would merge `logs` into itself and number the
+ * files inside it. `logs (2)` never gets made and the source directory grows a
+ * second copy of its own contents.
+ *
+ * So the name is decided once, for the top-level entry, before the walk names
+ * anything underneath it — which is what `cp -r logs "logs (2)"` does and what
+ * anybody pressing "duplicate" means. Everything beneath rides along, because
+ * every item name is relative to the entry that was selected.
+ */
+export type LandingNames = Record<string, string>;
+
+/**
+ * An item's name at the destination. Only the first segment can change: the
+ * tree under a renamed directory keeps its shape, which is the whole point.
+ */
+export function landingFor(name: string, landing: LandingNames): string {
+  const cut = name.indexOf("/");
+  const top = cut === -1 ? name : name.slice(0, cut);
+  const to = landing[top];
+  if (to === undefined) return name;
+  return cut === -1 ? to : `${to}${name.slice(cut)}`;
+}
+
+/**
+ * The first name in the `numberedName` series that nothing in `taken` holds, or
+ * null after `MAX_KEEP_BOTH_ATTEMPTS` — a thousand copies of one name is not a
+ * conflict, it is a loop somewhere.
+ *
+ * The series is `numberedName`'s and not a second one, which is the same
+ * insistence the upload path and `keepBoth` already share: a file duplicated in
+ * a pane and a file that lost a conflict during a copy are the same situation
+ * and get the same answer, `report (2).txt`.
+ */
+export function freeName(name: string, taken: ReadonlySet<string>): string | null {
+  if (!taken.has(name)) return name;
+  for (let attempt = 2; attempt < MAX_KEEP_BOTH_ATTEMPTS; attempt += 1) {
+    const candidate = numberedName(name, attempt);
+    if (!taken.has(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * The landing map as stored on the job, read back defensively.
+ *
+ * `TransferJobs.options` is a JSON column: whatever is in it was written by
+ * some version of this application, and a runner that trusted its shape would
+ * turn a schema change into paths built out of `undefined`. Anything that is
+ * not a string-to-string map reads as "no renaming", which is the behaviour
+ * every transfer had before this existed.
+ */
+export function readLandingNames(options: unknown): LandingNames {
+  if (typeof options !== "object" || options === null) return {};
+  const stored = (options as { landAs?: unknown }).landAs;
+  if (typeof stored !== "object" || stored === null || Array.isArray(stored)) return {};
+
+  const landing: LandingNames = {};
+  for (const [from, to] of Object.entries(stored as Record<string, unknown>)) {
+    // A landing name is a single segment, like every other name in this app.
+    // One containing a separator would let a stored value redirect a write
+    // outside the destination the guard validated.
+    if (typeof to === "string" && to !== "" && !to.includes("/") && to !== "." && to !== "..") {
+      landing[from] = to;
+    }
+  }
+  return landing;
+}
+
 /**
  * The directory a selection was made in, and the proof that it was one.
  *

@@ -14,8 +14,12 @@ import {
   decisionFor,
   destinationInsideSource,
   type EntryFacts,
+  freeName,
   itemFrom,
   joinPath,
+  type LandingNames,
+  landingFor,
+  MAX_KEEP_BOTH_ATTEMPTS,
   type PlannedItem,
   type TransferOperation,
   undecided,
@@ -65,6 +69,13 @@ export interface TransferPlan {
   /** True when the selection is larger than the walk's ceiling; nothing may be queued. */
   truncated: boolean;
   ceiling: number;
+  /**
+   * What each selected entry is called on arrival (TRE-69 §2). Empty unless the
+   * request asked to duplicate, in which case every entry lands under a free
+   * name and the plan says which — so a modal, or a toast, can name it before
+   * the job runs.
+   */
+  landAs: LandingNames;
 }
 
 export interface TransferView {
@@ -115,7 +126,17 @@ export class TransferService {
     let truncated = false;
     let skippedLinks = 0;
 
-    const targets = await this.destinationFacts(dstDriver, destination, input.srcPaths.map(basename), ceiling);
+    const landAs = await this.landingNames(userId, srcDriver, dstDriver, destination, input);
+    // Keyed by where each item will *land*, which for an ordinary transfer is
+    // where it is called now. A duplicate asks about `logs (2)/app.log`, and
+    // asking about `logs/app.log` instead would report a conflict with the file
+    // it is being copied from.
+    const targets = await this.destinationFacts(
+      dstDriver,
+      destination,
+      input.srcPaths.map((path) => landingFor(basename(path), landAs)),
+      ceiling,
+    );
 
     for (const path of input.srcPaths) {
       const validated = await this.guard.validate({ driver: srcDriver, userId, path, intent: "read" });
@@ -135,7 +156,7 @@ export class TransferService {
         // for the root entry itself, whose relative path is the empty string.
         const suffix = entry.path.slice(validated.realPath.length).replace(/^\//, "");
         const name = suffix === "" ? top : `${top}/${suffix}`;
-        items.push(itemFrom(entry, name, targets.get(name) ?? null));
+        items.push(itemFrom(entry, name, targets.get(landingFor(name, landAs)) ?? null));
       }
     }
 
@@ -158,7 +179,63 @@ export class TransferService {
       skippedLinks,
       truncated,
       ceiling,
+      landAs,
     };
+  }
+
+  /**
+   * What each selected entry will be called at the destination (TRE-69 §2).
+   *
+   * Empty — and free — for every transfer that did not ask to duplicate, which
+   * is the shape this has to have: `landingFor` is then the identity function
+   * and nothing about an ordinary copy changes.
+   *
+   * The names are chosen against one listing of the destination, and each one
+   * is added to the set as it is taken, so two entries duplicated in the same
+   * request cannot both be handed `report (2).txt`. They are chosen *early*,
+   * before the walk, because everything underneath a renamed directory is
+   * named relative to it — the decision has to be made once, at the top, or it
+   * cannot be made at all.
+   *
+   * Racy against another writer, unavoidably, and the runner is what makes that
+   * safe rather than this: a file whose landing name has been taken by the time
+   * the bytes arrive meets `settleName` and its conflict decision, exactly as
+   * any other item does.
+   */
+  private async landingNames(
+    userId: string,
+    srcDriver: HostDriver,
+    dstDriver: HostDriver,
+    destination: string,
+    input: PlanInput,
+  ): Promise<LandingNames> {
+    if (input.duplicate !== true) return {};
+    if (input.operation !== "copy") {
+      throw new BadRequestException("A duplicate is a copy. Moving an entry beside itself is a rename.");
+    }
+
+    const taken = new Set((await dstDriver.list(destination).catch((): FileEntry[] => [])).map((entry) => entry.name));
+    const landing: LandingNames = {};
+
+    for (const path of input.srcPaths) {
+      // Resolved, not taken from the request: the walk below names its items
+      // after `basename(realPath)`, and a map keyed any other way would simply
+      // never match. A selected symlink resolves to its target, which is the
+      // entry that actually gets copied.
+      const validated = await this.guard.validate({ driver: srcDriver, userId, path, intent: "read" });
+      const top = basename(validated.realPath);
+
+      const free = freeName(top, taken);
+      if (free === null) {
+        throw new BadRequestException(
+          `There are already ${MAX_KEEP_BOTH_ATTEMPTS} copies of ${top} in this directory.`,
+        );
+      }
+      taken.add(free);
+      landing[top] = free;
+    }
+
+    return landing;
   }
 
   // ----------------------------------------------------------------- create
@@ -245,7 +322,11 @@ export class TransferService {
         dstHostId: input.dstHostId,
         dstPath: plan.destination.path,
         operation: input.operation === "move" ? "MOVE" : "COPY",
-        options: { strategy: input.strategy },
+        // `landAs` is written down rather than recomputed by the runner, and
+        // that is the same reason the items are: the job may be picked up
+        // minutes later, or after a restart, and a name chosen again then would
+        // be a different name. What was decided is what runs.
+        options: { strategy: input.strategy, landAs: plan.landAs },
         status: "QUEUED",
         bytesTotal: BigInt(writing),
         itemsTotal: plan.items.length,
@@ -497,6 +578,8 @@ export interface PlanInput {
   dstHostId: string;
   dstPath: string;
   operation: TransferOperation;
+  /** Land every entry under a free name instead of merging (TRE-69 §2). */
+  duplicate?: boolean;
 }
 
 export interface CreateInput extends PlanInput {

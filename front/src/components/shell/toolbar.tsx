@@ -35,8 +35,15 @@ export interface ToolbarAction {
 
 /** Everything M2 owns, declared once so the toolbar and the palette agree. */
 export const M2_ACTIONS: readonly ToolbarAction[] = [
+  // F7 rather than the ⇧⌘N the design spec drew (TRE-69). Chrome and Firefox
+  // both take ⇧⌘N for a private window at the window manager, so the page never
+  // receives the key — a hint advertising it would teach a shortcut that does
+  // nothing. F7 is `mkdir` in the two-pane managers this app is shaped after,
+  // which is also where its F2, F3, F5 and F6 come from.
+  { id: "new", label: "new", hint: "F7" },
   { id: "copy", label: "copy", hint: "F5" },
   { id: "move", label: "move", hint: "F6" },
+  { id: "duplicate", label: "duplicate", hint: "⌘D" },
   { id: "compare", label: "compare", hint: "⇄", unavailableReason: "Pane comparison arrives in TRE-28" },
   { id: "chmod", label: "permissions", unavailableReason: "chmod and chown arrive in TRE-21" },
   { id: "rename", label: "regex rename", hint: "F2", unavailableReason: "Regex rename arrives in TRE-22" },

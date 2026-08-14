@@ -30,6 +30,7 @@ import {
   PERMISSION_MASK,
   rangeOf,
   type ReadOptions,
+  writeFlags,
   type WriteOptions,
 } from "@hosts/drivers/host-driver";
 import { type AllowedProgram, isAllowedProgram } from "@hosts/drivers/shell-quote";
@@ -169,7 +170,12 @@ export class LocalDriver implements HostDriver {
     // await. The interface stays a promise because the SSH side needs one.
     return Promise.resolve(
       createWriteStream(path, {
-        flags: options.append ? "a" : "w",
+        // Resolved by the interface both drivers implement, so the two cannot
+        // disagree about what `exclusive` means. `EXCLUSIVE` is O_CREAT|O_EXCL:
+        // the open fails rather than truncating what is already there (TRE-69),
+        // and because the stream opens lazily that refusal arrives as an
+        // `error` event rather than as a rejection here.
+        flags: writeFlags(options),
         mode: options.mode ?? 0o644,
       }),
     );

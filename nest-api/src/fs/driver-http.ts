@@ -24,6 +24,12 @@ export function toHttp(error: DriverError): HttpException {
       return body(HttpStatus.FORBIDDEN, "Permission denied on the host");
     case "ENOTDIR":
       return body(HttpStatus.BAD_REQUEST, "Not a directory");
+    // TRE-69: the name is taken. A conflict rather than a 500, which is what it
+    // fell through to before there was a route that could meet one — `mkdir`
+    // and an exclusive open are the two operations for which "it is already
+    // there" is an ordinary answer rather than an internal failure.
+    case "EEXIST":
+      return body(HttpStatus.CONFLICT, "Already exists");
     // TRE-10 §3: the mismatch must read as its own thing. The `code` already
     // distinguished it, but the message did not, and the message is what a
     // person sees — telling someone to check the network during a host key

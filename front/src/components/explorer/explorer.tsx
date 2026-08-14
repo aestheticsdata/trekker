@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@auth/context/AuthContext";
+import { CreateModal } from "@components/explorer/create-modal";
 import { DeleteModal } from "@components/explorer/delete-modal";
 import { Inspector } from "@components/explorer/inspector";
 import { Pane } from "@components/explorer/pane";
@@ -19,13 +21,16 @@ import { CollapsiblePane } from "@components/ui/collapsible-pane";
 import { useToast } from "@components/ui/toast";
 import { useUploads } from "@components/ui/uploads";
 import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
+import { ApiError } from "@lib/api/client";
 import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
+import { startTransfer } from "@lib/api/transfers";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { warmDirectory } from "@lib/query/warm-directory";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useRef, useState } from "react";
 
+import type { CreateMode, CreateTarget } from "@components/explorer/create-modal";
 import type { DeleteTargetSelection } from "@components/explorer/delete-modal";
 import type { PaneCallbacks } from "@components/explorer/pane";
 import type { PaneIndex, PaneView } from "@components/explorer/pane-state";
@@ -85,6 +90,10 @@ export function Explorer({
   onPermissionsOpenChange,
   renameMode,
   onRenameMode,
+  createMode,
+  onCreateMode,
+  duplicateRequested,
+  onDuplicateRequestedChange,
   deleteOpen,
   onDeleteOpenChange,
   downloadRequested,
@@ -133,6 +142,23 @@ export function Explorer({
    */
   renameMode: RenameMode | null;
   onRenameMode: (mode: RenameMode | null) => void;
+  /**
+   * Which create form is open, or null for none (TRE-69). A mode for the same
+   * reason `renameMode` is one — the modal serves a directory and a file.
+   *
+   * Unlike every other target here it is aimed at the pane's *directory*
+   * rather than at the selection: a new entry goes into the place the pane is
+   * standing in, which is the only place a pane unambiguously names.
+   */
+  createMode: CreateMode | null;
+  onCreateMode: (mode: CreateMode | null) => void;
+  /**
+   * `duplicate` (TRE-69 §2). A request rather than a state, like the download:
+   * it opens nothing, queues a transfer from the selection into the directory
+   * that selection already sits in, and reports through the queue widget.
+   */
+  duplicateRequested: boolean;
+  onDuplicateRequestedChange: (requested: boolean) => void;
   /** The toolbar's `rm` button (TRE-25). Owned by the page, like the two above. */
   deleteOpen: boolean;
   onDeleteOpenChange: (open: boolean) => void;
@@ -157,6 +183,7 @@ export function Explorer({
   onTransferMode: (mode: "copy" | "move" | null) => void;
 }) {
   const [memory, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
+  const { csrfToken } = useAuth();
   const { push } = useToast();
   const uploads = useUploads();
   const queryClient = useQueryClient();
@@ -248,7 +275,13 @@ export function Explorer({
   // Also computed while either modal is open: the toolbar's buttons need the
   // selection whether or not the panel that usually shows it is up.
   const inspecting =
-    inspector || permissionsOpen || renameMode !== null || deleteOpen || downloadRequested || transferMode !== null
+    inspector ||
+    permissionsOpen ||
+    renameMode !== null ||
+    deleteOpen ||
+    downloadRequested ||
+    duplicateRequested ||
+    transferMode !== null
       ? new Set(activePane.sel)
       : null;
   const inspected = inspecting ? activeView.rows.filter((row) => inspecting.has(row.name)) : [];
@@ -351,6 +384,33 @@ export function Explorer({
   }, [deleteEmpty, onDeleteOpenChange, push]);
 
   /**
+   * What a create is aimed at (TRE-69 §3).
+   *
+   * The directory the active pane is showing, and never the selection: a new
+   * entry goes *into* a place, and the only place a pane names unambiguously is
+   * the one it is standing in. It is the same rule the upload follows, for the
+   * same reason.
+   *
+   * The names come from the listing rather than from the rows on screen, so a
+   * glob hiding `report.txt` cannot make the modal report that name as free.
+   */
+  const createTarget: CreateTarget | null =
+    createMode === null || activePane.hostId === null
+      ? null
+      : {
+          hostId: activePane.hostId,
+          directory: activePane.path,
+          existing: (activeView.listing.data?.entries ?? []).map((entry) => entry.name),
+        };
+
+  const createEmpty = createMode !== null && !hostsPending && activePane.hostId === null;
+  useEffect(() => {
+    if (!createEmpty) return;
+    onCreateMode(null);
+    push({ tone: "info", message: "No host on this pane", detail: "Bind one from the sidebar first" });
+  }, [createEmpty, onCreateMode, push]);
+
+  /**
    * What a transfer is aimed at (TRE-24 §1).
    *
    * The active pane's selection is the source and the *other* pane's directory
@@ -428,6 +488,61 @@ export function Explorer({
     // them is a second, worse copy of what the user is already looking at.
     startDownload(activePane.hostId, joinPath(activePane.path, downloadEntries[0].name));
   }, [downloadRequested, onDownloadRequestedChange, activePane, downloadEntries, push]);
+
+  /**
+   * Duplicating where it stands (TRE-69 §2).
+   *
+   * A copy of the selection into the directory it is already in, which is the
+   * one transfer whose destination is not the other pane — so it takes the same
+   * `srcPaths`, aims them at `activePane.path`, and asks the server to land
+   * them under free names. `report.txt` becomes `report (2).txt`, from the
+   * server's `numberedName`; nothing here computes that.
+   *
+   * There is no modal, and no conflict list, because there are no conflicts to
+   * answer: every name is free by construction. What it becomes is a job in the
+   * queue, which is right rather than convenient — duplicating a 40 GB
+   * directory is a transfer whatever the button was called, and it belongs in
+   * the same widget with the same cancel.
+   */
+  const duplicateEntries = inspected.length > 0 ? inspected : cursorRow ? [cursorRow] : [];
+  useEffect(() => {
+    if (!duplicateRequested) return;
+    onDuplicateRequestedChange(false);
+
+    if (activePane.hostId === null || duplicateEntries.length === 0) {
+      push({ tone: "info", message: "Nothing to duplicate", detail: "Select an entry, or put the cursor on one" });
+      return;
+    }
+
+    const names = duplicateEntries.map((entry) => entry.name);
+    void startTransfer(
+      {
+        srcHostId: activePane.hostId,
+        srcPaths: names.map((name) => joinPath(activePane.path, name)),
+        dstHostId: activePane.hostId,
+        dstPath: activePane.path,
+        operation: "copy",
+        // Answers the per-item conflicts inside a duplicated directory, which
+        // are the only ones there can be — the top-level names are free.
+        strategy: "keepBoth",
+        duplicate: true,
+      },
+      csrfToken,
+    ).then(
+      () => {
+        void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.TRANSFERS] });
+        // No success toast: the queue widget is about to show the job with a
+        // progress bar, and the panes are refreshed when it finishes.
+      },
+      (error: unknown) => {
+        push({
+          tone: "warning",
+          message: names.length === 1 ? `Could not duplicate ${names[0]}` : "Could not duplicate",
+          detail: error instanceof ApiError ? error.message : "The host refused.",
+        });
+      },
+    );
+  }, [duplicateRequested, onDuplicateRequestedChange, activePane, duplicateEntries, csrfToken, queryClient, push]);
 
   /**
    * Uploading into a pane (TRE-65).
@@ -553,6 +668,14 @@ export function Explorer({
           onActiveChange(index);
           onDownloadRequestedChange(true);
           return true;
+        case "F7":
+          // `mkdir` in the two-pane managers this app takes its other F-keys
+          // from, and not the ⇧⌘N the design spec drew: Chrome and Firefox both
+          // take that chord for a private window before the page sees it, so a
+          // shortcut advertised as ⇧⌘N would be a shortcut that never fires.
+          onActiveChange(index);
+          onCreateMode("dir");
+          return true;
         case "F5":
         case "F6":
           // The pane the key was pressed in becomes the source, and the other
@@ -599,6 +722,16 @@ export function Explorer({
     key: "a",
     inFields: false,
     onPress: () => dispatch({ type: "selectAll", pane: active, names: rendered[active].rows.map((row) => row.name) }),
+  });
+
+  // ⌘D duplicates the selection (TRE-69 §2). Out of the fields, like ⌘A: the
+  // browser's own ⌘D is "bookmark this page", which nobody wants from a file
+  // manager, but inside a text field the chord is not ours to take.
+  useShortcut({
+    enabled: manageHostsFor === null,
+    key: "d",
+    inFields: false,
+    onPress: () => onDuplicateRequestedChange(true),
   });
 
   const callbacksFor = (index: PaneIndex): PaneCallbacks => ({
@@ -801,6 +934,21 @@ export function Explorer({
             // changed (TRE-16 §3). Leaving it would highlight rows that are
             // gone and hand the next action a stale list.
             dispatch({ type: "selectNone", pane: active });
+          }}
+        />
+      )}
+
+      {createTarget && createMode && (
+        <CreateModal
+          target={createTarget}
+          initialMode={createMode}
+          onClose={() => onCreateMode(null)}
+          onCreated={(entry) => {
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, createTarget.hostId] });
+            // Created and then found, which is one gesture rather than two. The
+            // name means nothing until the refetch lands and everything the
+            // moment it does — the reducer holds names, not indices.
+            dispatch({ type: "reveal", pane: active, name: entry.name });
           }}
         />
       )}

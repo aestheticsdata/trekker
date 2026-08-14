@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { CreateService } from "@fs/create.service";
 import { DeleteService } from "@fs/delete.service";
 import { DownloadService } from "@fs/download.service";
 import { FsController } from "@fs/fs.controller";
@@ -27,6 +28,7 @@ import { UploadService } from "@fs/upload.service";
     IdResolverService,
     PermissionsService,
     RenameService,
+    CreateService,
     DeleteService,
     DownloadService,
     UploadService,
@@ -37,6 +39,7 @@ import { UploadService } from "@fs/upload.service";
     IdResolverService,
     PermissionsService,
     RenameService,
+    CreateService,
     DeleteService,
     DownloadService,
     UploadService,

@@ -14,6 +14,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useQueryStates } from "nuqs";
 import { useState } from "react";
 
+import type { CreateMode } from "@components/explorer/create-modal";
 import type { PaneUrl } from "@components/explorer/explorer";
 import type { PaneIndex } from "@components/explorer/pane-state";
 import type { RenameMode } from "@components/explorer/rename-modal";
@@ -46,6 +47,12 @@ export default function HomePage() {
   const [manageHostsFor, setManageHostsFor] = useState<PaneIndex | null>(null);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [renameMode, setRenameMode] = useState<RenameMode | null>(null);
+  /**
+   * Which create form is open, or null for none (TRE-69). A mode rather than a
+   * boolean for the reason `renameMode` is one: the modal serves a directory
+   * and a file, and whichever the caller asked for is the one it opens on.
+   */
+  const [createMode, setCreateMode] = useState<CreateMode | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   /**
    * A request, not a state (TRE-26).
@@ -59,6 +66,12 @@ export default function HomePage() {
   const [downloadRequested, setDownloadRequested] = useState(false);
   /** The same shape, for the toolbar's `upload` button (TRE-65). */
   const [uploadRequested, setUploadRequested] = useState(false);
+  /**
+   * The same shape again, for `duplicate` (TRE-69 §2), which opens nothing:
+   * it queues a transfer from the selection and reports through the queue
+   * widget, so there is no modal for the flag to be the state of.
+   */
+  const [duplicateRequested, setDuplicateRequested] = useState(false);
   /**
    * Which transfer modal is open, or null for none (TRE-24).
    *
@@ -95,8 +108,13 @@ export default function HomePage() {
    * exists rather than of what this page happens to enable.
    */
   const OPENERS: Record<string, () => void> = {
+    // The button says `new`, so it opens on the directory — which is what the
+    // key it advertises means everywhere else. The file is one click away
+    // inside the modal.
+    new: () => setCreateMode("dir"),
     copy: () => setTransferMode("copy"),
     move: () => setTransferMode("move"),
+    duplicate: () => setDuplicateRequested(true),
     chmod: () => setPermissionsOpen(true),
     // The button is labelled `regex rename`, so it opens the pattern whatever
     // is selected. F2 is the one that opens a single name.
@@ -230,6 +248,10 @@ export default function HomePage() {
         onPermissionsOpenChange={setPermissionsOpen}
         renameMode={renameMode}
         onRenameMode={setRenameMode}
+        createMode={createMode}
+        onCreateMode={setCreateMode}
+        duplicateRequested={duplicateRequested}
+        onDuplicateRequestedChange={setDuplicateRequested}
         deleteOpen={deleteOpen}
         onDeleteOpenChange={setDeleteOpen}
         downloadRequested={downloadRequested}

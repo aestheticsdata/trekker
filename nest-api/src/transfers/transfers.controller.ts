@@ -130,17 +130,24 @@ export class TransfersController {
         dstPath?: string;
         strategy?: string;
         dstHostId?: string;
+        duplicate?: boolean;
       };
       const paths = body.srcPaths ?? [];
+      const verb = body.duplicate === true ? "duplicate" : (body.operation ?? "copy");
       return {
-        summary: `${body.operation ?? "copy"} ${count(paths.length, "entry", "entries")} → ${body.dstPath ?? "?"}`,
+        summary: `${verb} ${count(paths.length, "entry", "entries")} → ${body.dstPath ?? "?"}`,
         tag: count(paths.length, "entry", "entries"),
         // The destination host, not the source: this row records where data
         // arrived, and "what was written to this machine" is the question the
         // log is read with.
         hostId: body.dstHostId,
         paths,
-        payload: { operation: body.operation, strategy: body.strategy, destination: body.dstPath },
+        payload: {
+          operation: body.operation,
+          strategy: body.strategy,
+          destination: body.dstPath,
+          duplicate: body.duplicate === true,
+        },
       };
     },
   })

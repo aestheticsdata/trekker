@@ -116,6 +116,21 @@ export const LIMITS = {
   rename: rule("limit:mv", "renames", 60, 60, "TREKKER_LIMIT_RENAMES_PER_MIN"),
 
   /**
+   * New directories and new empty files (TRE-69), on one budget.
+   *
+   * Per request, and the same number as the renames above for the same reason:
+   * making a folder is an ordinary editing gesture, and somebody laying out a
+   * project does it several times in a minute without meaning anything by it.
+   *
+   * Neither route is destructive — `create` cannot truncate and `mkdir` cannot
+   * replace — so the coverage spec does not demand a limit here. It is attached
+   * anyway: these are the two routes that let a session write entries onto
+   * another machine's filesystem without sending any bytes, and "not
+   * destructive" is not the same as "worth leaving unbounded".
+   */
+  entryCreate: rule("limit:mk", "new entries", 60, 60, "TREKKER_LIMIT_CREATES_PER_MIN"),
+
+  /**
    * Deletes (TRE-25), per request. Ten a minute: harsher than the renames above
    * because this is the operation with no undo, and nobody deletes deliberately
    * ten times in a minute.

@@ -75,6 +75,15 @@ export type ExplorerAction =
   /** After an operation renamed or removed what was selected (TRE-22): the
    * names no longer describe anything, and the cursor's does not either. */
   | { type: "selectNone"; pane: PaneIndex }
+  /**
+   * Put the cursor and the selection on one entry, by name (TRE-69 §3).
+   *
+   * Carries no `names`, unlike `click`: what this points at has usually just
+   * been created and is not in the listing yet. The name is written down now
+   * and means something the moment the refetch lands, which is what makes
+   * "created, then selected" one gesture instead of two.
+   */
+  | { type: "reveal"; pane: PaneIndex; name: string }
   | { type: "cursor"; pane: PaneIndex; name: string | null };
 
 export function explorerReducer(state: ExplorerState, action: ExplorerAction): ExplorerState {
@@ -147,6 +156,9 @@ function paneReducer(pane: PaneMemory, action: ExplorerAction): PaneMemory {
       // The cursor goes with it. Its name is one of the ones that just changed,
       // and the effect that seeds a cursor puts it back on the first row.
       return pane.sel.length === 0 && pane.cur === null ? pane : { ...pane, sel: [], cur: null };
+
+    case "reveal":
+      return { ...pane, sel: [action.name], cur: action.name };
 
     case "cursor":
       return pane.cur === action.name ? pane : { ...pane, cur: action.name };

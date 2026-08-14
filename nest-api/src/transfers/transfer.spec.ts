@@ -604,6 +604,126 @@ describe("conflicts", () => {
   });
 });
 
+// ----------------------------------------------------------------- duplicate
+
+/**
+ * TRE-69 §2 — a copy of a selection into the directory it already sits in.
+ *
+ * Worth its own block because it is the one destination where every entry
+ * collides with itself, and the per-item conflict strategy is not enough to
+ * answer that. `isConflict` treats a directory arriving on a directory as a
+ * merge — correctly, for an ordinary copy — so a `keepBoth` duplicate of a
+ * folder would merge it into itself and number the files *inside* it. The
+ * directory test below is the one that catches that; the file tests would pass
+ * either way.
+ */
+describe("duplicating", () => {
+  function duplicateOf(paths: string[], directory: string): CreateInput {
+    return copyInput(paths, directory, { strategy: "keepBoth", duplicate: true });
+  }
+
+  it("copies a file beside itself, and again", async () => {
+    const dir = join(base, "here");
+    await mkdir(dir);
+    await writeFile(join(dir, "report.txt"), "figures");
+
+    const kit = harness();
+    await kit.transfer(duplicateOf([join(dir, "report.txt")], dir));
+    await kit.transfer(duplicateOf([join(dir, "report.txt")], dir));
+
+    // `numberedName`'s series, which is the upload path's and `keepBoth`'s.
+    // One situation, one convention.
+    expect((await readdir(dir)).sort()).toEqual(["report (2).txt", "report (3).txt", "report.txt"]);
+    expect(await readFile(join(dir, "report (3).txt"), "utf8")).toBe("figures");
+  });
+
+  it("copies a directory beside itself, tree and all, without merging into it", async () => {
+    const dir = join(base, "here");
+    await mkdir(dir);
+    const source = await tree("here/logs");
+
+    const kit = harness();
+    await kit.transfer(duplicateOf([source], dir));
+
+    expect(await readFile(join(dir, "logs (2)", "top.txt"), "utf8")).toBe("top");
+    expect(await readFile(join(dir, "logs (2)", "nested", "deeper", "two.txt"), "utf8")).toBe("two");
+    expect(await exists(join(dir, "logs (2)", "empty"))).toBe(true);
+    // The failure this test exists for: the original is untouched, rather than
+    // holding a numbered copy of each of its own files.
+    expect((await readdir(source)).sort()).toEqual(["empty", "nested", "top.txt"]);
+  });
+
+  it("gives two entries duplicated at once two different names", async () => {
+    const dir = join(base, "here");
+    await mkdir(dir);
+    await writeFile(join(dir, "a.txt"), "a");
+    await writeFile(join(dir, "b.txt"), "b");
+
+    const kit = harness();
+    await kit.transfer(duplicateOf([join(dir, "a.txt"), join(dir, "b.txt")], dir));
+
+    expect((await readdir(dir)).sort()).toEqual(["a (2).txt", "a.txt", "b (2).txt", "b.txt"]);
+  });
+
+  it("steps over a numbered name that is already taken", async () => {
+    const dir = join(base, "here");
+    await mkdir(dir);
+    await writeFile(join(dir, "report.txt"), "figures");
+    await writeFile(join(dir, "report (2).txt"), "an older copy");
+
+    const kit = harness();
+    await kit.transfer(duplicateOf([join(dir, "report.txt")], dir));
+
+    expect(await readFile(join(dir, "report (2).txt"), "utf8")).toBe("an older copy");
+    expect(await readFile(join(dir, "report (3).txt"), "utf8")).toBe("figures");
+  });
+
+  it("says in the plan what each entry will be called", async () => {
+    const dir = join(base, "here");
+    await mkdir(dir);
+    await writeFile(join(dir, "report.txt"), "figures");
+
+    const kit = harness();
+    const plan = await kit.service.plan(USER_ID, { ...duplicateOf([join(dir, "report.txt")], dir) });
+
+    expect(plan.landAs).toEqual({ "report.txt": "report (2).txt" });
+    // And nothing conflicts, because the name it is going to is free. A plan
+    // that reported a conflict here would be describing the wrong destination.
+    expect(plan.conflicts).toBe(0);
+  });
+
+  it("leaves an ordinary transfer with no landing map at all", async () => {
+    const from = join(base, "from");
+    const to = join(base, "to");
+    await mkdir(from);
+    await mkdir(to);
+    await writeFile(join(from, "a.txt"), "x");
+
+    const kit = harness();
+    const plan = await kit.service.plan(USER_ID, copyInput([join(from, "a.txt")], to));
+
+    expect(plan.landAs).toEqual({});
+  });
+
+  it("refuses to duplicate as a move", async () => {
+    const dir = join(base, "here");
+    await mkdir(dir);
+    await writeFile(join(dir, "a.txt"), "a");
+
+    // A move that renamed what it moved would be a rename, and this application
+    // has one of those. Refused rather than quietly treated as a copy.
+    const kit = harness();
+    const error = await refusal(
+      kit.service.create(
+        USER_ID,
+        copyInput([join(dir, "a.txt")], dir, { operation: "move", duplicate: true, strategy: "keepBoth" }),
+      ),
+    );
+    expect(statusOf(error)).toBe(400);
+    expect(await readdir(dir)).toEqual(["a.txt"]);
+  });
+});
+
 // ---------------------------------------------------------------------- move
 
 describe("moving", () => {
