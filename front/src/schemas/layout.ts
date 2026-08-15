@@ -33,6 +33,9 @@ export const StoredLayoutSchema = z.strictObject({
   view: z.enum(VIEW_MODES),
   heat: z.boolean(),
   insp: z.boolean(),
+  du: z.boolean(),
+  /** Null is "follow the active pane", which is where the strip starts. */
+  duRoot: z.string().min(1).max(700).startsWith("/").nullable(),
   glob: z.string().max(200),
 });
 
@@ -50,6 +53,6 @@ export type StoredLayout = z.infer<typeof StoredLayoutSchema>;
  */
 export function serialiseLayout(layout: StoredLayout): string {
   const pane = ({ host, path, sort, dir }: StoredLayout["a"]) => ({ host, path, sort, dir });
-  const { active, split, view, heat, insp, glob } = layout;
-  return JSON.stringify({ a: pane(layout.a), b: pane(layout.b), active, split, view, heat, insp, glob });
+  const { active, split, view, heat, insp, du, duRoot, glob } = layout;
+  return JSON.stringify({ a: pane(layout.a), b: pane(layout.b), active, split, view, heat, insp, du, duRoot, glob });
 }

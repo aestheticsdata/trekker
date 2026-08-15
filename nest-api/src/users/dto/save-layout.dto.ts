@@ -72,6 +72,24 @@ export class SaveLayoutDto {
   @IsBoolean()
   insp!: boolean;
 
+  /** The disk-usage strip (TRE-33), open or collapsed. */
+  @IsBoolean()
+  du!: boolean;
+
+  /**
+   * The root that strip is pinned to, or null to follow the active pane.
+   *
+   * Nullable rather than optional: null is the value the explorer produces for
+   * "nothing pinned", and accepting its absence as well would let two different
+   * payloads mean the same thing — which is how a layout starts failing to
+   * compare equal with itself and gets written back on every render.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_PATH)
+  @Matches(/^\//, { message: "duRoot must be absolute" })
+  duRoot?: string | null;
+
   @IsString()
   @MaxLength(MAX_GLOB)
   glob!: string;

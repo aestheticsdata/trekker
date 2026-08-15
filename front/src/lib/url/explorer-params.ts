@@ -113,6 +113,24 @@ export const explorerParams = {
   // way into the permissions modal — reachable solely by a shortcut nobody had
   // been told about.
   insp: parseAsFlag.withDefault(true),
+  // The disk-usage strip (TRE-33 §2), on by default for the same reason `insp`
+  // is: the mockup draws it open, and a panel nobody knows exists is a panel
+  // nobody scans a disk from. It costs the panes 92px, which is why it has a
+  // switch at all — `hide ▾` in the strip, `show disk usage ▴` in the status bar.
+  du: parseAsFlag.withDefault(true),
+  /**
+   * Which root the strip is showing, or null to follow the active pane.
+   *
+   * Null is meaningful and is the starting state: with nothing pinned the strip
+   * asks about wherever the pane is, which is what makes it useful before
+   * anyone has scanned anything. Starting a scan pins it — otherwise clicking a
+   * band would navigate the pane, move the strip to the directory just opened,
+   * and blank the very treemap that was clicked.
+   *
+   * In the URL rather than in React state because it is part of what a link
+   * shows: "here is the disk usage of /srv" is a view worth sending someone.
+   */
+  duRoot: parseAsAbsolutePath,
   // Typed a character at a time. Without this each keystroke is a URL write,
   // and on the App Router each write is three history calls (nuqs sets
   // rateLimitFactor 3 for exactly that reason). Debounced, the URL catches up

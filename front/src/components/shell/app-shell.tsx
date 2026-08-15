@@ -37,6 +37,8 @@ export function AppShell({
   onInspectorChange,
   actions,
   sidebar,
+  strip,
+  onShowStrip,
   children,
 }: {
   host?: HostChip | null;
@@ -60,6 +62,17 @@ export function AppShell({
   actions?: readonly ToolbarAction[];
   /** The 176px left rail (TRE-18). Rendered beside the panes, inside the bars. */
   sidebar?: ReactNode;
+  /**
+   * The docked disk-usage strip (TRE-33 §2), or null when it is collapsed.
+   *
+   * Below the sidebar-and-panes row rather than inside it, as the mockup docks
+   * it: it describes a whole host, not one pane, and it runs the full width
+   * under both. Null rather than a `hidden` class, because it holds an SSE
+   * connection and a collapsed strip should not be listening to anything.
+   */
+  strip?: ReactNode;
+  /** Given only while the strip is collapsed; puts the way back in the status bar. */
+  onShowStrip?: (() => void) | null;
   children: ReactNode;
 }) {
   return (
@@ -105,7 +118,12 @@ export function AppShell({
               <main className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
             </div>
 
-            <StatusBar selection={selection} />
+            {strip}
+
+            <StatusBar
+              selection={selection}
+              onShowStrip={onShowStrip}
+            />
           </div>
         </TransferProvider>
       </UploadProvider>

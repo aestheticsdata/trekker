@@ -20,7 +20,20 @@ export interface SelectionSummary {
   modified: string;
 }
 
-export function StatusBar({ selection, hint }: { selection: SelectionSummary | null; hint?: string }) {
+export function StatusBar({
+  selection,
+  hint,
+  onShowStrip,
+}: {
+  selection: SelectionSummary | null;
+  hint?: string;
+  /**
+   * Present only while the disk-usage strip is collapsed (TRE-33 §2). The bar
+   * is where the mockup puts the way back: a strip that hides itself and leaves
+   * nothing behind is a feature somebody turns off once and never finds again.
+   */
+  onShowStrip?: (() => void) | null;
+}) {
   return (
     <footer className="bg-chrome border-line flex h-statusbar shrink-0 items-center gap-3 border-t px-2 font-mono text-2xs">
       {selection ? (
@@ -47,6 +60,16 @@ export function StatusBar({ selection, hint }: { selection: SelectionSummary | n
         </>
       ) : (
         <span className="text-ink-faint min-w-0 flex-1 truncate">{hint ?? "No selection"}</span>
+      )}
+
+      {onShowStrip && (
+        <button
+          type="button"
+          onClick={onShowStrip}
+          className="text-ink-dim hover:text-ink flex-none whitespace-nowrap"
+        >
+          show disk usage ▴
+        </button>
       )}
 
       <UiScale />

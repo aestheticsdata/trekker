@@ -32,6 +32,14 @@ export interface DiskMount {
   availableBytes: number;
   /** 0-100, computed from used and total. Never `df`'s own `Capacity`. */
   percent: number;
+  /**
+   * Full enough to draw amber (TRE-33 §1). Computed here rather than compared
+   * against a number in the panel, for the reason `ScanView.stale` is: the
+   * threshold is a policy, it is env-tunable, and two clients reading the same
+   * `df` must not disagree about which mounts are in trouble. The pane badge and
+   * the sidebar row both take this flag, so they agree by construction.
+   */
+  warn: boolean;
   /** Null where the filesystem keeps no inode count — btrfs, and BSD's dash. */
   inodes: DiskInodes | null;
   /** Whether this is one of the mounts the default view leaves out. */
@@ -98,7 +106,29 @@ const PLAIN_ROW = /^(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\/.*)$/;
  */
 const PSEUDO_TYPES = new Set(["tmpfs", "devtmpfs", "overlay", "squashfs", "ramfs", "efivarfs"]);
 
+/**
+ * Where a filesystem starts being worth a colour.
+ *
+ * Seventy, and it is a judgement rather than a measurement: it is the point at
+ * which a disk is close enough that somebody should know before the thing that
+ * fills it runs. Higher and the warning arrives after the outage; lower and
+ * every healthy `/` on a well-used machine is amber, which is the same as no
+ * warning at all.
+ *
+ * Env-tunable because the right number depends on how fast a particular volume
+ * fills, and because a fleet operator should not have to fork the app to move a
+ * threshold. Clamped to 1-100: a zero here would paint every mount amber, and
+ * that is the failure mode of a mistyped variable rather than a policy anyone
+ * chose.
+ */
+export const DISK_WARN_PERCENT = warnPercentFromEnv();
+
 const KIB = 1024;
+
+function warnPercentFromEnv(): number {
+  const override = Number.parseInt(process.env.TREKKER_DISK_WARN_PERCENT ?? "", 10);
+  return Number.isNaN(override) || override < 1 || override > 100 ? 70 : override;
+}
 
 @Injectable()
 export class HostDisksService {
@@ -281,6 +311,7 @@ function blockRow(row: {
   if (total <= 0) return null;
 
   const mountPoint = row.mountPoint.trimEnd();
+  const percent = percentOf(used, total);
   return {
     mountPoint,
     device: row.device,
@@ -288,7 +319,10 @@ function blockRow(row: {
     totalBytes: total * KIB,
     usedBytes: used * KIB,
     availableBytes: available * KIB,
-    percent: percentOf(used, total),
+    percent,
+    // At the threshold, not past it: a volume that has just reached 70% has
+    // reached it, and an off-by-one here is a warning that arrives a percent late.
+    warn: percent >= DISK_WARN_PERCENT,
     pseudo: isPseudo(row.type, mountPoint),
   };
 }

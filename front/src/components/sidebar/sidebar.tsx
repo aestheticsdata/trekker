@@ -2,6 +2,7 @@
 
 import { useAuth } from "@auth/context/AuthContext";
 import { ActivityStrip } from "@components/sidebar/activity-strip";
+import { Volumes } from "@components/sidebar/volumes";
 import { useToast } from "@components/ui/toast";
 import { TransferQueue } from "@components/ui/transfers";
 import { deleteBookmark, fetchBookmarks } from "@lib/api/bookmarks";
@@ -16,10 +17,11 @@ import type { ReactNode } from "react";
 /**
  * The 176px left sidebar (TRE-18 §2, §3), built from the App mockup's markup.
  *
- * Four sections ship here. VOLUMES is deliberately absent rather than empty:
+ * Five sections ship here. VOLUMES was deliberately absent rather than empty —
  * `GET /hosts/:id/summary` carries uptime, load, memory and ping and no disk
- * data at all, and the ticket's own rule is to hide the panel rather than fake
- * it — the `df` probe belongs to TRE-33. VIEWS is TRE-34.
+ * data at all, and the rule is to hide a panel rather than fake it — and
+ * arrived with TRE-33 once `GET /hosts/:id/disks` existed to fill it. VIEWS is
+ * TRE-34.
  *
  * ACTIVITY was absent for a harder reason — nothing in the API wrote an
  * ActivityLog row, and the vocabulary of `kind` was TRE-30's to define — and
@@ -65,6 +67,18 @@ export function Sidebar({
             />
           ))}
           {hosts.length === 0 && <Empty>No hosts yet.</Empty>}
+        </Section>
+
+        <Rule />
+
+        {/* Below SERVERS and above FAVOURITES, as the mockup orders them — and
+            the order is the meaning again: this section describes the machine
+            the section above it selected. */}
+        <Section title="VOLUMES">
+          <Volumes
+            host={hosts.find((host) => host.id === paneHostIds[activePane]) ?? null}
+            onNavigate={onNavigate}
+          />
         </Section>
 
         <Rule />

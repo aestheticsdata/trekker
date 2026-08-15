@@ -2,6 +2,7 @@
 
 import { Explorer } from "@components/explorer/explorer";
 import { AppShell } from "@components/shell/app-shell";
+import { DiskUsage } from "@components/shell/disk-usage";
 import { M2_ACTIONS } from "@components/shell/toolbar";
 import { Sidebar } from "@components/sidebar/sidebar";
 import { formatInstant, formatSize } from "@helpers/listing";
@@ -235,6 +236,21 @@ export default function HomePage() {
           onNavigate={(host, path) => bind(active, host, path)}
         />
       }
+      strip={
+        shared.du && (
+          <DiskUsage
+            host={activeHost}
+            // Pinned once something has been scanned, and following the active
+            // pane until then — see the strip's own note on why the pin exists.
+            root={shared.duRoot ?? panes[active].path}
+            panePath={panes[active].path}
+            onPin={(duRoot) => void setShared({ duRoot })}
+            onNavigate={(path) => setPane(active, { path })}
+            onHide={() => changeLayout({ du: false })}
+          />
+        )
+      }
+      onShowStrip={shared.du ? null : () => changeLayout({ du: true })}
     >
       <Explorer
         hosts={hosts ?? []}

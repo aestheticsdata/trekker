@@ -9,6 +9,7 @@
     "lint:fix": "biome check --write ./src",
     "typecheck": "tsc --noEmit",
     "test": "echo 'no front tests yet — test tooling lands with TRE-39'",
+    "verify:contrast": "node scripts/verify-contrast.ts",
     "verify:permissions": "node scripts/verify-permissions.ts",
     "verify:virtual": "node scripts/verify-virtual.ts"
   },

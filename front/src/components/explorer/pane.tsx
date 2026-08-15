@@ -2,12 +2,14 @@
 
 import { pathOf } from "@components/explorer/pane-state";
 import { useRowWindow } from "@components/explorer/row-window";
-import { ageDays, ageIndex, breadcrumbs, formatAge, formatSize, formatTotal, typeTag } from "@helpers/listing";
+import { ageIndex, HEAT, HEAT_OFF_BAR, HEAT_OFF_INK } from "@helpers/heat";
+import { ageDays, breadcrumbs, formatAge, formatSize, formatTotal, typeTag } from "@helpers/listing";
 import { ApiError } from "@lib/api/client";
 import { useState } from "react";
 
 import type { PaneView } from "@components/explorer/pane-state";
 import type { Crumb, SortKey } from "@helpers/listing";
+import type { DiskMount } from "@lib/api/disks";
 import type { FileRow, ListMeta } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
 
@@ -37,16 +39,6 @@ const GRID =
   // 14  104   13  26  62  30  88  38
   "grid-cols-[0.875rem_minmax(6.5rem,1fr)_0.8125rem_1.625rem_3.875rem_1.875rem_5.5rem_2.375rem] gap-1.25 min-w-101 px-2.25";
 
-/**
- * The age ramp as classes, one per bucket.
- *
- * Written out rather than composed as `bg-age-${bucket}`: Tailwind reads the
- * source for literal class names, and a token no utility mentions is pruned
- * from the stylesheet — a computed `var(--color-age-3)` then resolves to
- * nothing and the bar silently disappears.
- */
-const HEAT_CLASS = ["bg-age-0", "bg-age-1", "bg-age-2", "bg-age-3", "bg-age-4", "bg-age-5", "bg-age-6"] as const;
-
 export interface PaneCallbacks {
   onFocus: () => void;
   onCd: (path: string) => void;
@@ -74,6 +66,7 @@ export function Pane({
   error,
   glob,
   hiddenByGlob,
+  volume,
   heat,
   now,
   callbacks,
@@ -90,6 +83,13 @@ export function Pane({
   glob: string;
   /** How many rows the glob is hiding, so the empty state can say so. */
   hiddenByGlob: number;
+  /**
+   * The filesystem under this path, and only when it is over the warning
+   * threshold (TRE-33 §1). A pane sitting in `/var/log` on a volume at 81% says
+   * so in its header — the sidebar's row is not much use to somebody reading
+   * this pane.
+   */
+  volume: DiskMount | null;
   heat: boolean;
   /** Passed in so every row in a render ages against the same instant. */
   now: number;
@@ -175,6 +175,7 @@ export function Pane({
         host={host}
         crumbs={breadcrumbs(path)}
         meta={meta}
+        volume={volume}
         shownBytes={shownBytes}
         callbacks={callbacks}
       />
@@ -363,6 +364,7 @@ function PathRow({
   host,
   crumbs,
   meta,
+  volume,
   shownBytes,
   callbacks,
 }: {
@@ -371,9 +373,12 @@ function PathRow({
   host: HostView | null;
   crumbs: readonly Crumb[];
   meta: ListMeta | null;
+  volume: DiskMount | null;
   shownBytes: number;
   callbacks: PaneCallbacks;
 }) {
+  const badge = badgeFor(meta, volume, shownBytes);
+
   return (
     <div
       className={`border-pane-line text-on-pane-data flex h-pathrow flex-none items-center gap-1.5 overflow-hidden border-b px-1.75 font-mono text-xs @container ${
@@ -443,17 +448,56 @@ function PathRow({
         </span>
       </nav>
 
-      {meta && (
+      {badge && (
         <span
+          title={badge.title}
           className={`hidden flex-none rounded-xs px-1.5 py-0.5 text-2xs whitespace-nowrap @[25rem]:inline ${
-            meta.truncated ? "bg-on-pane-muted text-ink" : "bg-pane-chip text-on-pane"
+            badge.alarming ? "bg-on-pane-muted text-ink" : "bg-pane-chip text-on-pane"
           }`}
         >
-          {meta.truncated ? `⚠ first ${meta.count} of ${meta.totalEntries}` : `${formatTotal(shownBytes)} total`}
+          {badge.label}
         </span>
       )}
     </div>
   );
+}
+
+/**
+ * The one chip at the end of the path row, and which of three things it says.
+ *
+ * Three facts compete for it and only one can win, so the order is by how much
+ * it changes what you are about to do with what is on screen. A truncated
+ * listing comes first because it is about *these rows* — acting on a directory
+ * believing you can see all of it is the expensive mistake. A full volume comes
+ * next: it is true of the machine rather than of the listing, but it is the
+ * reason a write is about to fail. The total is what the row says the rest of
+ * the time, which is most of it.
+ *
+ * The two warnings share the dark chip the mockup gives them; the total keeps
+ * the pale one. Same box either way, so the row's geometry never moves.
+ */
+function badgeFor(
+  meta: ListMeta | null,
+  volume: DiskMount | null,
+  shownBytes: number,
+): { label: string; title?: string; alarming: boolean } | null {
+  if (meta?.truncated) {
+    return {
+      label: `⚠ first ${meta.count} of ${meta.totalEntries}`,
+      title: "This directory has more entries than one listing carries.",
+      alarming: true,
+    };
+  }
+
+  if (volume) {
+    return {
+      label: `⚠ volume at ${volume.percent}%`,
+      title: `${volume.mountPoint} is ${volume.percent}% full — ${formatTotal(volume.availableBytes)} free.`,
+      alarming: true,
+    };
+  }
+
+  return meta ? { label: `${formatTotal(shownBytes)} total`, alarming: false } : null;
 }
 
 function NavButton({
@@ -552,8 +596,13 @@ function Row({
 }) {
   const tag = typeTag(row);
   const days = ageDays(row.mtime, now);
-  const bucket = ageIndex(days);
+  const paint = HEAT[ageIndex(days)];
+  // Relative, unlike the heat map, and deliberately: the question this column
+  // answers is "which of *these* is big", so the scale is the largest row in
+  // the listing rather than anything absolute. Two percent minimum, or a small
+  // file in a directory holding one huge one draws nothing at all.
   const share = largest > 0 ? Math.max(2, Math.round((row.size / largest) * 100)) : 2;
+  const chip = heat ? paint.chip : null;
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: rows are driven by the pane's roving cursor and ⏎, not by per-row tab stops — a thousand-row listing must not add a thousand of them
@@ -602,7 +651,7 @@ function Row({
 
       <span className="bg-pane-bar block h-1.5">
         <span
-          className={`block h-1.5 ${heat ? HEAT_CLASS[bucket] : "bg-share-idle"}`}
+          className={`block h-1.5 ${heat ? paint.bar : HEAT_OFF_BAR}`}
           style={{ width: `${share}%` }}
         />
       </span>
@@ -611,14 +660,10 @@ function Row({
       <span className="text-on-pane-dim">{row.mode}</span>
       <span className={`truncate ${row.ownerResolved ? "text-on-pane-dim" : "text-on-pane-faint"}`}>{row.owner}</span>
 
-      {/* Only the fresh buckets get a filled chip: past a fortnight the exact
-          age stops being the thing you are scanning for. */}
+      {/* The padding is unconditional, so turning the heat map off removes a
+          fill and never a pixel — the column keeps its width and no row moves. */}
       <span
-        className={`px-1 py-0.5 text-right text-2xs ${
-          heat && bucket <= 3
-            ? `${HEAT_CLASS[bucket]} ${bucket <= 2 ? "text-on-pane-bright" : "text-on-accent"}`
-            : "text-on-pane-dim"
-        }`}
+        className={`px-1 py-0.5 text-right text-2xs ${chip ?? ""} ${heat ? paint.ink : HEAT_OFF_INK}`}
         title={row.mtime}
       >
         {formatAge(days)}

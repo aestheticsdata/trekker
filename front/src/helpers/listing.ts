@@ -86,16 +86,8 @@ export function formatAge(days: number): string {
   return `${Math.round(days / 365)}y`;
 }
 
-/** Seven buckets, fresh to ancient, indexing the `age-*` ramp. */
-export function ageIndex(days: number): number {
-  if (days < 0.02) return 0;
-  if (days < 0.5) return 1;
-  if (days < 3) return 2;
-  if (days < 14) return 3;
-  if (days < 60) return 4;
-  if (days < 200) return 5;
-  return 6;
-}
+/* The seven age buckets moved to `@helpers/heat` with TRE-33, where the ramp
+ * they index and the contrast check that verifies it live beside them. */
 
 /* ---- the type tag ------------------------------------------------------ */
 

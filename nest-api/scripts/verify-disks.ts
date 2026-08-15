@@ -92,8 +92,11 @@ function show(disks: DiskMount[]): void {
     const size = (disk.totalBytes / 1024 ** 3).toFixed(1);
     const used = (disk.usedBytes / 1024 ** 3).toFixed(1);
     const inodes = disk.inodes ? `${disk.inodes.percent}% inodes` : "no inode count";
+    // The flag rather than the number, because the flag is what the panel draws
+    // and what a reader of this output is checking against their own `df`.
+    const warn = disk.warn ? " ⚠" : "  ";
     console.log(
-      `  ${disk.mountPoint.padEnd(24)} ${(disk.type ?? "?").padEnd(10)} ${used}/${size} GiB  ${disk.percent}%  ${inodes}  ${disk.device}`,
+      `  ${disk.mountPoint.padEnd(24)} ${(disk.type ?? "?").padEnd(10)} ${used}/${size} GiB  ${disk.percent}%${warn} ${inodes}  ${disk.device}`,
     );
   }
 }

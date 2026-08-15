@@ -1,5 +1,5 @@
 import type { HostDriver } from "@hosts/drivers/host-driver";
-import { HostDisksService } from "@hosts/host-disks.service";
+import { DISK_WARN_PERCENT, HostDisksService } from "@hosts/host-disks.service";
 
 /**
  * How full every filesystem is (TRE-31).
@@ -38,6 +38,15 @@ const INODES = `Filesystem      Inodes   IUsed    IFree IUse% Mounted on
 /dev/sda1      2621440  345678  2275762   14% /
 tmpfs           500000       1   499999    1% /dev/shm
 /dev/sdb1     52428800  120000 52308800    1% /srv/data`;
+
+/**
+ * Two mounts either side of the warning threshold, written against it rather
+ * than against a literal: the number is env-tunable, and a fixture that pinned
+ * 70 would start failing the moment somebody set the variable.
+ */
+const FULLNESS = `Filesystem     Type    1024-blocks     Used Available Capacity Mounted on
+/dev/sda1      ext4          1000000   ${String((DISK_WARN_PERCENT - 1) * 10_000).padStart(6)}    310000      69% /
+/dev/sdb1      ext4          1000000   ${String(DISK_WARN_PERCENT * 10_000).padStart(6)}    300000      70% /srv`;
 
 /** 41147472 KiB, and 12345678 of them used: 30.0%, not the 32% df prints. */
 const ROOT_TOTAL_BYTES = 41_147_472 * 1024;
@@ -116,6 +125,17 @@ describe("HostDisksService", () => {
     const [root] = await disks;
 
     expect(root.percent).toBe(30);
+  });
+
+  it("flags a mount at the threshold, and the one a percent below it", async () => {
+    // The boundary is the whole test. `warn` is what paints a row amber and
+    // what puts a warning in a pane's header, and the two sides of it are one
+    // percentage point apart — which is precisely where an off-by-one hides.
+    const { disks } = disksOf({ typed: FULLNESS });
+    const [root, srv] = await disks;
+
+    expect(root).toMatchObject({ mountPoint: "/", percent: DISK_WARN_PERCENT - 1, warn: false });
+    expect(srv).toMatchObject({ mountPoint: "/srv", percent: DISK_WARN_PERCENT, warn: true });
   });
 
   it("sorts by mount point, so the same host lists the same way twice running", async () => {

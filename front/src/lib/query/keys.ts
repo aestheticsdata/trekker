@@ -12,6 +12,15 @@ export const QUERY_KEYS = {
    * second of sampling.
    */
   HOST_METRICS: "hostMetrics",
+  /**
+   * How full a host's filesystems are (TRE-31). Its own key rather than part of
+   * the summary's, because two very different things ask for it — the sidebar's
+   * volumes panel, and each pane deciding whether its header carries a warning —
+   * and one cached answer serves both.
+   */
+  HOST_DISKS: "hostDisks",
+  /** The disk-usage panel's whole payload (TRE-33): last scan, running scan, one level. */
+  SCAN: "scan",
   BOOKMARKS: "bookmarks",
   DIRECTORY: "directory",
   ENTRY: "entry",

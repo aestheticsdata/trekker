@@ -20,8 +20,10 @@ import { HostManager } from "@components/hosts/host-manager";
 import { CollapsiblePane } from "@components/ui/collapsible-pane";
 import { useToast } from "@components/ui/toast";
 import { useUploads } from "@components/ui/uploads";
+import { volumeFor } from "@helpers/disks";
 import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
 import { ApiError } from "@lib/api/client";
+import { fetchDisks } from "@lib/api/disks";
 import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
 import { startTransfer } from "@lib/api/transfers";
@@ -39,6 +41,7 @@ import type { RenameMode, RenameTarget } from "@components/explorer/rename-modal
 import type { TransferTarget } from "@components/explorer/transfer-modal";
 import type { SplitMode } from "@components/shell/toolbar";
 import type { SortKey } from "@helpers/listing";
+import type { DiskMount } from "@lib/api/disks";
 import type { FileRow } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
 
@@ -232,6 +235,7 @@ export function Explorer({
   }, [splitMode, active, onActiveChange]);
 
   const listings = [useListing(views[0]), useListing(views[1])] as const;
+  const volumes = [useVolumeWarning(views[0]), useVolumeWarning(views[1])] as const;
 
   // Every row in a paint ages against one instant, so two rows a millisecond
   // apart never render as "59min" and "1h".
@@ -871,6 +875,7 @@ export function Explorer({
                   error={view.listing.error}
                   glob={index === active ? glob.trim() : ""}
                   hiddenByGlob={index === active ? view.hiddenByGlob : 0}
+                  volume={volumes[index]}
                   heat={heat}
                   now={now}
                   callbacks={callbacksFor(index)}
@@ -1025,6 +1030,33 @@ function useListing(pane: PaneView) {
     retry: false,
     throwOnError: false,
   });
+}
+
+/**
+ * The filesystem this pane is standing on, and only when it is worth saying
+ * (TRE-33 §1).
+ *
+ * Null unless the volume is over the threshold, so the pane header carries a
+ * warning rather than a reading: a badge that always says how full the disk is
+ * would be four words of furniture, and the one time it matters is the one time
+ * nobody would notice it had changed.
+ *
+ * Keyed on the host alone, so the two panes and the sidebar's volumes panel are
+ * one `df` between them however many of them are pointed at the same machine.
+ */
+function useVolumeWarning(pane: PaneView): DiskMount | null {
+  const { data: disks } = useQuery({
+    queryKey: [QUERY_KEYS.HOST_DISKS, pane.hostId],
+    queryFn: () => fetchDisks(pane.hostId as string),
+    enabled: pane.hostId !== null,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: false,
+    throwOnError: false,
+  });
+
+  const volume = disks ? volumeFor(pane.path, disks) : null;
+  return volume?.warn ? volume : null;
 }
 
 function matcher(glob: string): (row: FileRow) => boolean {
