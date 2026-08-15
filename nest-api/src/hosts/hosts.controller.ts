@@ -9,8 +9,10 @@ import type { HostProbeResult } from "@hosts/drivers/ssh-connection.pool";
 // a 201 with nothing saved — and neither tsc nor the linter says a word.
 import { AcceptHostKeyDto } from "@hosts/dto/accept-host-key.dto";
 import { CreateHostDto } from "@hosts/dto/create-host.dto";
+import { DisksQueryDto } from "@hosts/dto/disks-query.dto";
 import { TestHostDto } from "@hosts/dto/test-host.dto";
 import { UpdateHostDto } from "@hosts/dto/update-host.dto";
+import type { DiskMount } from "@hosts/host-disks.service";
 import { HostKeyService } from "@hosts/host-key.service";
 import type { HostMetrics } from "@hosts/host-metrics.service";
 import type { HostSummary } from "@hosts/host-summary.service";
@@ -25,6 +27,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -105,6 +108,17 @@ export class HostsController {
   @Get(":id/metrics")
   metrics(@Req() req: Request, @Param("id") id: string): Promise<HostMetrics> {
     return this.hosts.hostMetrics(userIdOf(req), id);
+  }
+
+  /**
+   * How full every filesystem on the host is (TRE-31), for the sidebar's disk
+   * panel. A read, so no CSRF and nothing audited — and no path parameter, by
+   * design: `df` takes what it is given, and a path here would be a path to
+   * validate.
+   */
+  @Get(":id/disks")
+  disks(@Req() req: Request, @Param("id") id: string, @Query() query: DisksQueryDto): Promise<DiskMount[]> {
+    return this.hosts.hostDisks(userIdOf(req), id, { includePseudo: isTrue(query.pseudo) });
   }
 
   @Post()
@@ -208,4 +222,12 @@ export class HostsController {
 
 function userIdOf(req: Request): string {
   return (req as AuthenticatedRequest).user.id;
+}
+
+/**
+ * A query flag, read where it is used. The pipe validates the shape and does not
+ * transform, so this is where the four characters become a boolean.
+ */
+function isTrue(value: string | undefined): boolean {
+  return value === "true" || value === "1";
 }

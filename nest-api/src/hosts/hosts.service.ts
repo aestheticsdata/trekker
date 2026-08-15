@@ -5,6 +5,7 @@ import type { CreateHostDto } from "@hosts/dto/create-host.dto";
 import type { HostRootInput, RootAccessInput } from "@hosts/dto/host-root.dto";
 import type { TestHostDto } from "@hosts/dto/test-host.dto";
 import type { UpdateHostDto } from "@hosts/dto/update-host.dto";
+import { DiskMount, DiskOptions, HostDisksService } from "@hosts/host-disks.service";
 import { HostMetrics, HostMetricsService } from "@hosts/host-metrics.service";
 import { HostSummary, HostSummaryService } from "@hosts/host-summary.service";
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from "@nestjs/common";
@@ -46,6 +47,7 @@ export class HostsService {
     private readonly factory: HostDriverFactory,
     private readonly summaries: HostSummaryService,
     private readonly metrics: HostMetricsService,
+    private readonly disks: HostDisksService,
   ) {}
 
   async list(userId: string): Promise<HostView[]> {
@@ -300,6 +302,7 @@ export class HostsService {
       this.factory.invalidate(id, "host updated");
       this.summaries.forget(id);
       this.metrics.forget(id);
+      this.disks.forget(id);
     }
 
     return toView(updated);
@@ -318,6 +321,7 @@ export class HostsService {
     this.factory.invalidate(id, "host deleted");
     this.summaries.forget(id);
     this.metrics.forget(id);
+    this.disks.forget(id);
     this.logger.log(`Host deleted: ${id} for user ${userId}`);
   }
 
@@ -368,6 +372,13 @@ export class HostsService {
     await this.get(userId, id);
     const driver = await this.factory.forHost(id, userId);
     return this.metrics.forHost(driver);
+  }
+
+  /** How full every filesystem on the host is, for the disk panel (TRE-31). */
+  async hostDisks(userId: string, id: string, options?: DiskOptions): Promise<DiskMount[]> {
+    await this.get(userId, id);
+    const driver = await this.factory.forHost(id, userId);
+    return this.disks.forHost(driver, options);
   }
 
   // ---- internals ----------------------------------------------------------

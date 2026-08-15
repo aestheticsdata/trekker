@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
 import { DEFAULT_POOL_SETTINGS, SshConnectionPool } from "@hosts/drivers/ssh-connection.pool";
+import { HostDisksService } from "@hosts/host-disks.service";
 import { HostKeyService } from "@hosts/host-key.service";
 import { HostMetricsService } from "@hosts/host-metrics.service";
 import { HostSummaryService } from "@hosts/host-summary.service";
@@ -39,6 +40,7 @@ import { Global, Module } from "@nestjs/common";
       provide: HostMetricsService,
       useFactory: () => new HostMetricsService(),
     },
+    HostDisksService,
     HostKeyService,
     HostsService,
   ],
@@ -49,6 +51,7 @@ import { Global, Module } from "@nestjs/common";
     HostsService,
     HostSummaryService,
     HostMetricsService,
+    HostDisksService,
     HostKeyService,
   ],
 })
