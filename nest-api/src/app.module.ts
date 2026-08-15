@@ -10,6 +10,7 @@ import { HealthModule } from "@health/health.module";
 import { loadEnv } from "@config/load-env";
 import { RedisModule } from "@redis/redis.module";
 import { HostsModule } from "@hosts/hosts.module";
+import { ScansModule } from "@scans/scans.module";
 import { SecretStoreModule } from "@secrets/secret-store.module";
 import { TransfersModule } from "@transfers/transfers.module";
 import { UsersModule } from "@users/users.module";
@@ -40,6 +41,10 @@ loadEnv();
     AuditModule,
     SecretStoreModule,
     HostsModule,
+    // After HostsModule, which also declares routes under `hosts`. Nothing
+    // depends on the order — every path here carries more segments than
+    // `hosts/:id` — but the two sharing a prefix is worth reading in one place.
+    ScansModule,
     BookmarksModule,
     FsModule,
     TransfersModule,

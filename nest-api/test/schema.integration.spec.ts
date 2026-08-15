@@ -213,3 +213,98 @@ describe("deleting a user", () => {
     expect(await prisma.activityLog.count({ where: { userId } })).toBe(0);
   });
 });
+
+describe("one scan per host", () => {
+  it("refuses a second running scan of the same host", async () => {
+    // The promise `runningSlot` exists to keep, made by the database rather
+    // than by a check in a service — which could not survive a restart, and
+    // which across two Node ticks is a race whose prize is two `du`s walking
+    // somebody's filesystem at once.
+    const userId = await makeUser();
+    const host = await prisma.hosts.create({ data: sshHost(userId, "busy") });
+
+    await prisma.diskScans.create({ data: { hostId: host.id, root: "/srv", runningSlot: host.id } });
+
+    await expect(
+      prisma.diskScans.create({ data: { hostId: host.id, root: "/var", runningSlot: host.id } }),
+    ).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("lets every finished scan leave the slot alone", async () => {
+    // A finished scan nulls the slot, and a null has to stay distinct from
+    // every other null or the second scan a host ever completes would collide.
+    const userId = await makeUser();
+    const host = await prisma.hosts.create({ data: sshHost(userId, "history") });
+
+    await prisma.diskScans.create({ data: { hostId: host.id, root: "/srv", status: "DONE" } });
+    await prisma.diskScans.create({ data: { hostId: host.id, root: "/srv", status: "DONE" } });
+
+    expect(await prisma.diskScans.count({ where: { hostId: host.id } })).toBe(2);
+  });
+
+  it("frees the slot for the next scan once one has ended", async () => {
+    const userId = await makeUser();
+    const host = await prisma.hosts.create({ data: sshHost(userId, "sequential") });
+
+    const first = await prisma.diskScans.create({
+      data: { hostId: host.id, root: "/srv", runningSlot: host.id },
+    });
+    await prisma.diskScans.update({
+      where: { id: first.id },
+      data: { status: "DONE", runningSlot: null, finishedAt: new Date() },
+    });
+
+    await expect(
+      prisma.diskScans.create({ data: { hostId: host.id, root: "/srv", runningSlot: host.id } }),
+    ).resolves.toMatchObject({ hostId: host.id });
+  });
+});
+
+describe("superseding a scan", () => {
+  it("keeps the survivor when the scan it replaced is deleted", async () => {
+    // SET NULL rather than CASCADE. The terminal transaction deletes the
+    // superseded row on success, and under CASCADE that delete would take the
+    // living scan with it — the one it was keeping the panel warm for.
+    const userId = await makeUser();
+    const host = await prisma.hosts.create({ data: sshHost(userId, "rolling") });
+
+    const previous = await prisma.diskScans.create({
+      data: { hostId: host.id, root: "/srv", status: "DONE", totalBytes: 1_000n },
+    });
+    const current = await prisma.diskScans.create({
+      data: { hostId: host.id, root: "/srv", status: "DONE", totalBytes: 2_000n, supersedesId: previous.id },
+    });
+
+    await prisma.diskScans.delete({ where: { id: previous.id } });
+
+    const survivor = await prisma.diskScans.findUnique({ where: { id: current.id } });
+    expect(survivor).toMatchObject({ id: current.id, supersedesId: null, totalBytes: 2_000n });
+  });
+
+  it("takes a scan's entries with it", async () => {
+    const userId = await makeUser();
+    const host = await prisma.hosts.create({ data: sshHost(userId, "entries") });
+
+    const scan = await prisma.diskScans.create({
+      data: {
+        hostId: host.id,
+        root: "/srv",
+        status: "DONE",
+        totalBytes: 10_200n,
+        entries: {
+          create: [
+            { path: "/srv", bytes: 10_200n, percent: 100, parentPath: "", depth: 0, kind: "DIRECTORY" },
+            { path: "/srv/a", bytes: 5_100n, percent: 50, parentPath: "/srv", depth: 1, kind: "DIRECTORY" },
+            { path: "/srv", bytes: 80n, percent: 0.78, parentPath: "/srv", depth: 1, kind: "OTHER" },
+          ],
+        },
+      },
+    });
+
+    expect(await prisma.diskScanEntries.count({ where: { scanId: scan.id } })).toBe(3);
+
+    await prisma.diskScans.delete({ where: { id: scan.id } });
+
+    expect(await prisma.diskScanEntries.count({ where: { scanId: scan.id } })).toBe(0);
+  });
+});

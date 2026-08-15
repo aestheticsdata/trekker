@@ -104,6 +104,33 @@ enum ScanStatus {
   RUNNING
   DONE
   FAILED
+  /// Stopped by somebody, not by an error. Distinct from FAILED because a
+  /// cancelled scan is not a host that misbehaved, and the panel says so
+  /// differently (TRE-32).
+  CANCELLED
+}
+
+/// Which `du` answered, and therefore which facts the scan could gather.
+///
+/// Stored on the row rather than inferred, because the three facts are
+/// independently nullable and "we did not ask" has to be distinguishable from
+/// "we asked and this host cannot say". A null largest file on a PORTABLE scan
+/// is a BSD `du` with no `--time`; the same null on a GNU scan would be a bug.
+enum ScanFlavour {
+  /// `du -x -a -0 -B1 --time --time-style=+%s` — every fact.
+  GNU
+  /// BSD or busybox: `du -x -a -k`. No mtime, so no age fact.
+  PORTABLE
+  /// No `-a` either: directory subtotals only, so the treemap and nothing else.
+  SUBTOTALS
+}
+
+/// What a treemap rectangle is. `OTHER` is the synthetic remainder row and has
+/// no path on the host — see `DiskScanEntries.kind`.
+enum ScanEntryKind {
+  DIRECTORY
+  FILE
+  OTHER
 }
 
 // ---------------------------------------------------------------- account
@@ -384,6 +411,15 @@ model TransferItems {
 
 // ---------------------------------------------------------------- disk
 
+/// One `du` of one root, kept so the treemap survives a reload (TRE-32).
+///
+/// The row is written twice and no more: once as RUNNING when the scan is
+/// accepted, once when it ends. Nothing is written per record — a walk emits
+/// millions of them — and the entries below land in the same transaction as
+/// the terminal write, so a scan has either all of its rows or none of them at
+/// every instant, including a `kill -9`. A RUNNING scan carrying a partial
+/// entry set is exactly the "partial scan marked complete" the ticket forbids,
+/// and this shape makes it unrepresentable rather than merely unlikely.
 model DiskScans {
   id     String @id @default(uuid(7)) @db.Char(36)
   hostId String @db.Char(36)
@@ -395,23 +431,135 @@ model DiskScans {
   inodes     BigInt?
   status     ScanStatus @default(RUNNING)
 
-  host    Hosts            @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  /// How deep the persisted tree goes — what is *stored*, never what is read.
+  ///
+  /// The walk is always full depth, and the reason is that `du --max-depth`
+  /// limits printing rather than walking: `du` stats every inode either way, so
+  /// a depth limit on the wire buys no IO back. What it would cost is the three
+  /// facts, which come from the per-file records `-a` prints and which a depth
+  /// limit truncates. So depth is applied here, by the aggregator, to one full
+  /// walk (TRE-32 §1).
+  depth Int @default(3) @db.TinyInt
+
+  /// "One scan per host at a time", as a promise the database keeps.
+  ///
+  /// Holds the hostId while RUNNING and NULL afterwards. MySQL has no partial
+  /// unique index, so this is the same trick `Users.ownerSlot` and
+  /// `Hosts.localSlot` use — a unique index counts every NULL as distinct, so
+  /// only a second *running* scan of one host collides.
+  ///
+  /// A field on a service would have been simpler and wrong twice over: it
+  /// cannot survive a restart, and a check-then-insert across two Node ticks is
+  /// a race that starts two `du`s on somebody's server. It is also what makes
+  /// the boot sweep obligatory rather than tidy — a RUNNING row left by a crash
+  /// holds this key and locks the host out of scanning until something nulls it.
+  runningSlot String? @unique @db.Char(36)
+
+  /// The scan this one replaces, kept until this one reaches DONE so the panel
+  /// never goes blank mid-scan.
+  ///
+  /// A relation rather than a `SUPERSEDED` status: a superseded scan is still
+  /// DONE and still entirely servable, which is the whole point of keeping it.
+  /// A status would make every read path ask "DONE or SUPERSEDED?" and the
+  /// answer would always be yes.
+  ///
+  /// `SetNull`, never `Cascade`: deleting the old scan must not delete the new
+  /// one that points at it — which is precisely what the terminal transaction
+  /// does on success.
+  supersedesId String?    @unique @db.Char(36)
+  supersedes   DiskScans? @relation("Superseded", fields: [supersedesId], references: [id], onDelete: SetNull)
+  supersededBy DiskScans? @relation("Superseded")
+
+  /// Which `du` answered, so a fact reported as unavailable is explained rather
+  /// than looking like a bug.
+  flavour ScanFlavour @default(GNU)
+  /// Whether the walk actually ran de-prioritised. False when the host has no
+  /// `nice` and the scan was retried without it — worth saying, because it is
+  /// the difference between a considerate scan and a rude one.
+  niced   Boolean     @default(true)
+
+  /// Directories `du` could not read, counted from its stderr. A count and not
+  /// the messages: remote text is never persisted, and the number is what tells
+  /// somebody the total is short.
+  unreadableCount Int @default(0)
+  /// Set when one of the aggregator's bounds bit, so a tree that is not the
+  /// whole tree never presents itself as one.
+  truncated       Boolean @default(false)
+
+  /// Why it failed, in fixed English chosen here from the error's class. Never
+  /// the remote message, which is somebody else's machine talking.
+  error String? @db.VarChar(500)
+
+  // ---- the three facts. NULL is "not gathered", and never zero: a host whose
+  // `du` cannot report mtimes has no age answer, which is a different statement
+  // from "no files here are old".
+
+  largestPath  String? @db.Text
+  largestBytes BigInt?
+
+  oldFileCount BigInt?
+  oldFileBytes BigInt?
+  /// The cutoff the count was taken against, stored rather than recomputed on
+  /// read: "older than a year" has to keep meaning a year before *this* scan,
+  /// not a year before whenever somebody opens the panel.
+  oldFileBefore DateTime?
+
+  /// Groups sharing a size, groups a hash then confirmed, and groups the bounds
+  /// left unhashed. All three are reported: "12 confirmed" alone would read as
+  /// the whole answer when it is the part we could afford to check.
+  dupGroupsCandidate  Int?
+  dupGroupsConfirmed  Int?
+  dupGroupsSkipped    Int?
+  /// Each confirmed group's size counted once less than its member count —
+  /// what deleting the copies would give back, keeping one of each.
+  dupReclaimableBytes BigInt?
+
+  host    Hosts             @relation(fields: [hostId], references: [id], onDelete: Cascade)
   entries DiskScanEntries[]
 
   @@index([hostId, startedAt(sort: Desc)])
+  /// The GET's index: the most recent scan of one root. The index above cannot
+  /// serve it — `root` is not a prefix of it — and the panel asks this question
+  /// on every load. Prefixed at 191 characters because InnoDB caps a key at
+  /// 3072 bytes and utf8mb4 spends 4 per character.
+  @@index([hostId, root(length: 191), startedAt(sort: Desc)])
 }
 
+/// One rectangle of the treemap.
+///
+/// These are not every directory the walk saw — they are the top few consumers
+/// per level down to `DiskScans.depth`, plus one synthetic `OTHER` row per
+/// parent holding everything else. The aggregation is server-side by design:
+/// the client draws what it is given and never sums anything, so two clients
+/// cannot disagree about what a level adds up to.
 model DiskScanEntries {
   id     String @id @default(uuid(7)) @db.Char(36)
   scanId String @db.Char(36)
   path   String @db.Text
   bytes  BigInt
-  /// Share of the scan root, so the treemap does not recompute totals.
+  /// Share of the scan root, for the label beside the rectangle.
+  ///
+  /// The *geometry* is drawn from `bytes`, which sum to the parent exactly.
+  /// These are rounded per row and therefore need not sum to 100 within a
+  /// level, which is correct and should not be "fixed": a percentage is a label
+  /// and the bytes are the truth.
   percent Decimal @db.Decimal(5, 2)
+
+  /// The parent's path, so one indexed read returns one whole treemap level.
+  ///
+  /// Empty string on the root row rather than the root's own path — otherwise
+  /// the root is its own child and the level query returns it twice.
+  parentPath String @db.VarChar(700)
+  /// 0 is the root. Redundant with `parentPath` for the level query, and kept
+  /// anyway: it makes "the whole persisted tree, in order" one query, and it
+  /// makes the sum-equals-total check cheap enough for a test to make it.
+  depth      Int    @db.TinyInt
+  kind       ScanEntryKind
 
   scan DiskScans @relation(fields: [scanId], references: [id], onDelete: Cascade)
 
   @@index([scanId, bytes(sort: Desc)])
+  @@index([scanId, parentPath(length: 191), bytes(sort: Desc)])
 }
 
 // ---------------------------------------------------------------- audit

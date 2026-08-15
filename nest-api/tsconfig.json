@@ -24,6 +24,7 @@
       "@fs/*": ["./src/fs/*"],
       "@health/*": ["./src/health/*"],
       "@hosts/*": ["./src/hosts/*"],
+      "@scans/*": ["./src/scans/*"],
       "@secrets/*": ["./src/secrets/*"],
       "@transfers/*": ["./src/transfers/*"],
       "@users/*": ["./src/users/*"]

@@ -102,7 +102,26 @@ interface PooledEntry {
   client: Client;
   sftp: SFTPWrapper;
   inFlight: number;
-  waiting: Array<() => void>;
+  /**
+   * Borrowers queued for a slot, each carrying the ceiling it may proceed
+   * under — a background borrower's is lower than an interactive one's
+   * (TRE-32). Held as objects rather than bare resolvers so that `release` can
+   * wake the first waiter that can actually run, instead of waking the one at
+   * the front and having it queue straight back up while the freed slot sits
+   * unused and nobody else is woken.
+   */
+  waiting: Array<{ ceiling: number; wake: () => void }>;
+  /**
+   * The connection has gone and this entry is off the map.
+   *
+   * It exists for the waiters. They re-check their ceiling after being woken,
+   * and a dead entry's `inFlight` never falls again — so without a way to tell
+   * them to stop asking, the wake-everybody on close would put them straight
+   * back into a queue nothing will ever drain. Woken on a dead entry they
+   * proceed instead, and fail fast on first use, which is what they did before
+   * the ceiling existed.
+   */
+  dead?: boolean;
   idleTimer: NodeJS.Timeout | null;
   connecting: Promise<PooledEntry> | null;
 }
@@ -113,6 +132,28 @@ export interface Lease {
   client: Client;
   release(): void;
 }
+
+export interface AcquireOptions {
+  /**
+   * Work nobody is waiting at a screen for (TRE-32).
+   *
+   * A disk scan holds its slot for minutes, which is a different thing from
+   * every other borrower here — a listing holds one for milliseconds. Marked
+   * background, it is refused the last `RESERVED_INTERACTIVE` slots and queues
+   * instead, so browsing the host being scanned still has connections to use.
+   */
+  background?: boolean;
+}
+
+/**
+ * Slots a background borrower may never take.
+ *
+ * Two, against a `maxConcurrency` of six. It is not tuned so much as reasoned:
+ * a pane doing a listing needs one, and something like a download running
+ * beside it needs the other, so two is the smallest number at which a person
+ * browsing a host under scan never waits on the scan.
+ */
+export const RESERVED_INTERACTIVE = 2;
 
 /** The result of a pre-persist connectivity test (TRE-12). Never carries the credential. */
 export interface HostProbeResult {
@@ -147,6 +188,14 @@ export interface HostProbeResult {
  * listing would make the app feel broken. Connections are lazy, keepalive'd,
  * evicted when idle, and capped so a single recursive walk cannot consume every
  * channel the server allows.
+ *
+ * **A known gap, found by TRE-32 and deliberately left.** The waiting queue has
+ * no timeout and no abort: a borrower queued behind a slot that never frees
+ * waits forever rather than failing with `ETIMEDOUT` like everything else here.
+ * It has never bitten because every borrower until now held its slot for
+ * milliseconds. A scan holds one for minutes, which is why `RESERVED_INTERACTIVE`
+ * exists — it removes the case that would have made the gap visible, rather than
+ * fixing the gap. Giving `acquire` a signal and a deadline is its own change.
  */
 @Injectable()
 export class SshConnectionPool implements OnModuleDestroy {
@@ -169,7 +218,7 @@ export class SshConnectionPool implements OnModuleDestroy {
     return `${spec.hostId}:${spec.username}`;
   }
 
-  async acquire(spec: HostConnectionSpec): Promise<Lease> {
+  async acquire(spec: HostConnectionSpec, options: AcquireOptions = {}): Promise<Lease> {
     const key = SshConnectionPool.key(spec);
     let entry = this.entries.get(key);
 
@@ -186,8 +235,14 @@ export class SshConnectionPool implements OnModuleDestroy {
       entry.idleTimer = null;
     }
 
-    if (entry.inFlight >= this.settings.maxConcurrency) {
-      await new Promise<void>((resolve) => entry.waiting.push(resolve));
+    const ceiling = this.ceilingFor(options);
+    // A loop rather than a single wait: being woken is permission to re-ask,
+    // not permission to proceed. Another borrower can take the freed slot
+    // between the wake and this line, and a background waiter woken by an
+    // interactive release may still be over its lower ceiling.
+    const held = entry;
+    while (!held.dead && held.inFlight >= ceiling) {
+      await new Promise<void>((wake) => held.waiting.push({ ceiling, wake }));
     }
     entry.inFlight++;
 
@@ -203,14 +258,31 @@ export class SshConnectionPool implements OnModuleDestroy {
     };
   }
 
+  /**
+   * How many slots this borrower may occupy up to. Background work stops short
+   * of the last few so that browsing the host never queues behind it (TRE-32).
+   *
+   * Floored at one: a `maxConcurrency` configured below the reservation would
+   * otherwise give background work a ceiling of zero, and a scan that can never
+   * acquire is a scan that hangs rather than one that runs politely.
+   */
+  private ceilingFor(options: AcquireOptions): number {
+    if (!options.background) return this.settings.maxConcurrency;
+    return Math.max(1, this.settings.maxConcurrency - RESERVED_INTERACTIVE);
+  }
+
   private release(key: string): void {
     const entry = this.entries.get(key);
     if (!entry) return;
 
     entry.inFlight = Math.max(0, entry.inFlight - 1);
-    const next = entry.waiting.shift();
-    if (next) {
-      next();
+    // The first waiter that can actually proceed, not simply the first waiter:
+    // waking a background borrower that is still over its ceiling would leave
+    // the freed slot idle with an interactive request queued behind it.
+    const index = entry.waiting.findIndex((waiter) => entry.inFlight < waiter.ceiling);
+    if (index !== -1) {
+      const [next] = entry.waiting.splice(index, 1);
+      next.wake();
       return;
     }
 
@@ -286,7 +358,8 @@ export class SshConnectionPool implements OnModuleDestroy {
           // be handed out on the next request.
           client.on("close", () => {
             if (this.entries.get(key) === entry) this.entries.delete(key);
-            for (const wake of entry.waiting.splice(0)) wake();
+            entry.dead = true;
+            for (const waiter of entry.waiting.splice(0)) waiter.wake();
           });
 
           this.logger.log(`SSH connected: ${spec.username}@${spec.address}:${spec.port}`);

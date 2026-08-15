@@ -1,9 +1,12 @@
 import type { Readable, Writable } from "node:stream";
-import type { Stats } from "ssh2";
+import type { ClientChannel, Stats } from "ssh2";
 import { DriverError, fromSftpError } from "@hosts/drivers/driver-error";
 import {
   type ExecOptions,
   type ExecResult,
+  type ExecStream,
+  type ExecStreamOptions,
+  type ExecStreamResult,
   type FileEntry,
   type FileStat,
   type HostDriver,
@@ -19,6 +22,21 @@ import type { HostConnectionSpec, Lease, PoolSettings, SshConnectionPool } from 
 import { type AllowedProgram, buildRemoteCommand, isAllowedProgram } from "@hosts/drivers/shell-quote";
 
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+
+/** As LocalDriver's: the head of stderr says what kind of thing went wrong. */
+const DEFAULT_MAX_STDERR_BYTES = 64 * 1024;
+
+/**
+ * How long a cancelled command is given to close its channel before the lease
+ * is taken back anyway.
+ *
+ * The remote process dies of SIGPIPE the next time it writes to a closed
+ * channel, which for a command that prints steadily is immediate. Three seconds
+ * is for the one that does not — and the slot matters more than the tidiness of
+ * waiting, because a lease held by a channel nobody is reading is a slot the
+ * next pane queues behind forever.
+ */
+const KILL_GRACE_MS = 3_000;
 
 /**
  * A remote machine over SFTP, with the same surface as LocalDriver (TRE-9 §3).
@@ -328,7 +346,7 @@ export class SshDriver implements HostDriver {
       throw new DriverError("EPERM", `Program "${name}" is not on the allowlist.`);
     }
 
-    const command = buildRemoteCommand(program, args);
+    const command = buildRemoteCommand(program, args, { nice: options.nice });
     const limit = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
     const lease = await this.pool.acquire(this.spec);
 
@@ -376,9 +394,163 @@ export class SshDriver implements HostDriver {
     });
   }
 
+  /**
+   * The streaming form (TRE-32). Same allowlist, same quoting, one channel held
+   * for as long as the command runs.
+   *
+   * **The channel is the stream.** ssh2's Channel is a Duplex whose receive
+   * window is only re-opened from `_read`, so a caller that stops reading
+   * genuinely stops the remote process rather than letting it buffer a
+   * filesystem's worth of records into this one's memory.
+   *
+   * **stderr is drained here and never handed out.** ssh2 shares one drain flag
+   * between a channel's stdout and its stderr: an unread stderr latches it, the
+   * window is never re-adjusted, and *stdout stops too*. `du /` prints a
+   * permission denial per unreadable directory, so leaving that to the caller
+   * is a stall waiting to happen. The driver keeps the head and drops the rest.
+   *
+   * **The lease is released on `close`, never on `exit`.** `exit` can arrive
+   * before the final data does, and on some paths never arrives at all — which
+   * is also why a `close` with no `exit` is reported as a failure here rather
+   * than as a successful command with no exit code. That combination means the
+   * connection went away underneath a running command, and calling it success
+   * would hand the caller a truncated walk labelled complete.
+   */
+  async execStream(
+    program: AllowedProgram,
+    args: readonly string[],
+    options: ExecStreamOptions = {},
+  ): Promise<ExecStream> {
+    // Widened so the runtime guard survives type erasure — see shell-quote.ts.
+    const name: string = program;
+    if (!isAllowedProgram(name)) {
+      throw new DriverError("EPERM", `Program "${name}" is not on the allowlist.`);
+    }
+    if (options.signal?.aborted) {
+      throw new DriverError("EIO", `${program} was cancelled before it started`);
+    }
+
+    const command = buildRemoteCommand(program, args, { nice: options.nice });
+    const stderrLimit = options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES;
+    const lease = await this.pool.acquire(this.spec, { background: true });
+
+    let channel: Awaited<ReturnType<typeof openChannel>>;
+    try {
+      channel = await openChannel(lease, command, program);
+    } catch (error) {
+      lease.release();
+      throw error;
+    }
+
+    let stderr = "";
+    let stderrTruncated = false;
+    channel.stderr.on("data", (chunk: Buffer) => {
+      if (stderr.length >= stderrLimit) {
+        stderrTruncated = true;
+        return;
+      }
+      stderr += chunk.toString("utf8");
+    });
+
+    const done = new Promise<ExecStreamResult>((resolve, reject) => {
+      let settled = false;
+      let code: number | null = null;
+      let signal: string | null = null;
+      let exited = false;
+      let cancelled = false;
+
+      const finish = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(graceTimer);
+        clearTimeout(deadline);
+        options.signal?.removeEventListener("abort", abort);
+        lease.release();
+        fn();
+      };
+
+      let graceTimer: NodeJS.Timeout | undefined;
+      let deadline: NodeJS.Timeout | undefined;
+
+      const abort = (): void => {
+        cancelled = true;
+        // `signal()` before `close()`, and never `end()` first: ssh2 clears the
+        // channel's writable side on finish and its `signal()` requires it, so
+        // ending first silently swallows the request. The signal is best effort
+        // — OpenSSH's sshd does not implement the RFC 4254 request at all — and
+        // the actual kill is `close()`: the remote process takes SIGPIPE the
+        // next time it writes to a channel that is gone.
+        try {
+          channel.signal("TERM");
+        } catch {
+          // A channel already closing. `close()` below is the part that matters.
+        }
+        try {
+          channel.close();
+        } catch {
+          // Same.
+        }
+        // Never `client.end()` or `destroy()`: that connection is shared with
+        // every other pane on this host.
+        graceTimer = setTimeout(() => {
+          finish(() => resolve({ code, signal: signal ?? "SIGTERM", stderr, stderrTruncated }));
+        }, KILL_GRACE_MS);
+        graceTimer.unref();
+      };
+
+      if (options.timeoutMs !== undefined) {
+        deadline = setTimeout(() => {
+          abort();
+        }, options.timeoutMs);
+        deadline.unref();
+      }
+
+      options.signal?.addEventListener("abort", abort, { once: true });
+
+      channel.on("exit", (exitCode: number | null, exitSignal?: string) => {
+        exited = true;
+        code = exitCode;
+        signal = exitSignal ?? null;
+      });
+
+      channel.on("close", () => {
+        // A cancelled command closes without exiting, which is expected and not
+        // a failure — the caller asked for it.
+        if (!exited && !cancelled) {
+          finish(() =>
+            reject(new DriverError("EUNREACHABLE", "The connection dropped while the command was running.")),
+          );
+          return;
+        }
+        finish(() => resolve({ code, signal, stderr, stderrTruncated }));
+      });
+    });
+
+    return { stdout: channel, done };
+  }
+
   async dispose(): Promise<void> {
     // The pool owns the connection's lifetime; a driver instance is per request.
   }
+}
+
+/**
+ * `client.exec` as a promise, so the channel's own failure mode is separated
+ * from everything that can go wrong once it is open (TRE-32).
+ *
+ * The lease is the caller's to release — this function borrows nothing and
+ * therefore returns nothing to clean up if it throws.
+ */
+function openChannel(lease: Lease, command: string, program: AllowedProgram): Promise<ClientChannel> {
+  return new Promise<ClientChannel>((resolve, reject) => {
+    lease.client.exec(command, (error, channel) => {
+      if (error) {
+        reject(new DriverError("EIO", `Could not start ${program}: ${error.message}`, undefined, error));
+        return;
+      }
+      resolve(channel);
+    });
+  });
 }
 
 function joinPath(directory: string, name: string): string {

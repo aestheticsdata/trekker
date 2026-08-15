@@ -15,6 +15,7 @@
     "verify:ssh": "tsx scripts/verify-ssh-driver.ts",
     "verify:fs": "tsx scripts/verify-fs-listing.ts",
     "verify:disks": "tsx scripts/verify-disks.ts",
+    "verify:scan": "tsx scripts/verify-scan.ts",
     "account:create": "tsx scripts/create-account.ts",
     "host:create": "tsx scripts/create-host.ts",
     "rotate-key": "tsx scripts/rotate-master-key.ts",
@@ -100,6 +101,7 @@
       "^@fs/(.*)$": "<rootDir>/fs/$1",
       "^@health/(.*)$": "<rootDir>/health/$1",
       "^@hosts/(.*)$": "<rootDir>/hosts/$1",
+      "^@scans/(.*)$": "<rootDir>/scans/$1",
       "^@secrets/(.*)$": "<rootDir>/secrets/$1",
       "^@transfers/(.*)$": "<rootDir>/transfers/$1",
       "^@users/(.*)$": "<rootDir>/users/$1"

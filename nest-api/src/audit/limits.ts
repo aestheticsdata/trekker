@@ -246,6 +246,25 @@ export const LIMITS = {
    * the queue rather than this.
    */
   transferJobs: rule("limit:xfer", "transfers started", 20, 60, "TREKKER_LIMIT_TRANSFERS_PER_MIN"),
+
+  /**
+   * Disk scans started (TRE-32), per hour rather than per minute — the only
+   * rule here whose window is not measured against a burst.
+   *
+   * A scan takes minutes, and almost everything about how often one can happen
+   * is already decided by things this table cannot express: one per host at a
+   * time, held by a unique index; two in flight across the process, held by the
+   * queue; and two SSH slots per host that a scan may never take. What is left
+   * for a rate limit is somebody pointing a script at a fleet and queueing a
+   * hundred roots, and against that a minute-long window would be the wrong
+   * shape — a scan an hour apart on twenty hosts is ordinary use, and twenty
+   * inside a minute on one host is not something the counter would ever see,
+   * because the unique index refuses the second one first.
+   *
+   * It is here rather than in `TO_ATTACH` because the route it governs lands in
+   * the same change, so there is no window in which this is a promise.
+   */
+  diskScan: rule("limit:scan", "disk scans", 20, 3600, "TREKKER_LIMIT_SCANS_PER_HOUR"),
 } as const satisfies Record<string, LimitRule>;
 
 /**

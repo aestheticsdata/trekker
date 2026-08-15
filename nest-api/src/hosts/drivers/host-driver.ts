@@ -57,6 +57,58 @@ export interface ExecOptions {
   /** Truncate captured output at this many bytes. `du /` is not a small string. */
   maxOutputBytes?: number;
   cwd?: string;
+  /**
+   * Run it de-prioritised, 0–19 (TRE-32). Rendered as a `nice` prefix over SSH
+   * and applied with `os.setPriority` locally — see shell-quote.ts for why the
+   * prefix is not an allowlist entry.
+   */
+  nice?: number;
+}
+
+/**
+ * A command whose output is read as it arrives rather than collected (TRE-32).
+ *
+ * `exec` above is the right shape for `df`: a short answer, wanted whole. It is
+ * the wrong shape for a `du` of a filesystem, which runs for minutes and prints
+ * hundreds of megabytes — buffering that means holding all of it in a string to
+ * hand back at the end, so there is no progress to report until there is
+ * nothing left to report, and no way to stop it.
+ */
+export interface ExecStreamOptions {
+  /**
+   * Stops the command. There is deliberately no default timeout: a scan of a
+   * few terabytes is minutes, and a driver-level ceiling would kill it at a
+   * number chosen by somebody thinking about `stat`.
+   */
+  signal?: AbortSignal;
+  /** As `ExecOptions.nice`. */
+  nice?: number;
+  /** Ceiling on the stderr the driver keeps. `stdout` is never buffered. */
+  maxStderrBytes?: number;
+  /** A ceiling for callers that do want one. Absent means none. */
+  timeoutMs?: number;
+}
+
+export interface ExecStreamResult {
+  code: number | null;
+  signal: string | null;
+  /** The head of stderr, capped. Drained by the driver whether you read it or not. */
+  stderr: string;
+  stderrTruncated: boolean;
+}
+
+export interface ExecStream {
+  /**
+   * Backpressured: stop reading and the command stops producing, which is the
+   * point — a parser that falls behind must slow the walk down rather than let
+   * the process buffer a filesystem's worth of records on its behalf.
+   */
+  stdout: Readable;
+  /**
+   * Settles when the process or channel has closed, never merely when it
+   * exited: exit can arrive before the last bytes do.
+   */
+  done: Promise<ExecStreamResult>;
 }
 
 export interface WriteOptions {
@@ -138,6 +190,16 @@ export interface HostDriver {
    * the SSH side, where the protocol forces a string.
    */
   exec(program: AllowedProgram, args: readonly string[], options?: ExecOptions): Promise<ExecResult>;
+
+  /**
+   * The same, read as it arrives (TRE-32). Same allowlist, same quoting.
+   *
+   * Optional because it is needed by one caller and implementing it is real
+   * work: a test double standing in for a driver should not have to grow a
+   * channel lifecycle to keep compiling. Callers check for it and say so when
+   * a driver cannot stream, rather than assuming.
+   */
+  execStream?(program: AllowedProgram, args: readonly string[], options?: ExecStreamOptions): Promise<ExecStream>;
 
   /** Releases anything the driver holds. The local driver holds nothing. */
   dispose(): Promise<void>;

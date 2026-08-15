@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
 import {
   access,
@@ -16,12 +16,16 @@ import {
   utimes,
 } from "node:fs/promises";
 import { chmod, chown } from "node:fs/promises";
+import { setPriority } from "node:os";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { DriverError, fromNodeError } from "@hosts/drivers/driver-error";
 import {
   type ExecOptions,
   type ExecResult,
+  type ExecStream,
+  type ExecStreamOptions,
+  type ExecStreamResult,
   type FileEntry,
   type FileStat,
   type HostDriver,
@@ -44,6 +48,15 @@ export const LOCAL_READ_FLAGS = FS.R_OK;
 
 const DEFAULT_EXEC_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+
+/**
+ * How much of a streamed command's stderr is kept.
+ *
+ * `du /` prints a permission denial per unreadable directory and there can be
+ * thousands. The head is what says *what kind* of thing went wrong, which is
+ * all any caller does with it; the rest is the same sentence again.
+ */
+const DEFAULT_MAX_STDERR_BYTES = 64 * 1024;
 
 /**
  * The machine the API runs on, reached through `node:fs` (TRE-9).
@@ -259,7 +272,7 @@ export class LocalDriver implements HostDriver {
     }
 
     return new Promise<ExecResult>((resolve, reject) => {
-      execFile(
+      const child = execFile(
         program,
         [...args],
         {
@@ -305,10 +318,124 @@ export class LocalDriver implements HostDriver {
           });
         },
       );
+
+      deprioritise(child.pid, options.nice);
     });
+  }
+
+  /**
+   * The streaming form (TRE-32). `spawn`, for the same reason `exec` uses
+   * `execFile`: an argv array and no shell anywhere.
+   *
+   * Three things differ from `exec` above, each of them the point:
+   *
+   * **No `maxBuffer`.** Nothing is collected, so there is nothing to overflow —
+   * which also removes the conflation above, where a buffer overrun and a
+   * timeout both arrive as `killed` and both report as `ETIMEDOUT`.
+   *
+   * **No default timeout.** A scan is minutes. The caller's `AbortSignal` is
+   * what stops it, and a driver-level ceiling would be a number chosen by
+   * somebody thinking about `stat`.
+   *
+   * **`close`, not `exit`.** `exit` fires when the process goes; `close` fires
+   * when its pipes have ended, which is the first moment the last record has
+   * certainly been read.
+   */
+  execStream(program: AllowedProgram, args: readonly string[], options: ExecStreamOptions = {}): Promise<ExecStream> {
+    // Widened so the runtime guard survives type erasure — see shell-quote.ts.
+    const name: string = program;
+    if (!isAllowedProgram(name)) {
+      return Promise.reject(new DriverError("EPERM", `Program "${name}" is not on the allowlist.`));
+    }
+    // `spawn` with an already-aborted signal produces a child that never runs
+    // and an AbortError on a listener nobody has attached yet. Refusing here is
+    // the same answer, said in the vocabulary above this line.
+    if (options.signal?.aborted) {
+      return Promise.reject(new DriverError("EIO", `${program} was cancelled before it started`));
+    }
+
+    const child = spawn(program, [...args], {
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      signal: options.signal,
+      killSignal: "SIGTERM",
+      ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
+    });
+
+    deprioritise(child.pid, options.nice);
+
+    const stdout = child.stdout;
+    const stderrLimit = options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES;
+    let stderr = "";
+    let stderrTruncated = false;
+
+    // Drained whether the caller looks at it or not. An unread pipe fills its
+    // kernel buffer and the child blocks writing to it — with stdout still
+    // flowing, that is a walk which stops partway through for no visible
+    // reason.
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (stderr.length >= stderrLimit) {
+        stderrTruncated = true;
+        return;
+      }
+      stderr += chunk.toString("utf8");
+    });
+
+    const done = new Promise<ExecStreamResult>((resolve, reject) => {
+      let failure: DriverError | null = null;
+
+      // ENOENT and EACCES arrive here rather than in a callback, because there
+      // is no callback. An aborted spawn also lands here as an AbortError,
+      // which is not a failure to report: the caller asked for it, and `close`
+      // still follows with the real exit.
+      child.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.name === "AbortError") return;
+        if (error.code === "ENOENT") {
+          failure = new DriverError("ENOENT", `${program} is not installed on this host`, undefined, error);
+          return;
+        }
+        if (error.code === "EACCES") {
+          failure = new DriverError("EACCES", `Not permitted to run ${program}`, undefined, error);
+          return;
+        }
+        failure = new DriverError("EIO", `Could not run ${program}: ${error.message}`, undefined, error);
+      });
+
+      child.on("close", (code, signal) => {
+        if (failure) {
+          reject(failure);
+          return;
+        }
+        resolve({ code, signal, stderr, stderrTruncated });
+      });
+    });
+
+    return Promise.resolve({ stdout, done });
   }
 
   async dispose(): Promise<void> {
     // Nothing held open.
+  }
+}
+
+/**
+ * Lower a child's priority, best effort (TRE-32).
+ *
+ * `os.setPriority` rather than an `execFile("nice", …)`: locally there is no
+ * shell to prefix, `nice` is not an allowlisted program and must not become
+ * one, and a syscall needs neither. See shell-quote.ts, which does the same job
+ * for the remote side where a string is unavoidable.
+ *
+ * Swallowed on failure, deliberately. A kernel that refuses the change, a
+ * process that has already exited, a platform with no notion of niceness — none
+ * of those is a reason to fail a `du` that is otherwise about to run correctly.
+ * The scan records whether it was niced; it does not depend on it.
+ */
+function deprioritise(pid: number | undefined, nice: number | undefined): void {
+  if (nice === undefined || pid === undefined) return;
+  try {
+    setPriority(pid, nice);
+  } catch {
+    // Best effort, and the caller is told by `niced` on the row.
   }
 }

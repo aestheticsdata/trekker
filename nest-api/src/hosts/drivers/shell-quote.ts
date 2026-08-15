@@ -48,8 +48,43 @@ export function quoteArgument(argument: string): string {
   return `'${argument.split("'").join(`'\\''`)}'`;
 }
 
-/** Builds the full command string for `ssh2.exec`. The only caller is SshDriver. */
-export function buildRemoteCommand(program: AllowedProgram, args: readonly string[]): string {
+/**
+ * The niceness range this builder will render.
+ *
+ * Zero to nineteen, which is to say: lower the priority or leave it alone.
+ * Negative niceness *raises* it and needs privilege, so the range is not a
+ * validation detail — it is the reason the prefix cannot be turned into a way
+ * of making Trekker's work outrank the machine's own (TRE-32).
+ */
+export const NICE_MIN = 0;
+export const NICE_MAX = 19;
+
+export interface RemoteCommandOptions {
+  /** Run the program de-prioritised, via a `nice` prefix. See below. */
+  nice?: number;
+}
+
+/**
+ * Builds the full command string for `ssh2.exec`. The only caller is SshDriver.
+ *
+ * **On the `nice` prefix, which looks like an allowlist hole and is not.**
+ * `nice` is not in ALLOWED_PROGRAMS and must never be added to it: its entire
+ * purpose is to run a program named by its argument, so an entry there would
+ * turn the list from an allowlist into an allowlist with a universal escape
+ * hatch — `nice -n 0 sh -c '...'` past every check in this file.
+ *
+ * Here it is a **literal**, written into the string by this function and never
+ * supplied by a caller. The program that actually runs is still the allowlisted
+ * one, still checked below, and still the only thing a caller can name. The
+ * only caller-supplied part of the prefix is an integer, range-checked, and
+ * quoted anyway — belt and braces, since a number that reached here as a string
+ * would otherwise be the one unquoted token in the command.
+ */
+export function buildRemoteCommand(
+  program: AllowedProgram,
+  args: readonly string[],
+  options: RemoteCommandOptions = {},
+): string {
   // Widened deliberately: the parameter type already excludes anything else, so
   // TypeScript narrows the failing branch to `never`. The check still has to
   // exist — types are erased, and this is the last thing between an argv array
@@ -60,5 +95,13 @@ export function buildRemoteCommand(program: AllowedProgram, args: readonly strin
     // and this function is the last thing between an argv and a remote shell.
     throw new Error(`Program "${name}" is not on the allowlist.`);
   }
-  return [program, ...args.map(quoteArgument)].join(" ");
+
+  const payload = [program, ...args.map(quoteArgument)].join(" ");
+  if (options.nice === undefined) return payload;
+
+  const nice = options.nice;
+  if (!Number.isInteger(nice) || nice < NICE_MIN || nice > NICE_MAX) {
+    throw new Error(`nice must be an integer between ${NICE_MIN} and ${NICE_MAX}.`);
+  }
+  return `nice -n ${quoteArgument(String(nice))} ${payload}`;
 }

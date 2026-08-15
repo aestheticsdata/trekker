@@ -11,6 +11,7 @@ import { AuditModule } from "@audit/audit.module";
 import { BookmarksModule } from "@bookmarks/bookmarks.module";
 import { FsModule } from "@fs/fs.module";
 import { HostsModule } from "@hosts/hosts.module";
+import { ScansModule } from "@scans/scans.module";
 import { RedisService } from "@redis/redis.service";
 import { SecretStoreModule } from "@secrets/secret-store.module";
 import { TransfersModule } from "@transfers/transfers.module";
@@ -413,6 +414,7 @@ beforeAll(async () => {
       AuditModule,
       SecretStoreModule,
       HostsModule,
+      ScansModule,
       BookmarksModule,
       FsModule,
       TransfersModule,
@@ -649,6 +651,10 @@ describe("the route table", () => {
     expect(routes.map(label)).toContain("GET /api/users/me");
     expect(routes.map(label)).toContain("POST /api/fs/chmod");
     expect(routes.map(label)).toContain("DELETE /api/hosts/:id");
+    // One route per module that owns any, because the table is only as complete
+    // as the `imports` above it — a module left out of that list is swept by
+    // nothing, and every assertion below still passes. TRE-32 arrived that way.
+    expect(routes.map(label)).toContain("POST /api/hosts/:id/scan");
   });
 });
 
