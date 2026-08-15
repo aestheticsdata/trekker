@@ -289,13 +289,50 @@ resets and never prompts.
 
 MySQL DDL is not transactional. A migration that fails halfway leaves the
 database part-applied, and the script's rollback restores the *code* but cannot
-undo that. If a deploy fails during this step:
+undo that. If a deploy fails during this step, check the state on the server:
 
 ```bash
-pnpm exec prisma migrate status      # in /var/www/trekker/nest-api
+# On the server. ROOT is TREKKER_REMOTE_ROOT, which is set in deploy.env on the
+# workstation and therefore not in this shell — name it here.
+ROOT=/var/www/trekker
+
+(
+  cd "$ROOT/api/nest-api"
+  export NODE_ENV=production
+  export DATABASE_URL=$(node -e "process.stdout.write(require('$ROOT/ecosystem.config.js').apps[0].env_production.DATABASE_URL)")
+  pnpm exec prisma migrate status
+)
 ```
 
-and finish or revert the migration by hand before deploying again.
+A subshell, so the database URL — password and all — does not stay in the
+environment of the shell you carry on working in. Finish or revert the
+migration by hand before deploying again.
+
+**Both exports are load-bearing, and a bare `pnpm exec prisma migrate status`
+fails without them.** `prisma.config.ts` calls `loadEnv()`, which is a no-op
+only when `NODE_ENV=production`; anywhere else it looks for
+`ecosystem.config.js` in the working directory and throws when it is not there.
+And it is deliberately not there — the deploy keeps that file one level *above*
+the app directory so it survives the release swap, and rsync excludes it from
+the release itself. So the config the CLI wants is absent by design, and the
+database URL has to be read out of the file PM2 uses rather than kept in a
+second copy that could disagree with it.
+
+This is exactly what `deploy-api.sh` does around its own `migrate deploy`, and
+the block above is that same recipe run by hand.
+
+Three paths are involved and they are easy to confuse:
+
+| | |
+|---|---|
+| `$TREKKER_REMOTE_ROOT/api` | the workspace root — where `pnpm --filter ./nest-api …` is run |
+| `$TREKKER_REMOTE_ROOT/api/nest-api` | the API package — what PM2 runs, and where the Prisma CLI belongs |
+| `$TREKKER_REMOTE_ROOT/ecosystem.config.js` | the PM2 config, above both so the release swap cannot take it |
+
+A shell left open in the app directory across a deploy is still on the *old*
+inode — the path reads the same while the directory beneath it has been
+replaced. `cd` back in and confirm with `pwd -P` before trusting anything a
+command there tells you.
 
 ## Rollback
 
