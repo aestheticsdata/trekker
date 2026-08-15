@@ -98,18 +98,22 @@ function show(disks: DiskMount[]): void {
   }
 }
 
-function resolveAuth(): SshAuth {
+/**
+ * A key file if one is named, otherwise the forwarded agent — and null when
+ * there is neither.
+ *
+ * Null rather than `process.exit`: the SSH comparison is the optional half of
+ * this script, and killing the run for the want of an agent throws away the
+ * eight local checks that already passed and reports the whole thing red. A
+ * half that cannot run is a skip, which is what the missing environment
+ * variables are already treated as.
+ */
+function resolveAuth(): SshAuth | null {
   const keyPath = process.env.TREKKER_TEST_SSH_KEY;
   if (keyPath) return { kind: "PRIVATE_KEY", privateKey: readFileSync(keyPath) };
 
   const agentSocket = process.env.SSH_AUTH_SOCK;
-  if (agentSocket) return { kind: "AGENT", agentSocket };
-
-  console.error(
-    "An SSH host was named but there is no way to authenticate. Reconnect with `ssh -A`,\n" +
-      "or point TREKKER_TEST_SSH_KEY at a private key this host accepts for this user.",
-  );
-  process.exit(1);
+  return agentSocket ? { kind: "AGENT", agentSocket } : null;
 }
 
 async function main(): Promise<void> {
@@ -196,8 +200,16 @@ async function main(): Promise<void> {
 
   const sshHost = process.env.TREKKER_TEST_SSH_HOST;
   const sshUser = process.env.TREKKER_TEST_SSH_USER;
+  const auth = resolveAuth();
   if (!sshHost || !sshUser) {
     console.log("\n== local and SSH ==\n  skipped: set TREKKER_TEST_SSH_HOST and TREKKER_TEST_SSH_USER to compare");
+  } else if (!auth) {
+    console.log(
+      "\n== local and SSH ==\n" +
+        "  skipped: an SSH host was named but there is no way to authenticate.\n" +
+        "  Reconnect with `ssh -A` so SSH_AUTH_SOCK is forwarded, or point\n" +
+        "  TREKKER_TEST_SSH_KEY at a private key this host accepts for this user.",
+    );
   } else {
     console.log("\n== the two drivers describe the same filesystems ==");
     const pool = new SshConnectionPool(DEFAULT_POOL_SETTINGS);
@@ -206,7 +218,7 @@ async function main(): Promise<void> {
       address: sshHost,
       port: Number(process.env.TREKKER_TEST_SSH_PORT ?? 22),
       username: sshUser,
-      auth: resolveAuth(),
+      auth,
     };
     const ssh = new SshDriver(spec, pool, DEFAULT_POOL_SETTINGS);
 
