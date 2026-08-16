@@ -504,6 +504,27 @@ describe("sending it", () => {
   });
 });
 
+/**
+ * What the process is holding, counting the memory a stream actually uses.
+ *
+ * `heapUsed` alone is the wrong number here, and quietly so: a `Buffer` lives
+ * outside V8's heap. A version of the download path that pushed every chunk
+ * into an array and released none was written and run against this test: while
+ * it held all two gigabytes, `heapUsed` went *down* 9.0 MB and the old
+ * assertion passed. `arrayBuffers` is where those bytes are counted, and the
+ * same broken path measures 2,063.8 MB here — which is the whole difference
+ * between a test that can fail and one that cannot.
+ *
+ * Deliberately identical to `held()` in `transfers/transfer.spec.ts`, where the
+ * finding was first made (TRE-23). The two must stay the same measure: a
+ * download and a transfer make the same claim about memory, and it is worth
+ * nothing if they check it differently. This file only predates the correction.
+ */
+function held(): number {
+  const usage = process.memoryUsage();
+  return usage.heapUsed + usage.arrayBuffers;
+}
+
 describe("memory", () => {
   it("moves a 2 GiB file without holding it", async () => {
     // Sparse: `truncate` costs no disk and no write time, and the read path is
@@ -523,15 +544,22 @@ describe("memory", () => {
     const plan = await service.plan(USER_ID, HOST_ID, path);
     const opened = await service.open(USER_ID, "s", HOST_ID, path, plan, null);
 
-    global.gc?.();
-    const before = process.memoryUsage().heapUsed;
+    // No `global.gc()` here on purpose. It read as making the baseline
+    // deterministic and never did: nothing in `nest-api` passes `--expose-gc`,
+    // so `global.gc` is undefined under `pnpm test` and the call was inert. The
+    // ceiling below is wide enough not to need one.
+    const before = held();
     const target = sink();
     await pipeline(opened.stream, target);
-    const after = process.memoryUsage().heapUsed;
+    const after = held();
 
     expect(target.bytes).toBe(2 * 1024 ** 3);
-    // A hundred megabytes of headroom against two gigabytes moved. Anything
-    // that accumulated would be three orders of magnitude past this.
+    // A hundred megabytes of headroom against two gigabytes moved. An upper
+    // bound, not a prediction: streaming the file measures at *minus* 5.3 MB
+    // here, because a collection during the pipeline releases more than the
+    // chunks in flight ever hold. What the ceiling has to separate is that from
+    // accumulation, and accumulation came in at 2,063.8 MB — a margin of twenty
+    // to one either side, which is why the number needs no tuning.
     expect(after - before).toBeLessThan(100 * 1024 ** 2);
   }, 60_000);
 });
