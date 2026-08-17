@@ -1,5 +1,6 @@
 "use client";
 
+import { Tooltip } from "@components/ui/tooltip";
 import { STRENGTH_LABELS, scoreKey } from "@schemas/auth";
 import { useId, useState } from "react";
 
@@ -54,17 +55,21 @@ export function AuthField({
         >
           {label}
         </label>
-        {/* Always rendered, empty when valid: this is what keeps the height fixed. */}
-        <span
-          id={`${id}-error`}
-          // `alert` only once it has something to say, so an empty span is not
-          // announced as a blank message.
-          role={error ? "alert" : undefined}
-          title={error}
-          className="text-danger-soft min-w-0 truncate text-right text-xs"
-        >
-          {error ?? ""}
-        </span>
+        {/* Always rendered, empty when valid: this is what keeps the height
+            fixed. The tooltip adds no element of its own and hands the span
+            straight back when there is no error, so neither the box nor the
+            label's line moves when one appears (TRE-76). */}
+        <Tooltip content={error}>
+          <span
+            id={`${id}-error`}
+            // `alert` only once it has something to say, so an empty span is not
+            // announced as a blank message.
+            role={error ? "alert" : undefined}
+            className="text-danger-soft min-w-0 truncate text-right text-xs"
+          >
+            {error ?? ""}
+          </span>
+        </Tooltip>
       </div>
 
       <div className="relative">

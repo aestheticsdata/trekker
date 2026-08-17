@@ -3,6 +3,7 @@
 import { useAuth } from "@auth/context/AuthContext";
 import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
+import { Tooltip } from "@components/ui/tooltip";
 import { joinPath } from "@helpers/listing";
 import { parseMode } from "@helpers/permissions";
 import { ApiError } from "@lib/api/client";
@@ -190,15 +191,16 @@ function PermissionsPanel({
         <span className="text-ink font-mono text-xs font-semibold tracking-label">chmod</span>
         <span className="text-ink-muted min-w-0 truncate font-mono text-cmd">{subject}</span>
         <div className="flex-1" />
-        <button
-          type="button"
-          onClick={close}
-          aria-label="Close"
-          title="Close (⎋)"
-          className="text-ink-dim font-mono text-2xs"
-        >
-          esc ✕
-        </button>
+        <Tooltip content="Close (⎋)">
+          <button
+            type="button"
+            onClick={close}
+            aria-label="Close"
+            className="text-ink-dim font-mono text-2xs"
+          >
+            esc ✕
+          </button>
+        </Tooltip>
       </header>
 
       <div className="flex gap-4.5 px-3.5 pt-3.5 pb-2.5">

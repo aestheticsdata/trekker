@@ -4,6 +4,7 @@ import { useAuth } from "@auth/context/AuthContext";
 import { ActivityStrip } from "@components/sidebar/activity-strip";
 import { Volumes } from "@components/sidebar/volumes";
 import { useToast } from "@components/ui/toast";
+import { Tooltip } from "@components/ui/tooltip";
 import { TransferQueue } from "@components/ui/transfers";
 import { deleteBookmark, fetchBookmarks } from "@lib/api/bookmarks";
 import { fetchHostSummary } from "@lib/api/hosts";
@@ -180,16 +181,17 @@ function ServerRow({
         style={{ backgroundColor: host.colour }}
       />
 
-      <button
-        type="button"
-        onClick={onPick}
-        title={`Open ${host.label} in the active pane`}
-        className={`min-w-0 flex-1 truncate text-left font-mono text-xs ${
-          here ? "text-ink font-medium" : "text-ink-soft"
-        }`}
-      >
-        {host.label}
-      </button>
+      <Tooltip content={`Open ${host.label} in the active pane`}>
+        <button
+          type="button"
+          onClick={onPick}
+          className={`min-w-0 flex-1 truncate text-left font-mono text-xs ${
+            here ? "text-ink font-medium" : "text-ink-soft"
+          }`}
+        >
+          {host.label}
+        </button>
+      </Tooltip>
 
       {/* A measurement, so it degrades to a dash rather than vanishing. */}
       <span className="text-ink-faint flex-none font-mono text-caps">
@@ -198,21 +200,24 @@ function ServerRow({
 
       <span className="flex flex-none gap-0.5">
         {([0, 1] as const).map((pane) => (
-          <button
+          <Tooltip
             key={pane}
-            type="button"
-            onClick={() => onBind(pane)}
-            aria-pressed={boundTo[pane]}
-            title={`Open ${host.label} in pane ${pane === 0 ? "A" : "B"}`}
-            className="flex size-3.25 items-center justify-center border font-mono text-[0.5rem] font-semibold"
-            style={
-              boundTo[pane]
-                ? { backgroundColor: host.colour, color: "var(--color-on-accent)", borderColor: host.colour }
-                : { color: "var(--color-ink-faint)", borderColor: "var(--color-line-strong)" }
-            }
+            content={`Open ${host.label} in pane ${pane === 0 ? "A" : "B"}`}
           >
-            {pane === 0 ? "A" : "B"}
-          </button>
+            <button
+              type="button"
+              onClick={() => onBind(pane)}
+              aria-pressed={boundTo[pane]}
+              className="flex size-3.25 items-center justify-center border font-mono text-[0.5rem] font-semibold"
+              style={
+                boundTo[pane]
+                  ? { backgroundColor: host.colour, color: "var(--color-on-accent)", borderColor: host.colour }
+                  : { color: "var(--color-ink-faint)", borderColor: "var(--color-line-strong)" }
+              }
+            >
+              {pane === 0 ? "A" : "B"}
+            </button>
+          </Tooltip>
         ))}
       </span>
     </div>
@@ -276,26 +281,28 @@ function Favourites({
                 key={bookmark.id}
                 className="hover:bg-raised group flex items-center gap-1.5 pr-1 pl-2.5"
               >
-                <button
-                  type="button"
-                  onClick={() => onNavigate(host, bookmark.path)}
-                  title={bookmark.path}
-                  className="flex min-w-0 flex-1 flex-col items-start py-0.75 text-left"
-                >
-                  <span className="text-ink-soft w-full truncate font-mono text-xs">{bookmark.label}</span>
-                  {bookmark.hint && (
-                    <span className="text-ink-faint w-full truncate font-mono text-caps">{bookmark.hint}</span>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => remove.mutate(bookmark.id)}
-                  aria-label={`Remove ${bookmark.label} from favourites`}
-                  title="Remove"
-                  className="text-ink-faint hover:text-danger-soft flex-none px-1 font-mono text-2xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                >
-                  ✕
-                </button>
+                <Tooltip content={bookmark.path}>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate(host, bookmark.path)}
+                    className="flex min-w-0 flex-1 flex-col items-start py-0.75 text-left"
+                  >
+                    <span className="text-ink-soft w-full truncate font-mono text-xs">{bookmark.label}</span>
+                    {bookmark.hint && (
+                      <span className="text-ink-faint w-full truncate font-mono text-caps">{bookmark.hint}</span>
+                    )}
+                  </button>
+                </Tooltip>
+                <Tooltip content="Remove">
+                  <button
+                    type="button"
+                    onClick={() => remove.mutate(bookmark.id)}
+                    aria-label={`Remove ${bookmark.label} from favourites`}
+                    className="text-ink-faint hover:text-danger-soft flex-none px-1 font-mono text-2xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                  >
+                    ✕
+                  </button>
+                </Tooltip>
               </div>
             ))}
           </div>

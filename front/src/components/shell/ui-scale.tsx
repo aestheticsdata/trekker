@@ -1,5 +1,6 @@
 "use client";
 
+import { Tooltip } from "@components/ui/tooltip";
 import { clampBase, UI_BASE_DEFAULT, UI_BASE_KEY, UI_BASE_MAX, UI_BASE_MIN } from "@helpers/ui-scale";
 import { useEffect, useState } from "react";
 
@@ -60,16 +61,20 @@ function Step({
   onSelect: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      disabled={disabled}
-      aria-label={label}
-      title={label}
-      className={`px-1 ${disabled ? "text-line-strong cursor-not-allowed" : "text-ink-dim hover:text-ink"}`}
-    >
-      {glyph}
-    </button>
+    // `disabled` stays rather than becoming `aria-disabled` (TRE-76): the hint
+    // is this step's *name*, not a reason it cannot be pressed, so a step at the
+    // end of its range loses nothing by going quiet with the control.
+    <Tooltip content={label}>
+      <button
+        type="button"
+        onClick={onSelect}
+        disabled={disabled}
+        aria-label={label}
+        className={`px-1 ${disabled ? "text-line-strong cursor-not-allowed" : "text-ink-dim hover:text-ink"}`}
+      >
+        {glyph}
+      </button>
+    </Tooltip>
   );
 }
 

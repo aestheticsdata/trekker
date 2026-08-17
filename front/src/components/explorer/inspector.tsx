@@ -2,6 +2,7 @@
 
 import { useAuth } from "@auth/context/AuthContext";
 import { useToast } from "@components/ui/toast";
+import { Tooltip } from "@components/ui/tooltip";
 import {
   ageDays,
   formatAge,
@@ -187,14 +188,15 @@ export function Inspector({
     >
       <header className="bg-line text-brand flex h-6 flex-none items-center justify-between px-2.5 font-sans text-caps font-semibold tracking-[0.16em]">
         <span>INSPECTOR</span>
-        <button
-          type="button"
-          onClick={onClose}
-          title="Hide the inspector (⌘I)"
-          className="text-ink-faint hover:text-ink-muted font-normal"
-        >
-          ⌘I
-        </button>
+        <Tooltip content="Hide the inspector (⌘I)">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-ink-faint hover:text-ink-muted font-normal"
+          >
+            ⌘I
+          </button>
+        </Tooltip>
       </header>
 
       {/* The mockup pins INTEGRITY and the actions to the bottom with a flex
@@ -287,7 +289,7 @@ function DirectoryPanel({
           {
             label: "NEWEST",
             value: newest ? formatAge(ageDays(newest.mtime, now)) : "—",
-            title: newest?.name,
+            hint: newest?.name,
             quiet: true,
           },
         ]}
@@ -350,10 +352,10 @@ function EntryPanel({
             {
               label: "ON DISK",
               value: isLink ? "—" : formatTotal(onDiskBytes(entry.size)),
-              title: isLink ? undefined : "Rounded up to a 4 KiB block — an estimate, not a measurement",
+              hint: isLink ? undefined : "Rounded up to a 4 KiB block — an estimate, not a measurement",
             },
             { label: "MODE", value: entry.mode },
-            { label: "AGE", value: formatAge(ageDays(entry.mtime, now)), title: entry.mtime, quiet: true },
+            { label: "AGE", value: formatAge(ageDays(entry.mtime, now)), hint: entry.mtime, quiet: true },
           ]}
         />
 
@@ -439,12 +441,9 @@ function SelectionPanel({
             key={row.name}
             className="border-raised flex h-4.5 items-center gap-2 border-b font-mono text-2xs"
           >
-            <span
-              className="text-ink-soft min-w-0 flex-1 truncate"
-              title={row.name}
-            >
-              {row.name}
-            </span>
+            <Tooltip content={row.name}>
+              <span className="text-ink-soft min-w-0 flex-1 truncate">{row.name}</span>
+            </Tooltip>
             <span className="text-ink-faint flex-none">{formatSize(row.size, row.type)}</span>
           </div>
         ))}
@@ -499,7 +498,7 @@ function Name({ children }: { children: ReactNode }) {
 interface StatCell {
   label: string;
   value: string;
-  title?: string;
+  hint?: string;
   /** The dimmer value tone the mockup gives AGE — a reading, not a total. */
   quiet?: boolean;
 }
@@ -516,19 +515,22 @@ function Stats({ cells }: { cells: readonly StatCell[] }) {
     <div className="px-2.5 pt-2">
       <div className="bg-line border-line grid grid-cols-2 gap-px border">
         {cells.map((cell) => (
-          <div
+          <Tooltip
             key={cell.label}
-            className="bg-chrome px-1.75 py-1.25"
-            title={cell.title}
+            content={cell.hint}
           >
-            {/* `leading-none` because the mockup sets these two at /1 and /1.4,
-                while `text-3xs` and `text-xs` both default to a 1rem line box —
-                unset, the label floats 7px above the value it belongs to. */}
-            <div className="text-ink-faint font-mono text-3xs leading-none">{cell.label}</div>
-            <div className={`font-mono text-xs leading-[1.4] font-medium ${cell.quiet ? "text-ink-dim" : "text-ink"}`}>
-              {cell.value}
+            <div className="bg-chrome px-1.75 py-1.25">
+              {/* `leading-none` because the mockup sets these two at /1 and /1.4,
+                  while `text-3xs` and `text-xs` both default to a 1rem line box —
+                  unset, the label floats 7px above the value it belongs to. */}
+              <div className="text-ink-faint font-mono text-3xs leading-none">{cell.label}</div>
+              <div
+                className={`font-mono text-xs leading-[1.4] font-medium ${cell.quiet ? "text-ink-dim" : "text-ink"}`}
+              >
+                {cell.value}
+              </div>
             </div>
-          </div>
+          </Tooltip>
         ))}
       </div>
     </div>
@@ -542,7 +544,7 @@ function Meta({ children }: { children: ReactNode }) {
 /**
  * One key and one value. The key column is fixed so nine rows read as a table;
  * the value ellipsizes rather than wrapping, and carries the whole string in
- * its title — a path is exactly the thing that will not fit.
+ * its tooltip — a path is exactly the thing that will not fit.
  *
  * The key column is 56px where the mockup draws 70. That is the one geometry
  * here deliberately not ported: 2a's rows hold `{{ m.k }}`, a placeholder that
@@ -557,12 +559,9 @@ function MetaRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="border-raised flex h-4.5 items-center gap-2 border-b font-mono text-2xs">
       <dt className="text-ink-faint w-14 flex-none">{label}</dt>
-      <dd
-        className="text-ink-soft min-w-0 flex-1 truncate"
-        title={full}
-      >
-        {children}
-      </dd>
+      <Tooltip content={full}>
+        <dd className="text-ink-soft min-w-0 flex-1 truncate">{children}</dd>
+      </Tooltip>
     </div>
   );
 }
@@ -634,15 +633,16 @@ function Permissions({
               <Fragment key={row.who}>
                 <span>{row.who}</span>
                 {row.cells.map((cell, index) => (
-                  <span
+                  <Tooltip
                     // Position is the identity: three fixed columns, r/w/x.
                     // biome-ignore lint/suspicious/noArrayIndexKey: fixed r/w/x columns
                     key={index}
-                    title={cell.note}
-                    className={`py-0.5 text-center ${cell.granted ? "bg-accent text-on-accent" : "bg-raised"}`}
+                    content={cell.note}
                   >
-                    {cell.glyph}
-                  </span>
+                    <span className={`py-0.5 text-center ${cell.granted ? "bg-accent text-on-accent" : "bg-raised"}`}>
+                      {cell.glyph}
+                    </span>
+                  </Tooltip>
                 ))}
               </Fragment>
             ))}
@@ -687,23 +687,32 @@ function Actions({
       {ENTRY_ACTIONS.map((action) => {
         const press = handlers[action.id] ?? null;
         const busy = action.id === "link" && minting;
+        const off = press === null || busy;
         return (
-          <button
+          <Tooltip
             key={action.id}
-            type="button"
-            disabled={press === null || busy}
-            onClick={press ?? undefined}
-            title={action.reason}
-            className={
-              press === null || busy
-                ? `bg-line text-ink-dim cursor-not-allowed border py-1.5 text-center font-mono text-cmd ${
-                    action.primary ? "border-accent-soft" : "border-line-strong"
-                  }`
-                : "bg-accent-soft text-on-accent border-accent-soft hover:bg-accent border py-1.5 text-center font-mono text-cmd font-medium"
-            }
+            content={action.reason}
           >
-            {busy ? "signing…" : action.label}
-          </button>
+            <button
+              type="button"
+              // `aria-disabled`, not `disabled` (TRE-76). The whole value of the
+              // hint here is that it explains why the button is inert, and a
+              // control disabled by the attribute fires no mouse event and takes
+              // no focus — so that explanation reached nobody using a keyboard
+              // and nobody hovering it either.
+              aria-disabled={off}
+              onClick={off ? undefined : (press ?? undefined)}
+              className={
+                off
+                  ? `bg-line text-ink-dim cursor-not-allowed border py-1.5 text-center font-mono text-cmd ${
+                      action.primary ? "border-accent-soft" : "border-line-strong"
+                    }`
+                  : "bg-accent-soft text-on-accent border-accent-soft hover:bg-accent border py-1.5 text-center font-mono text-cmd font-medium"
+              }
+            >
+              {busy ? "signing…" : action.label}
+            </button>
+          </Tooltip>
         );
       })}
     </div>

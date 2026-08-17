@@ -4,6 +4,7 @@ import { Button } from "@components/hosts/field";
 import { HostForm } from "@components/hosts/host-form";
 import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
+import { Tooltip } from "@components/ui/tooltip";
 import { useState } from "react";
 
 import type { HostView } from "@lib/api/hosts";
@@ -95,15 +96,16 @@ export function HostManager({
           <div className="flex min-w-0 flex-1 flex-col">
             <header className="border-line text-ink-muted flex h-toolbar flex-none items-center justify-between border-b px-3 font-mono text-2xs tracking-label">
               {mode.kind === "create" ? "NEW HOST" : mode.kind === "edit" ? mode.host.slug : "SELECT A HOST"}
-              <button
-                type="button"
-                onClick={close}
-                aria-label="Close"
-                title="Close (⎋)"
-                className="text-ink-faint hover:text-ink px-1 font-mono text-sm"
-              >
-                ✕
-              </button>
+              <Tooltip content="Close (⎋)">
+                <button
+                  type="button"
+                  onClick={close}
+                  aria-label="Close"
+                  className="text-ink-faint hover:text-ink px-1 font-mono text-sm"
+                >
+                  ✕
+                </button>
+              </Tooltip>
             </header>
 
             {mode.kind === "idle" ? (
@@ -167,15 +169,16 @@ function HostRow({
         <span className="text-ink-soft w-full truncate font-mono text-xs">{host.label}</span>
         <span className="text-ink-faint w-full truncate font-mono text-2xs">{describe(host)}</span>
       </button>
-      <button
-        type="button"
-        onClick={onPick}
-        title={bound ? "Already open in this pane" : "Open in this pane"}
-        aria-label={`Open ${host.label} in this pane`}
-        className={`flex-none px-1 font-mono text-2xs ${bound ? "text-accent-soft" : "text-ink-faint hover:text-ink"}`}
-      >
-        {bound ? "●" : "→"}
-      </button>
+      <Tooltip content={bound ? "Already open in this pane" : "Open in this pane"}>
+        <button
+          type="button"
+          onClick={onPick}
+          aria-label={`Open ${host.label} in this pane`}
+          className={`flex-none px-1 font-mono text-2xs ${bound ? "text-accent-soft" : "text-ink-faint hover:text-ink"}`}
+        >
+          {bound ? "●" : "→"}
+        </button>
+      </Tooltip>
     </div>
   );
 }

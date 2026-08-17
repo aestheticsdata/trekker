@@ -203,7 +203,7 @@ export function HostForm({
                     value: "LOCAL",
                     label: "local",
                     disabled: localTaken,
-                    title: localTaken ? "This account already has a local host" : "The machine the API runs on",
+                    hint: localTaken ? "This account already has a local host" : "The machine the API runs on",
                   },
                   { value: "SSH", label: "ssh" },
                 ]}

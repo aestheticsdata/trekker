@@ -2,6 +2,7 @@
 
 import { useAuth } from "@auth/context/AuthContext";
 import { useToast } from "@components/ui/toast";
+import { Tooltip, TooltipBlock } from "@components/ui/tooltip";
 import { volumeFor, WARN_CHIP_FILL, WARN_CHIP_INK } from "@helpers/disks";
 import { formatTotal, parentPath } from "@helpers/listing";
 import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK, treemapBands } from "@helpers/treemap";
@@ -261,12 +262,11 @@ export function DiskUsage({
         <h2 className="text-accent-soft flex min-w-0 items-baseline gap-1 font-sans text-caps leading-none font-semibold tracking-[0.16em]">
           <span className="flex-none whitespace-nowrap">DISK USAGE</span>
           {host && (
-            <span
-              className="min-w-0 truncate font-mono tracking-normal"
-              title={`${host.label}:${root}`}
-            >
-              · {host.label}:{root}
-            </span>
+            <Tooltip content={`${host.label}:${root}`}>
+              <span className="min-w-0 truncate font-mono tracking-normal">
+                · {host.label}:{root}
+              </span>
+            </Tooltip>
           )}
         </h2>
 
@@ -288,7 +288,7 @@ export function DiskUsage({
             <Action
               onClick={() => stop.mutate()}
               disabled={stop.isPending}
-              title="Stop the scan running on this host"
+              hint="Stop the scan running on this host"
             >
               cancel ✕
             </Action>
@@ -296,7 +296,7 @@ export function DiskUsage({
             <Action
               onClick={() => begin.mutate(panePath)}
               disabled={begin.isPending}
-              title={`Walk ${panePath} with du and keep the result`}
+              hint={`Walk ${panePath} with du and keep the result`}
             >
               scan ⟳
             </Action>
@@ -304,7 +304,7 @@ export function DiskUsage({
 
         <Action
           onClick={onHide}
-          title="Collapse the strip and give the space back to the panes"
+          hint="Collapse the strip and give the space back to the panes"
         >
           hide ▾
         </Action>
@@ -414,12 +414,11 @@ function Summary({
   return (
     <p className={`${line} text-ink-faint flex items-baseline gap-1.5`}>
       {scan.stale && (
-        <span
-          className={`${WARN_CHIP_FILL} ${WARN_CHIP_INK} flex-none rounded-xs px-1 py-0.5 leading-none`}
-          title={`This install calls a scan current for ${formatDuration(scan.staleAfterSeconds)}.`}
-        >
-          ⚠ stale
-        </span>
+        <Tooltip content={`This install calls a scan current for ${formatDuration(scan.staleAfterSeconds)}.`}>
+          <span className={`${WARN_CHIP_FILL} ${WARN_CHIP_INK} flex-none rounded-xs px-1 py-0.5 leading-none`}>
+            ⚠ stale
+          </span>
+        </Tooltip>
       )}
       <span className="min-w-0 truncate">{parts.join(" · ")}</span>
     </p>
@@ -440,37 +439,57 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
     <div className="flex h-7.5 gap-0.5">
       {bands.map((band, index) => {
         const percent = Math.round(band.share * 100);
-        const label = `${band.path ?? "everything below the five largest"} — ${formatTotal(band.bytes)}, ${percent}%`;
         // A pane cannot be pointed at a file, so a band standing for one takes
         // you to the directory holding it — which is the place you can act on it.
         const target = band.path === null ? null : band.isDirectory ? band.path : parentPath(band.path);
 
         return (
-          <button
+          // ⚠️ The tooltip wraps the button and adds no element of its own,
+          // which here is structural rather than tidy: `flexGrow`/`flexBasis` is
+          // the entire geometry of this strip, and a box between the button and
+          // the flex row would divide the bar by the wrong numbers.
+          <Tooltip
             key={band.path ?? "rest"}
-            type="button"
-            disabled={target === null}
-            onClick={() => target && onNavigate(target)}
-            title={target === null ? label : `${label}. Open it in the active pane.`}
-            // `flexBasis: 0` with a grow of the band's share is the whole
-            // geometry: the row's width, minus its gaps, divided in proportion.
-            // `min-w-0` is what lets a sliver actually be a sliver rather than
-            // be held open by its own padding.
-            style={{ flexGrow: band.share, flexBasis: 0 }}
-            // By identity, never by position: the fold lands at whatever index
-            // is left over, which is the fifth only when the level had five
-            // children to name.
-            className={`flex min-w-0 flex-col justify-end overflow-hidden px-1.25 py-0.75 text-left ${
-              band.path === null ? BAND_REST_CLASS : BAND_CLASS[Math.min(index, BAND_CLASS.length - 1)]
-            } ${target === null ? "cursor-default" : ""}`}
+            content={
+              <TooltipBlock
+                note={target === null ? undefined : "Click to open it in the active pane."}
+                rows={[
+                  { label: "size", value: formatTotal(band.bytes) },
+                  { label: "share", value: `${percent}%` },
+                ]}
+                subject={band.path ?? "everything below the five largest"}
+              />
+            }
           >
-            <span className={`${BAND_LABEL_INK} truncate font-mono text-caption leading-tight font-medium`}>
-              {band.label}
-            </span>
-            <span className={`${BAND_SIZE_INK} truncate font-mono text-caps leading-tight`}>
-              {formatTotal(band.bytes)} · {percent}%
-            </span>
-          </button>
+            <button
+              type="button"
+              // `aria-disabled`, not `disabled`. A disabled control fires no
+              // mouse event at all, and the band that cannot be opened is the
+              // fold — the one band whose full size is written down nowhere
+              // else on screen. Still not activatable, the click below is
+              // guarded, and now reachable by keyboard, which it never was.
+              aria-disabled={target === null}
+              onClick={() => target && onNavigate(target)}
+              // `flexBasis: 0` with a grow of the band's share is the whole
+              // geometry: the row's width, minus its gaps, divided in proportion.
+              // `min-w-0` is what lets a sliver actually be a sliver rather than
+              // be held open by its own padding.
+              style={{ flexGrow: band.share, flexBasis: 0 }}
+              // By identity, never by position: the fold lands at whatever index
+              // is left over, which is the fifth only when the level had five
+              // children to name.
+              className={`flex min-w-0 flex-col justify-end overflow-hidden px-1.25 py-0.75 text-left ${
+                band.path === null ? BAND_REST_CLASS : BAND_CLASS[Math.min(index, BAND_CLASS.length - 1)]
+              } ${target === null ? "cursor-default" : ""}`}
+            >
+              <span className={`${BAND_LABEL_INK} truncate font-mono text-caption leading-tight font-medium`}>
+                {band.label}
+              </span>
+              <span className={`${BAND_SIZE_INK} truncate font-mono text-caps leading-tight`}>
+                {formatTotal(band.bytes)} · {percent}%
+              </span>
+            </button>
+          </Tooltip>
         );
       })}
     </div>
@@ -534,14 +553,15 @@ function Blank({
 
   return (
     <div className="border-pane-dash flex h-7.5 items-center gap-2.5 border border-dashed px-2">
-      <p
-        className={`min-w-0 flex-1 truncate font-mono text-caption leading-none ${
-          failure ? "text-danger-soft" : "text-ink-faint"
-        }`}
-        title={failure ?? undefined}
-      >
-        {failure ?? `${root} has not been scanned yet — du walks it once and the result is kept.`}
-      </p>
+      <Tooltip content={failure ?? undefined}>
+        <p
+          className={`min-w-0 flex-1 truncate font-mono text-caption leading-none ${
+            failure ? "text-danger-soft" : "text-ink-faint"
+          }`}
+        >
+          {failure ?? `${root} has not been scanned yet — du walks it once and the result is kept.`}
+        </p>
+      </Tooltip>
       {onScan && (
         <button
           type="button"
@@ -572,20 +592,30 @@ function Facts({ scan }: { scan: ScanView | null }) {
     <div className="text-ink-faint mt-1.5 flex gap-4 overflow-hidden font-mono text-caption leading-none whitespace-nowrap">
       <Fact
         label="largest"
-        title={largest?.path}
+        hint={largest?.path}
       >
         {largest ? `${lastSegment(largest.path)} ${formatTotal(Number(largest.bytes))}` : null}
       </Fact>
 
       <Fact
         label="duplicates"
-        // The pair matters: `confirmed` are groups two files of which were read
-        // and hashed, `candidates` only share a size. Reporting the second as
-        // the first would promise reclaimable space that may not exist.
-        title={
-          duplicates
-            ? `${duplicates.candidates} candidate groups by size, ${duplicates.confirmed} confirmed by hash, ${duplicates.skipped} too large to hash`
-            : undefined
+        hint={
+          duplicates ? (
+            <TooltipBlock
+              // The pair matters: `confirmed` are groups two files of which were
+              // read and hashed, `candidates` only share a size. Reporting the
+              // second as the first would promise reclaimable space that may not
+              // exist — which is why they are three rows here rather than the
+              // one flat line a `title` could hold.
+              note="Only the confirmed groups are reclaimable."
+              rows={[
+                { label: "candidates", value: formatCount(duplicates.candidates) },
+                { label: "confirmed", value: formatCount(duplicates.confirmed) },
+                { label: "too large to hash", value: formatCount(duplicates.skipped) },
+              ]}
+              subject="duplicates, by size then by hash"
+            />
+          ) : undefined
         }
       >
         {duplicates
@@ -595,7 +625,17 @@ function Facts({ scan }: { scan: ScanView | null }) {
 
       <Fact
         label="files > 1 year"
-        title={old ? `${formatTotal(Number(old.bytes))}, untouched since ${old.before.slice(0, 10)}` : undefined}
+        hint={
+          old ? (
+            <TooltipBlock
+              rows={[
+                { label: "size", value: formatTotal(Number(old.bytes)) },
+                { label: "untouched since", value: old.before.slice(0, 10) },
+              ]}
+              subject="files older than a year"
+            />
+          ) : undefined
+        }
       >
         {old ? formatCount(old.count) : null}
       </Fact>
@@ -603,39 +643,49 @@ function Facts({ scan }: { scan: ScanView | null }) {
   );
 }
 
-function Fact({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
+/** `hint`, not `title`: a prop called `title` that is not a title is how the
+ *  attribute finds its way back in (TRE-76). */
+function Fact({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
-    <span
-      title={title}
-      className="min-w-0 truncate"
-    >
-      {label}: <span className="text-ink-soft">{children ?? "—"}</span>
-    </span>
+    <Tooltip content={hint}>
+      <span className="min-w-0 truncate">
+        {label}: <span className="text-ink-soft">{children ?? "—"}</span>
+      </span>
+    </Tooltip>
   );
 }
 
-/** The mockup's own control text: mono, lowercase, no border. */
+/**
+ * The mockup's own control text: mono, lowercase, no border.
+ *
+ * The one place in this file that keeps the `disabled` attribute rather than
+ * moving to `aria-disabled`. Both are true of it: the state lasts as long as one
+ * request is in flight, and the hint says what the button does rather than why
+ * it cannot be pressed. Nothing is stranded by the hint pausing for as long as
+ * the control does.
+ */
 function Action({
   onClick,
   disabled = false,
-  title,
+  hint,
   children,
 }: {
   onClick: () => void;
   disabled?: boolean;
-  title: string;
+  hint: string;
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className="text-ink-dim hover:text-ink flex-none font-mono text-caption leading-none whitespace-nowrap disabled:opacity-60"
-    >
-      {children}
-    </button>
+    <Tooltip content={hint}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className="text-ink-dim hover:text-ink flex-none font-mono text-caption leading-none whitespace-nowrap disabled:opacity-60"
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 

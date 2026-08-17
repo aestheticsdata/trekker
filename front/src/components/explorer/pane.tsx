@@ -2,6 +2,7 @@
 
 import { pathOf } from "@components/explorer/pane-state";
 import { useRowWindow } from "@components/explorer/row-window";
+import { Tooltip } from "@components/ui/tooltip";
 import { ageIndex, HEAT, HEAT_OFF_BAR, HEAT_OFF_INK } from "@helpers/heat";
 import { ageDays, breadcrumbs, formatAge, formatSize, formatTotal, typeTag } from "@helpers/listing";
 import { ApiError } from "@lib/api/client";
@@ -449,14 +450,15 @@ function PathRow({
       </nav>
 
       {badge && (
-        <span
-          title={badge.title}
-          className={`hidden flex-none rounded-xs px-1.5 py-0.5 text-2xs whitespace-nowrap @[25rem]:inline ${
-            badge.alarming ? "bg-on-pane-muted text-ink" : "bg-pane-chip text-on-pane"
-          }`}
-        >
-          {badge.label}
-        </span>
+        <Tooltip content={badge.hint}>
+          <span
+            className={`hidden flex-none rounded-xs px-1.5 py-0.5 text-2xs whitespace-nowrap @[25rem]:inline ${
+              badge.alarming ? "bg-on-pane-muted text-ink" : "bg-pane-chip text-on-pane"
+            }`}
+          >
+            {badge.label}
+          </span>
+        </Tooltip>
       )}
     </div>
   );
@@ -480,11 +482,11 @@ function badgeFor(
   meta: ListMeta | null,
   volume: DiskMount | null,
   shownBytes: number,
-): { label: string; title?: string; alarming: boolean } | null {
+): { label: string; hint?: string; alarming: boolean } | null {
   if (meta?.truncated) {
     return {
       label: `⚠ first ${meta.count} of ${meta.totalEntries}`,
-      title: "This directory has more entries than one listing carries.",
+      hint: "This directory has more entries than one listing carries.",
       alarming: true,
     };
   }
@@ -492,7 +494,7 @@ function badgeFor(
   if (volume) {
     return {
       label: `⚠ volume at ${volume.percent}%`,
-      title: `${volume.mountPoint} is ${volume.percent}% full — ${formatTotal(volume.availableBytes)} free.`,
+      hint: `${volume.mountPoint} is ${volume.percent}% full — ${formatTotal(volume.availableBytes)} free.`,
       alarming: true,
     };
   }
@@ -512,16 +514,22 @@ function NavButton({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!enabled}
-      aria-label={label}
-      title={label}
-      className={`flex-none px-1 py-0.5 ${enabled ? "text-on-pane" : "text-pane-line cursor-not-allowed"}`}
-    >
-      {glyph}
-    </button>
+    // `disabled` stays rather than becoming `aria-disabled` (TRE-76): the hint
+    // is this arrow's *name*, not a reason it cannot be pressed, so an arrow
+    // with nowhere to go loses nothing by going quiet. The rule this file
+    // follows is that only a hint explaining its own unavailability needs the
+    // control to stay hoverable.
+    <Tooltip content={label}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={!enabled}
+        aria-label={label}
+        className={`flex-none px-1 py-0.5 ${enabled ? "text-on-pane" : "text-pane-line cursor-not-allowed"}`}
+      >
+        {glyph}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -662,12 +670,11 @@ function Row({
 
       {/* The padding is unconditional, so turning the heat map off removes a
           fill and never a pixel — the column keeps its width and no row moves. */}
-      <span
-        className={`px-1 py-0.5 text-right text-2xs ${chip ?? ""} ${heat ? paint.ink : HEAT_OFF_INK}`}
-        title={row.mtime}
-      >
-        {formatAge(days)}
-      </span>
+      <Tooltip content={row.mtime}>
+        <span className={`px-1 py-0.5 text-right text-2xs ${chip ?? ""} ${heat ? paint.ink : HEAT_OFF_INK}`}>
+          {formatAge(days)}
+        </span>
+      </Tooltip>
     </div>
   );
 }

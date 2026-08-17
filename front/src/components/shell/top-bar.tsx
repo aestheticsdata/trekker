@@ -1,6 +1,7 @@
 "use client";
 
 import { Sparkline } from "@components/shell/sparkline";
+import { Tooltip } from "@components/ui/tooltip";
 
 /**
  * The 34px top bar (TRE-14 §2, trued up against mockup 2a by TRE-42): who you
@@ -120,15 +121,14 @@ export function TopBar({
             </button>
           ))}
           {overflow > 0 && (
-            <span
-              className="text-ink-faint font-mono text-2xs"
-              title={views
+            <Tooltip
+              content={views
                 .slice(VISIBLE_VIEWS)
                 .map((view) => view.name)
-                .join(", ")}
+                .join("\n")}
             >
-              +{overflow}
-            </span>
+              <span className="text-ink-faint font-mono text-2xs">+{overflow}</span>
+            </Tooltip>
           )}
         </nav>
       )}

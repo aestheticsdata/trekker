@@ -36,6 +36,7 @@ import { fileURLToPath } from "node:url";
 
 import { WARN_CHIP_FILL, WARN_CHIP_INK } from "../src/helpers/disks.ts";
 import { AGE_BUCKETS, HEAT, HEAT_OFF_INK, PANE_SURFACES } from "../src/helpers/heat.ts";
+import { TOOLTIP_INK, TOOLTIP_LABEL_INK, TOOLTIP_SUBJECT_INK, TOOLTIP_SURFACE } from "../src/helpers/tooltip.ts";
 import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK } from "../src/helpers/treemap.ts";
 
 /** WCAG 2.1 AA for text below 18.66px bold / 24px regular, which is all of it. */
@@ -81,6 +82,22 @@ for (const [index, band] of [...BAND_CLASS, BAND_REST_CLASS].entries()) {
 
 console.log("\n--- the chrome's warning chip ---");
 check("stale marker", WARN_CHIP_INK, WARN_CHIP_FILL);
+
+console.log("\n--- the tooltip bubble (TRE-76) ---");
+check("subject", TOOLTIP_SUBJECT_INK, TOOLTIP_SURFACE);
+check("value", TOOLTIP_INK, TOOLTIP_SURFACE);
+check("label and note", TOOLTIP_LABEL_INK, TOOLTIP_SURFACE);
+
+/*
+ * And the one this app would otherwise have reached for. `ink-faint` is the
+ * colour of a quiet second line everywhere else in the chrome, which is exactly
+ * why it has to be refused here in writing rather than in somebody's memory.
+ *
+ * Printed rather than checked, like the mockup's band ramp above: it is not a
+ * pair that ships, it is the reason a pair that would have shipped does not.
+ */
+const faint = ratio(hexOf("text-ink-faint"), hexOf(TOOLTIP_SURFACE));
+console.log(`  --   ink-faint, refused in the bubble    ${faint.toFixed(2).padStart(5)}:1  ${verdict(faint)}`);
 
 /**
  * What the mockup shipped, kept as a demonstration rather than as a check.

@@ -1,3 +1,4 @@
+import { Tooltip } from "@components/ui/tooltip";
 import Link from "next/link";
 
 import type { ReactNode } from "react";
@@ -59,13 +60,14 @@ export function AuthCard({
           <span className="flex min-w-0 items-baseline gap-2">
             <span className={`shrink-0 font-mono text-xs tracking-label ${STATUS_CLASS[status]}`}>{status}</span>
             {/* Always present, empty when there is nothing wrong. */}
-            <span
-              role={failure ? "alert" : undefined}
-              title={failure ?? undefined}
-              className="text-danger-soft min-w-0 truncate text-xs"
-            >
-              {failure ?? ""}
-            </span>
+            <Tooltip content={failure ?? undefined}>
+              <span
+                role={failure ? "alert" : undefined}
+                className="text-danger-soft min-w-0 truncate text-xs"
+              >
+                {failure ?? ""}
+              </span>
+            </Tooltip>
           </span>
           {footer}
         </footer>

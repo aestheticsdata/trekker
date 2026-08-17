@@ -1,5 +1,7 @@
 "use client";
 
+import { Tooltip } from "@components/ui/tooltip";
+
 /**
  * The 30px toolbar (TRE-14 §3, trued up against mockup 2a by TRE-42).
  *
@@ -124,13 +126,12 @@ export function Toolbar({
         )}
       </label>
 
-      <span
-        className="hidden items-center gap-2.25 font-mono text-2xs whitespace-nowrap stats:flex"
-        title="Column visibility arrives in TRE-16"
-      >
-        <span className="text-ink-dim">columns</span>
-        <span className="text-brand">{DEFAULT_COLUMNS.join(" · ")}</span>
-      </span>
+      <Tooltip content="Column visibility arrives in TRE-16">
+        <span className="hidden items-center gap-2.25 font-mono text-2xs whitespace-nowrap stats:flex">
+          <span className="text-ink-dim">columns</span>
+          <span className="text-brand">{DEFAULT_COLUMNS.join(" · ")}</span>
+        </span>
+      </Tooltip>
 
       <Toggle
         label="heat"
@@ -142,7 +143,7 @@ export function Toolbar({
           nothing to open below the inspector breakpoint. */}
       <Toggle
         label="inspector"
-        title="Show the inspector (⌘I)"
+        hint="Show the inspector (⌘I)"
         tone="accent"
         className="hidden inspector:flex"
         pressed={inspector}
@@ -167,26 +168,33 @@ function ActionButton({ action }: { action: ToolbarAction }) {
   const disabled = action.unavailableReason !== undefined;
 
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={action.onSelect}
-      // `title` carries the reason on hover; aria-describedby would need an
-      // element per button for the same sentence the title already says.
-      title={action.unavailableReason}
-      className={[
-        "flex h-5 items-center gap-1 rounded-sm border px-2 font-mono text-xs whitespace-nowrap",
-        // Danger stays red even while disabled: rm should never look routine.
-        action.danger
-          ? `border-danger text-danger-soft ${disabled ? "cursor-not-allowed" : "hover:border-danger-mid hover:bg-danger/20"}`
-          : disabled
-            ? "border-line-strong text-ink-dim cursor-not-allowed"
-            : "border-line-strong text-ink-muted hover:text-ink hover:border-accent-soft",
-      ].join(" ")}
-    >
-      {action.label}
-      {action.hint && <span>{action.hint}</span>}
-    </button>
+    // The tooltip carries the reason, and it is `aria-describedby` rather than
+    // an attribute now — the bubble is one element portalled to the body and
+    // pointed at by id, not one per button (TRE-76).
+    <Tooltip content={action.unavailableReason}>
+      <button
+        type="button"
+        // ⚠️ `aria-disabled`, not `disabled`. This is the button whose hint
+        // matters most in the file — it is the reason a destructive action
+        // cannot be pressed — and a control disabled by the attribute fires no
+        // mouse event and is not a tab stop, so that reason reached nobody at
+        // all. Inert either way: the click below returns before `onSelect`.
+        aria-disabled={disabled}
+        onClick={disabled ? undefined : action.onSelect}
+        className={[
+          "flex h-5 items-center gap-1 rounded-sm border px-2 font-mono text-xs whitespace-nowrap",
+          // Danger stays red even while disabled: rm should never look routine.
+          action.danger
+            ? `border-danger text-danger-soft ${disabled ? "cursor-not-allowed" : "hover:border-danger-mid hover:bg-danger/20"}`
+            : disabled
+              ? "border-line-strong text-ink-dim cursor-not-allowed"
+              : "border-line-strong text-ink-muted hover:text-ink hover:border-accent-soft",
+        ].join(" ")}
+      >
+        {action.label}
+        {action.hint && <span>{action.hint}</span>}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -248,25 +256,30 @@ function SplitControl({ value, onChange }: { value: SplitMode; onChange: (mode: 
       {options.map((option) => {
         const active = option.value === value;
         return (
-          <button
+          <Tooltip
             key={option.value}
-            type="button"
-            aria-pressed={active}
-            aria-label={option.label}
-            title={option.label}
-            onClick={() => onChange(option.value)}
-            className={`flex h-4.5 w-6 border ${
-              active ? "border-accent bg-line text-ink-soft" : "border-line-strong text-ink-faint hover:text-ink-muted"
-            }`}
+            content={option.label}
           >
-            <span className={`flex-1 ${option.value === "left" ? "bg-current" : ""}`} />
-            {/* The divider matches the active border, as the mockup draws it. */}
-            <span
-              aria-hidden
-              className={`w-px ${active ? "bg-accent" : "bg-current opacity-60"}`}
-            />
-            <span className={`flex-1 ${option.value === "right" ? "bg-current" : ""}`} />
-          </button>
+            <button
+              type="button"
+              aria-pressed={active}
+              aria-label={option.label}
+              onClick={() => onChange(option.value)}
+              className={`flex h-4.5 w-6 border ${
+                active
+                  ? "border-accent bg-line text-ink-soft"
+                  : "border-line-strong text-ink-faint hover:text-ink-muted"
+              }`}
+            >
+              <span className={`flex-1 ${option.value === "left" ? "bg-current" : ""}`} />
+              {/* The divider matches the active border, as the mockup draws it. */}
+              <span
+                aria-hidden
+                className={`w-px ${active ? "bg-accent" : "bg-current opacity-60"}`}
+              />
+              <span className={`flex-1 ${option.value === "right" ? "bg-current" : ""}`} />
+            </button>
+          </Tooltip>
         );
       })}
     </fieldset>
@@ -292,14 +305,16 @@ function Rule() {
  */
 function Toggle({
   label,
-  title,
+  hint,
   pressed,
   tone = "warning",
   className = "flex",
   onChange,
 }: {
   label: string;
-  title?: string;
+  /** `hint`, not `title`: a prop called `title` that is not one is how the
+   *  attribute finds its way back into this file (TRE-76). */
+  hint?: string;
   pressed: boolean;
   tone?: "warning" | "accent";
   className?: string;
@@ -309,16 +324,17 @@ function Toggle({
     tone === "accent" ? "border-accent-soft text-brand bg-accent/20" : "border-warning text-warning bg-warning/10";
 
   return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      title={title}
-      onClick={onChange}
-      className={`h-5 items-center rounded-sm border px-2 font-mono text-xs ${className} ${
-        pressed ? lit : "border-line-strong text-ink-faint hover:text-ink-muted"
-      }`}
-    >
-      {label}
-    </button>
+    <Tooltip content={hint}>
+      <button
+        type="button"
+        aria-pressed={pressed}
+        onClick={onChange}
+        className={`h-5 items-center rounded-sm border px-2 font-mono text-xs ${className} ${
+          pressed ? lit : "border-line-strong text-ink-faint hover:text-ink-muted"
+        }`}
+      >
+        {label}
+      </button>
+    </Tooltip>
   );
 }

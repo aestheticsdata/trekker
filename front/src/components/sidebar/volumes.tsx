@@ -1,5 +1,6 @@
 "use client";
 
+import { Tooltip, TooltipBlock } from "@components/ui/tooltip";
 import { DISK_CELLS, filledCells } from "@helpers/disks";
 import { formatTotal } from "@helpers/listing";
 import { fetchDisks } from "@lib/api/disks";
@@ -80,51 +81,65 @@ function Volume({ disk, onOpen }: { disk: DiskMount; onOpen: () => void }) {
   // than putting a link on the mount name, and a 176px row with a hit area the
   // width of `/var/log` is a row nobody hits.
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={`${disk.mountPoint} — ${disk.percent}% of ${formatTotal(disk.totalBytes)} used${
-        disk.warn ? " (above the warning threshold)" : ""
-      }. Open it in the active pane.`}
-      className="hover:bg-raised block w-full px-2.5 pt-1 pb-1.75 text-left"
+    <Tooltip
+      content={
+        <TooltipBlock
+          note={
+            disk.warn
+              ? "Above the warning threshold. Click to open it in the active pane."
+              : "Click to open it in the active pane."
+          }
+          rows={[
+            { label: "used", value: `${disk.percent}%` },
+            { label: "of", value: formatTotal(disk.totalBytes) },
+          ]}
+          subject={disk.mountPoint}
+        />
+      }
     >
-      {/* `leading-none` on the percentage as well as the row: `text-2xs` carries
-          a 16px line box of its own, which is five pixels taller than the 11px
-          line it sits on and would set the height of the whole row. */}
-      <span className="flex items-baseline font-mono text-xs leading-none font-medium">
-        <span className="text-ink min-w-0 flex-1 truncate">{disk.mountPoint}</span>
-        <span className={`ml-1.5 flex-none text-2xs leading-none ${disk.warn ? "text-warning" : "text-accent-soft"}`}>
-          {disk.percent}%
-        </span>
-      </span>
-
-      {/* Ten cells rather than a bar, because that is what the mockup draws and
-          because a segmented gauge is read as a fraction where a continuous one
-          is read as a value. Decorative: the percentage above says the same
-          thing in words. */}
-      <span
-        aria-hidden
-        className="mt-1.25 mb-1 flex gap-[0.09375rem]"
+      <button
+        type="button"
+        onClick={onOpen}
+        className="hover:bg-raised block w-full px-2.5 pt-1 pb-1.75 text-left"
       >
-        {Array.from({ length: DISK_CELLS }, (_, cell) => (
-          <i
-            // biome-ignore lint/suspicious/noArrayIndexKey: a fixed-length gauge, never reordered
-            key={cell}
-            className={`h-1.25 flex-1 ${cell < filled ? (disk.warn ? "bg-warning" : "bg-accent-soft") : "bg-line"}`}
-          />
-        ))}
-      </span>
-
-      <span className="text-ink-faint flex items-baseline font-mono text-caps leading-none">
-        {/* The device is the half that can be long — `vg0-log`, but also a
-            `/dev/mapper/…` — so it is the half that truncates. */}
-        <span className="min-w-0 flex-1 truncate">
-          {disk.device}
-          {disk.type && ` · ${disk.type}`}
+        {/* `leading-none` on the percentage as well as the row: `text-2xs`
+            carries a 16px line box of its own, which is five pixels taller than
+            the 11px line it sits on and would set the height of the whole row. */}
+        <span className="flex items-baseline font-mono text-xs leading-none font-medium">
+          <span className="text-ink min-w-0 flex-1 truncate">{disk.mountPoint}</span>
+          <span className={`ml-1.5 flex-none text-2xs leading-none ${disk.warn ? "text-warning" : "text-accent-soft"}`}>
+            {disk.percent}%
+          </span>
         </span>
-        <span className="ml-1.5 flex-none">{formatTotal(disk.availableBytes)} free</span>
-      </span>
-    </button>
+
+        {/* Ten cells rather than a bar, because that is what the mockup draws
+            and because a segmented gauge is read as a fraction where a
+            continuous one is read as a value. Decorative: the percentage above
+            says the same thing in words. */}
+        <span
+          aria-hidden
+          className="mt-1.25 mb-1 flex gap-[0.09375rem]"
+        >
+          {Array.from({ length: DISK_CELLS }, (_, cell) => (
+            <i
+              // biome-ignore lint/suspicious/noArrayIndexKey: a fixed-length gauge, never reordered
+              key={cell}
+              className={`h-1.25 flex-1 ${cell < filled ? (disk.warn ? "bg-warning" : "bg-accent-soft") : "bg-line"}`}
+            />
+          ))}
+        </span>
+
+        <span className="text-ink-faint flex items-baseline font-mono text-caps leading-none">
+          {/* The device is the half that can be long — `vg0-log`, but also a
+              `/dev/mapper/…` — so it is the half that truncates. */}
+          <span className="min-w-0 flex-1 truncate">
+            {disk.device}
+            {disk.type && ` · ${disk.type}`}
+          </span>
+          <span className="ml-1.5 flex-none">{formatTotal(disk.availableBytes)} free</span>
+        </span>
+      </button>
+    </Tooltip>
   );
 }
 

@@ -3,6 +3,7 @@
 import { useAuth } from "@auth/context/AuthContext";
 import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
+import { Tooltip } from "@components/ui/tooltip";
 import { joinPath } from "@helpers/listing";
 import { ApiError } from "@lib/api/client";
 import { applyRename, previewRename, renameEntry } from "@lib/api/rename";
@@ -239,31 +240,39 @@ function RenamePanel({
             // the cell says why it is inert rather than simply not responding.
             const disabled = option === "name" && only === null;
             return (
-              <button
+              <Tooltip
                 key={option}
-                type="button"
-                aria-pressed={active}
-                disabled={disabled}
-                title={disabled ? "One entry at a time — the pattern renames a selection" : undefined}
-                onClick={() => setMode(option)}
-                className={`border-line-strong flex items-center border-l px-2.25 font-mono text-2xs first:border-l-0 disabled:opacity-40 ${
-                  active ? "bg-accent-soft text-on-accent font-medium" : "text-ink-muted"
-                }`}
+                content={disabled ? "One entry at a time — the pattern renames a selection" : undefined}
               >
-                {option}
-              </button>
+                <button
+                  type="button"
+                  aria-pressed={active}
+                  // `aria-disabled`, not `disabled` (TRE-76): that sentence *is*
+                  // the explanation of the disabling, and a control disabled by
+                  // the attribute is neither hoverable nor a tab stop, so it was
+                  // the one cell nobody could ask.
+                  aria-disabled={disabled}
+                  onClick={() => !disabled && setMode(option)}
+                  className={`border-line-strong flex items-center border-l px-2.25 font-mono text-2xs first:border-l-0 aria-disabled:opacity-40 ${
+                    active ? "bg-accent-soft text-on-accent font-medium" : "text-ink-muted"
+                  }`}
+                >
+                  {option}
+                </button>
+              </Tooltip>
             );
           })}
         </fieldset>
-        <button
-          type="button"
-          onClick={close}
-          aria-label="Close"
-          title="Close (⎋)"
-          className="text-ink-dim font-mono text-2xs"
-        >
-          esc ✕
-        </button>
+        <Tooltip content="Close (⎋)">
+          <button
+            type="button"
+            onClick={close}
+            aria-label="Close"
+            className="text-ink-dim font-mono text-2xs"
+          >
+            esc ✕
+          </button>
+        </Tooltip>
       </header>
 
       {single ? (
@@ -386,21 +395,19 @@ function Row({ row }: { row: RenameMapping }) {
       {row.problem ? (
         // Red, and saying what it collides with rather than only that it does:
         // "duplicate" on its own leaves the reader to find the other row by eye.
-        // The row truncates, so the whole sentence is on the title — the part
+        // The row truncates, so the whole sentence is on the tooltip — the part
         // that gets cut is the end, which is where the other name is.
-        <span
-          title={`${row.next} — ${row.problem.message}`}
-          className="text-danger-soft truncate font-mono text-xs/[1.3]"
-        >
-          {row.next} <span className="text-danger-mid">— {row.problem.message}</span>
-        </span>
+        <Tooltip content={`${row.next} — ${row.problem.message}`}>
+          <span className="text-danger-soft truncate font-mono text-xs/[1.3]">
+            {row.next} <span className="text-danger-mid">— {row.problem.message}</span>
+          </span>
+        </Tooltip>
       ) : (
-        <span
-          title={row.changed ? row.next : undefined}
-          className={`truncate font-mono text-xs/[1.3] ${row.changed ? "text-ink" : "text-ink-faint"}`}
-        >
-          {row.changed ? row.next : "unchanged"}
-        </span>
+        <Tooltip content={row.changed ? row.next : undefined}>
+          <span className={`truncate font-mono text-xs/[1.3] ${row.changed ? "text-ink" : "text-ink-faint"}`}>
+            {row.changed ? row.next : "unchanged"}
+          </span>
+        </Tooltip>
       )}
     </div>
   );

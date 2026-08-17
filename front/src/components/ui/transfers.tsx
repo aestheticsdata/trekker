@@ -2,6 +2,7 @@
 
 import { useAuth } from "@auth/context/AuthContext";
 import { useToast } from "@components/ui/toast";
+import { Tooltip } from "@components/ui/tooltip";
 import { formatSize } from "@helpers/listing";
 import { ApiError } from "@lib/api/client";
 import { cancelTransfer, fetchTransfers, retryTransfer, transferStreamUrl } from "@lib/api/transfers";
@@ -249,15 +250,16 @@ function QueueRow({
           {job.operation}
         </span>
         <span className="text-ink-soft min-w-0 flex-1 truncate font-mono text-xs">{basename(job.dstPath)}</span>
-        <button
-          type="button"
-          aria-label={failed ? `Dismiss ${job.operation} into ${job.dstPath}` : `Cancel ${job.operation}`}
-          title={failed ? "Dismiss" : "Cancel"}
-          onClick={failed ? onDismiss : onCancel}
-          className="text-ink-faint hover:text-ink flex-none font-mono text-2xs"
-        >
-          ×
-        </button>
+        <Tooltip content={failed ? "Dismiss" : "Cancel"}>
+          <button
+            type="button"
+            aria-label={failed ? `Dismiss ${job.operation} into ${job.dstPath}` : `Cancel ${job.operation}`}
+            onClick={failed ? onDismiss : onCancel}
+            className="text-ink-faint hover:text-ink flex-none font-mono text-2xs"
+          >
+            ×
+          </button>
+        </Tooltip>
       </div>
 
       {failed ? (

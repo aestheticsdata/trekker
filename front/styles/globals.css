@@ -328,10 +328,17 @@ body {
  *
  * `:not(:disabled)` leaves the explicit `cursor-not-allowed` on the M2 actions
  * and the dead nav arrows alone: those are correctly not clickable.
+ *
+ * `[aria-disabled="true"]` is the other half of that, and it is why the guard is
+ * doubled rather than simply `:disabled`. A control disabled by the attribute
+ * fires no mouse event at all, so anything that has to explain its own
+ * unavailability — which is what a `disabled` M2 action, a pinned root or the
+ * treemap's fold band each do (TRE-76) — says so this way instead, and has to
+ * look every bit as inert while it does.
  */
 @layer base {
-  button:not(:disabled),
-  select:not(:disabled),
+  button:not(:disabled):not([aria-disabled="true"]),
+  select:not(:disabled):not([aria-disabled="true"]),
   summary,
   [role="button"]:not([aria-disabled="true"]) {
     cursor: pointer;

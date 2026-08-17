@@ -2,6 +2,7 @@
 
 import { useAuth } from "@auth/context/AuthContext";
 import { Overlay } from "@components/ui/overlay";
+import { Tooltip } from "@components/ui/tooltip";
 import { formatSize } from "@helpers/listing";
 import { ApiError } from "@lib/api/client";
 import { planTransfer, startTransfer } from "@lib/api/transfers";
@@ -336,14 +337,13 @@ function Endpoint({ host, path }: { host: HostView | null; path: string }) {
         className="size-1.5 flex-none rounded-full"
         style={{ backgroundColor: host?.colour ?? "var(--color-ink-faint)" }}
       />
-      <span
-        className="flex min-w-0 flex-auto justify-end overflow-hidden"
-        title={host ? `${host.label}:${path}` : path}
-      >
-        <span className="text-ink-muted flex-none font-mono text-cmd whitespace-nowrap">
-          {host ? `${host.label}:${path}` : path}
+      <Tooltip content={host ? `${host.label}:${path}` : path}>
+        <span className="flex min-w-0 flex-auto justify-end overflow-hidden">
+          <span className="text-ink-muted flex-none font-mono text-cmd whitespace-nowrap">
+            {host ? `${host.label}:${path}` : path}
+          </span>
         </span>
-      </span>
+      </Tooltip>
     </span>
   );
 }

@@ -11,6 +11,8 @@
  * a message appearing never moves the field below it (TRE-15's rule, kept).
  */
 
+import { Tooltip } from "@components/ui/tooltip";
+
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 
 export function Field({
@@ -70,7 +72,9 @@ export function Segmented<T extends string>({
 }: {
   label: string;
   value: T;
-  options: ReadonlyArray<{ value: T; label: string; disabled?: boolean; title?: string }>;
+  /** `hint`, not `title`: a prop called `title` that is not one is how the
+   *  attribute finds its way back in (TRE-76). */
+  options: ReadonlyArray<{ value: T; label: string; disabled?: boolean; hint?: string }>;
   onChange: (value: T) => void;
   disabled?: boolean;
 }) {
@@ -83,23 +87,29 @@ export function Segmented<T extends string>({
         const active = option.value === value;
         const off = disabled || option.disabled;
         return (
-          <button
+          <Tooltip
             key={option.value}
-            type="button"
-            aria-pressed={active}
-            disabled={off}
-            title={option.title}
-            onClick={() => onChange(option.value)}
-            className={`border-line-strong flex flex-1 items-center justify-center border-l px-2 font-mono text-xs first:border-l-0 ${
-              active
-                ? "bg-accent-soft text-on-accent font-medium"
-                : off
-                  ? "text-ink-faint cursor-not-allowed"
-                  : "text-ink-muted hover:text-ink"
-            }`}
+            content={option.hint}
           >
-            {option.label}
-          </button>
+            <button
+              type="button"
+              aria-pressed={active}
+              // `aria-disabled`, not `disabled` (TRE-76): an option that is off
+              // is the one whose hint says why, and a control disabled by the
+              // attribute is neither hoverable nor a tab stop.
+              aria-disabled={off}
+              onClick={() => !off && onChange(option.value)}
+              className={`border-line-strong flex flex-1 items-center justify-center border-l px-2 font-mono text-xs first:border-l-0 ${
+                active
+                  ? "bg-accent-soft text-on-accent font-medium"
+                  : off
+                    ? "text-ink-faint cursor-not-allowed"
+                    : "text-ink-muted hover:text-ink"
+              }`}
+            >
+              {option.label}
+            </button>
+          </Tooltip>
         );
       })}
     </fieldset>

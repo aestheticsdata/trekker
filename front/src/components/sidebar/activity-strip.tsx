@@ -1,5 +1,6 @@
 "use client";
 
+import { Tooltip, TooltipBlock } from "@components/ui/tooltip";
 import { fetchActivity } from "@lib/api/activity";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useQuery } from "@tanstack/react-query";
@@ -47,21 +48,30 @@ export function ActivityStrip() {
 }
 
 function Row({ item }: { item: ActivityView }) {
-  // The failure reason is worth more than the intent when there is one: "Removed
-  // a host" tells you nothing you did not already know if it did not happen.
-  const title = item.detail ? `${item.summary} — ${item.detail}` : item.summary;
-
   return (
-    <li
-      className="flex items-baseline gap-1.5 px-2.5 py-0.5"
-      title={title}
+    // The row is 176px wide and its summary is a sentence, so the tooltip is not
+    // a second copy of this row — it is the only place the row can be read. The
+    // failure reason goes under it rather than beside it: "Removed a host" tells
+    // you nothing you did not already know if it did not happen.
+    <Tooltip
+      content={
+        <TooltipBlock
+          note={item.detail}
+          rows={[{ label: "when", value: stamp(item.createdAt) }]}
+          subject={item.summary}
+        />
+      }
     >
-      <Dot outcome={item.outcome} />
-      <span className={`truncate font-sans text-xs ${item.outcome === "success" ? "text-ink-muted" : "text-ink"}`}>
-        {item.summary}
-      </span>
-      <span className="text-ink-faint ml-auto flex-none font-mono text-caps tabular-nums">{since(item.createdAt)}</span>
-    </li>
+      <li className="flex items-baseline gap-1.5 px-2.5 py-0.5">
+        <Dot outcome={item.outcome} />
+        <span className={`truncate font-sans text-xs ${item.outcome === "success" ? "text-ink-muted" : "text-ink"}`}>
+          {item.summary}
+        </span>
+        <span className="text-ink-faint ml-auto flex-none font-mono text-caps tabular-nums">
+          {since(item.createdAt)}
+        </span>
+      </li>
+    </Tooltip>
   );
 }
 
@@ -93,10 +103,22 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * The absolute time behind that column: `2026-08-17 15:42`.
+ *
+ * Sliced off the ISO string rather than formatted. `toLocaleString` would ask
+ * the browser which locale, and this app pins locales precisely because two
+ * different answers either side of hydration is a mismatch — and for a log the
+ * sliced form is unambiguous in a way a localised one is not.
+ */
+function stamp(iso: string): string {
+  return iso.slice(0, 16).replace("T", " ");
+}
+
+/**
  * Compact relative time — "4m", "3h", "2d". Deliberately not
  * `Intl.RelativeTimeFormat`: this column is 4 characters wide in the mockup and
  * "4 minutes ago" does not fit, so the full timestamp lives in the row's
- * `title` where there is room for it.
+ * tooltip where there is room for it.
  */
 function since(iso: string): string {
   const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));

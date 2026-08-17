@@ -1,6 +1,7 @@
 "use client";
 
 import { Button, Segmented, TextInput } from "@components/hosts/field";
+import { Tooltip } from "@components/ui/tooltip";
 import { contains } from "@schemas/host";
 
 import type { HostRoot } from "@lib/api/hosts";
@@ -82,14 +83,15 @@ export function RootsEditor({
               />
 
               {/* Says why this row cannot be removed before the button is reached for. */}
-              <span
-                className={`w-8 flex-none text-center font-mono text-3xs tracking-label ${
-                  holdsHome ? "text-accent-soft" : "text-transparent"
-                }`}
-                title={holdsHome ? "The home sits inside this root" : undefined}
-              >
-                HOME
-              </span>
+              <Tooltip content={holdsHome ? "The home sits inside this root" : undefined}>
+                <span
+                  className={`w-8 flex-none text-center font-mono text-3xs tracking-label ${
+                    holdsHome ? "text-accent-soft" : "text-transparent"
+                  }`}
+                >
+                  HOME
+                </span>
+              </Tooltip>
 
               <Segmented
                 label={`Root ${index + 1} access`}
@@ -97,22 +99,26 @@ export function RootsEditor({
                 onChange={(access) => replace(index, { access })}
                 options={[
                   { value: "READ", label: "read" },
-                  { value: "WRITE", label: "write", title: "Write implies read" },
+                  { value: "WRITE", label: "write", hint: "Write implies read" },
                 ]}
               />
 
-              <button
-                type="button"
-                onClick={() => onChange(roots.filter((_, position) => position !== index))}
-                disabled={pinned}
-                aria-label={`Remove root ${index + 1}`}
-                title={pinned ? "A host needs at least one root" : "Remove this root"}
-                className={`px-1 font-mono text-xs ${
-                  pinned ? "text-line-strong cursor-not-allowed" : "text-ink-faint hover:text-danger-soft"
-                }`}
-              >
-                ✕
-              </button>
+              <Tooltip content={pinned ? "A host needs at least one root" : "Remove this root"}>
+                <button
+                  type="button"
+                  // `aria-disabled`, not `disabled` (TRE-76): the pinned case is
+                  // the one with something to explain, and it was the one nobody
+                  // could hover or reach.
+                  aria-disabled={pinned}
+                  onClick={() => !pinned && onChange(roots.filter((_, position) => position !== index))}
+                  aria-label={`Remove root ${index + 1}`}
+                  className={`px-1 font-mono text-xs ${
+                    pinned ? "text-line-strong cursor-not-allowed" : "text-ink-faint hover:text-danger-soft"
+                  }`}
+                >
+                  ✕
+                </button>
+              </Tooltip>
             </div>
           );
         })}

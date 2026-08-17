@@ -3,6 +3,7 @@
 import { useAuth } from "@auth/context/AuthContext";
 import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
+import { Tooltip } from "@components/ui/tooltip";
 import { ApiError } from "@lib/api/client";
 import { createDirectory, createFile } from "@lib/api/create";
 import { useMutation } from "@tanstack/react-query";
@@ -152,15 +153,16 @@ function CreatePanel({
             );
           })}
         </fieldset>
-        <button
-          type="button"
-          onClick={close}
-          aria-label="Close"
-          title="Close (⎋)"
-          className="text-ink-dim font-mono text-2xs"
-        >
-          esc ✕
-        </button>
+        <Tooltip content="Close (⎋)">
+          <button
+            type="button"
+            onClick={close}
+            aria-label="Close"
+            className="text-ink-dim font-mono text-2xs"
+          >
+            esc ✕
+          </button>
+        </Tooltip>
       </header>
 
       <div className="px-3.5 pt-3.25 pb-2.5">
@@ -168,12 +170,11 @@ function CreatePanel({
             the operator has to remember from the pane behind the dialog. */}
         <div className="text-ink-faint mb-1.25 flex items-baseline gap-2 font-sans text-3xs/none font-medium tracking-[0.12em] uppercase">
           <span>in</span>
-          <span
-            title={directory}
-            className="text-ink-dim min-w-0 truncate font-mono text-2xs/none tracking-normal normal-case"
-          >
-            {directory}
-          </span>
+          <Tooltip content={directory}>
+            <span className="text-ink-dim min-w-0 truncate font-mono text-2xs/none tracking-normal normal-case">
+              {directory}
+            </span>
+          </Tooltip>
         </div>
 
         <div className="mb-1.25 flex items-baseline justify-between gap-2">
