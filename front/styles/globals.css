@@ -318,6 +318,30 @@ body {
 body {
   /* The app owns the viewport; nothing scrolls except the panes themselves. */
   overflow: hidden;
+
+  /*
+   * This is an application, not a document, so the arrow is the resting cursor
+   * and the I-beam is the exception (TRE-76).
+   *
+   * The browser's default is the other way round: `cursor: auto` puts an I-beam
+   * over every run of text, which promises a selection worth making. Almost
+   * nothing here is that. Half this UI is text truncated into a 176px rail or a
+   * 218px panel — an activity row, a path, a mount point — and an I-beam over
+   * an ellipsis offers to select a string whose end is not on screen. The
+   * tooltip is what those rows are read with now; the caret was pointing at a
+   * way to read them that never worked.
+   *
+   * One declaration, inherited, rather than a `cursor-default` on each of the
+   * forty-odd truncating spans — the same argument the pointer rule below makes,
+   * and it fails the same way if made per component: the next span added forgets.
+   * The two exceptions opt back in on their own terms and neither depends on
+   * this: controls take the pointer below, and the UA stylesheet keeps the
+   * I-beam on inputs and textareas, where a caret means what it says.
+   *
+   * Selecting still works everywhere it did — this changes what the pointer
+   * advertises, not what the mouse can do.
+   */
+  cursor: default;
 }
 
 /*
