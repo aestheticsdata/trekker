@@ -12,7 +12,10 @@ import { RateLimitService } from "@audit/rate-limit.service";
 import { sendDownload } from "@fs/download-response";
 import { DownloadService } from "@fs/download.service";
 import { LocalDriver } from "@hosts/drivers/local.driver";
+import { DriverError } from "@hosts/drivers/driver-error";
 import { PathGuardService } from "@hosts/path-guard/path-guard.service";
+import { SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
+import { SudoService } from "@hosts/sudo/sudo.service";
 
 import type { AddressInfo } from "node:net";
 import type { AuditAnnotation, AuditOpening, AuditService } from "@audit/audit.service";
@@ -95,7 +98,15 @@ function serviceFor(
     refused: () => Promise.resolve(),
   } as unknown as AuditService);
   const factory = { forHost: () => Promise.resolve(new LocalDriver(HOST_ID)) } as unknown as HostDriverFactory;
-  return new DownloadService(factory, guard, memoryLimits(options.maxDownloads), recordingAudit());
+  // A real runner over an empty window store: nothing here opens one, so every
+  // read takes the ordinary path — which TRE-29 must not have changed.
+  return new DownloadService(
+    factory,
+    guard,
+    memoryLimits(options.maxDownloads),
+    recordingAudit(),
+    new SudoRunnerService(new SudoService()),
+  );
 }
 
 const readRoot = () => [{ path: base, access: "READ" as const }];
@@ -562,4 +573,98 @@ describe("memory", () => {
     // to one either side, which is why the number needs no tuning.
     expect(after - before).toBeLessThan(100 * 1024 ** 2);
   }, 60_000);
+});
+
+/**
+ * Reading a root-owned file (TRE-29).
+ *
+ * `createReadStream` refuses the way SFTP does on a file the login user cannot
+ * open, and `execStream` stands in for `sudo cat`. The guard, the roots and the
+ * plan are all real — they run before any of this and are what sudo must not be
+ * able to widen.
+ */
+describe("reading a root-owned file with sudo", () => {
+  const SESSION_ID = "session-under-test";
+
+  function elevatedServiceFor(contents: string): {
+    service: DownloadService;
+    streamed: Array<{ program: string; args: readonly string[] }>;
+  } {
+    const streamed: Array<{ program: string; args: readonly string[] }> = [];
+
+    const driver = new LocalDriver(HOST_ID) as LocalDriver & Record<string, unknown>;
+    const realRead = driver.createReadStream.bind(driver) as LocalDriver["createReadStream"];
+    driver.createReadStream = (path: string, options?: unknown) => {
+      if (path.endsWith("root-owned.log")) return Promise.reject(new DriverError("EACCES", "denied", path));
+      return realRead(path, options as never);
+    };
+    driver.execStream = (program: string, args: readonly string[]) => {
+      streamed.push({ program, args });
+      return Promise.resolve({
+        stdout: Readable.from([Buffer.from(contents)]),
+        done: Promise.resolve({ code: 0, signal: null, stderr: "", stderrTruncated: false }),
+      });
+    };
+
+    const prisma = {
+      hosts: {
+        findFirst: ({ where }: { where: { id: string; userId: string } }) =>
+          Promise.resolve(
+            where.id === HOST_ID && where.userId === USER_ID
+              ? { id: HOST_ID, userId: USER_ID, transport: "LOCAL", roots: readRoot(), user: { role: "MEMBER" } }
+              : null,
+          ),
+      },
+    } as unknown as PrismaService;
+
+    const guard = new PathGuardService(prisma, [], memoryLimits(), {
+      refused: () => Promise.resolve(),
+    } as unknown as AuditService);
+    const factory = { forHost: () => Promise.resolve(driver) } as unknown as HostDriverFactory;
+    const sudo = new SudoService();
+    sudo.open(SESSION_ID, HOST_ID, "hunter2");
+
+    return {
+      service: new DownloadService(factory, guard, memoryLimits(), recordingAudit(), new SudoRunnerService(sudo)),
+      streamed,
+    };
+  }
+
+  it("reads it through `sudo cat` when the ordinary open is refused", async () => {
+    const path = join(base, "root-owned.log");
+    await writeFile(path, "placeholder");
+    const { service, streamed } = elevatedServiceFor("secret log line\n");
+
+    const plan = await service.plan(USER_ID, HOST_ID, path);
+    const stream = await service.stream(plan, null, SESSION_ID);
+
+    expect((await drain(stream)).toString()).toBe("secret log line\n");
+    expect(streamed).toEqual([{ program: "cat", args: ["--", await realpath(path)] }]);
+  });
+
+  it("does not escalate without a session", async () => {
+    const path = join(base, "root-owned.log");
+    await writeFile(path, "placeholder");
+    const { service, streamed } = elevatedServiceFor("secret");
+
+    const plan = await service.plan(USER_ID, HOST_ID, path);
+    expect(statusOf(await refusal(service.stream(plan, null)))).toBe(403);
+    expect(streamed).toHaveLength(0);
+  });
+
+  it("refuses a ranged read rather than answering it with the whole file", async () => {
+    // `cat` cannot start partway through, and nothing on either allowlist can
+    // bound a window without a pipe. Answering a request for bytes 10-20 with
+    // the entire file would have the client write it over what it already had.
+    const path = join(base, "root-owned.log");
+    await writeFile(path, "placeholder");
+    const { service, streamed } = elevatedServiceFor("secret");
+
+    const plan = await service.plan(USER_ID, HOST_ID, path);
+    const error = await refusal(service.stream(plan, { start: 10, end: 20 }, SESSION_ID));
+
+    expect(statusOf(error)).toBe(416);
+    expect(codeOf(error)).toBe("ENORANGESUDO");
+    expect(streamed).toHaveLength(0);
+  });
 });

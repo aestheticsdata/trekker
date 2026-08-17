@@ -7,7 +7,13 @@ import { RateLimitService } from "@audit/rate-limit.service";
 import { numberedName, partialName, safeFilename } from "@fs/upload-name";
 import { UploadRefused, UploadService } from "@fs/upload.service";
 import { LocalDriver } from "@hosts/drivers/local.driver";
+import { writeFileSync } from "node:fs";
+import { PassThrough } from "node:stream";
+import { DriverError } from "@hosts/drivers/driver-error";
+import type { ExecStreamResult } from "@hosts/drivers/host-driver";
 import { PathGuardService } from "@hosts/path-guard/path-guard.service";
+import { SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
+import { SudoService } from "@hosts/sudo/sudo.service";
 
 import type { AuditService } from "@audit/audit.service";
 import type { HostDriver } from "@hosts/drivers/host-driver";
@@ -60,7 +66,9 @@ function serviceFor(roots: { path: string; access: "READ" | "WRITE" }[]): Upload
 
   const guard = new PathGuardService(prisma, [], memoryLimits(), silentAudit);
   const factory = { forHost: () => Promise.resolve(new LocalDriver(HOST_ID)) } as unknown as HostDriverFactory;
-  return new UploadService(factory, guard, memoryLimits());
+  // A real runner over an empty window store: nothing here opens a window, so
+  // every upload takes the ordinary path — which TRE-29 must not have changed.
+  return new UploadService(factory, guard, memoryLimits(), new SudoRunnerService(new SudoService()));
 }
 
 const writeRoot = () => [{ path: base, access: "WRITE" as const }];
@@ -361,5 +369,167 @@ describe("a name that is already taken", () => {
     await serviceFor(writeRoot()).receive(USER_ID, driver(), base, "a.txt", body("new"), "keepBoth");
 
     expect(await readFile(join(base, "a.txt"), "utf8")).toBe("original");
+  });
+});
+
+/**
+ * Uploading into a root-owned directory (TRE-29).
+ *
+ * Two failures have to be handled and they are not the same one: the directory
+ * may be root-owned, so even the `.part` cannot be created; or the directory may
+ * be writable while the *file being replaced* is not, so the write succeeds and
+ * the rename is refused. Both reach sudo, by different routes.
+ */
+describe("uploading with sudo", () => {
+  const SESSION_ID = "session-under-test";
+
+  function elevatedServiceFor(refuse: { create?: boolean; rename?: boolean }) {
+    const calls: Array<{ program: string; args: readonly string[] }> = [];
+    const driver = new LocalDriver(HOST_ID) as LocalDriver & Record<string, unknown>;
+
+    const realCreate = driver.createWriteStream.bind(driver) as LocalDriver["createWriteStream"];
+    const realRename = driver.rename.bind(driver) as LocalDriver["rename"];
+
+    if (refuse.create) {
+      driver.createWriteStream = (path: string) => Promise.reject(new DriverError("EACCES", "denied", path));
+    }
+    if (refuse.rename) {
+      driver.rename = (from: string) => Promise.reject(new DriverError("EACCES", "denied", from));
+    }
+
+    // `sudo tee` — swallows the password line, writes the rest for real.
+    driver.execStream = (program: string, args: readonly string[], options: { stdin?: string } = {}) => {
+      calls.push({ program, args });
+      const target = args[args.length - 1];
+      const input = new PassThrough();
+      const output = new PassThrough();
+      if (options.stdin !== undefined) input.write(options.stdin);
+
+      let past = false;
+      let buffer = "";
+      input.on("data", (chunk: Buffer) => {
+        output.write(chunk);
+        buffer += chunk.toString("utf8");
+        if (!past) {
+          const cut = buffer.indexOf("\n");
+          if (cut === -1) return;
+          buffer = buffer.slice(cut + 1);
+          past = true;
+        }
+      });
+
+      const done = new Promise<ExecStreamResult>((resolve) => {
+        input.on("end", () => {
+          writeFileSync(target, buffer);
+          output.end();
+          resolve({ code: 0, signal: null, stderr: "", stderrTruncated: false });
+        });
+      });
+      return Promise.resolve({ stdout: output, done, stdin: input });
+    };
+
+    // `sudo mv` and `sudo rm` — both performed for real, so the assertions are
+    // about the filesystem and not about the recorder.
+    driver.exec = async (program: string, args: readonly string[]) => {
+      calls.push({ program, args });
+      if (program === "mv") await realRename(args[2], args[3]);
+      if (program === "rm") await rm(args[2], { force: true });
+      return { code: 0, signal: null, stdout: "", stderr: "" };
+    };
+
+    const prisma = {
+      hosts: {
+        findFirst: ({ where }: { where: { id: string; userId: string } }) =>
+          Promise.resolve(
+            where.id === HOST_ID && where.userId === USER_ID
+              ? { id: HOST_ID, userId: USER_ID, transport: "LOCAL", roots: writeRoot(), user: { role: "MEMBER" } }
+              : null,
+          ),
+      },
+    } as unknown as PrismaService;
+
+    const guard = new PathGuardService(prisma, [], memoryLimits(), silentAudit);
+    const factory = { forHost: () => Promise.resolve(driver) } as unknown as HostDriverFactory;
+    const sudo = new SudoService();
+    sudo.open(SESSION_ID, HOST_ID, "hunter2");
+
+    return {
+      service: new UploadService(factory, guard, memoryLimits(), new SudoRunnerService(sudo)),
+      driver: driver as unknown as LocalDriver,
+      calls,
+      realCreate,
+    };
+  }
+
+  it("writes through tee and renames through mv when the directory is root's", async () => {
+    const { service, driver, calls } = elevatedServiceFor({ create: true, rename: true });
+
+    const outcome = await service.receive(
+      USER_ID,
+      driver,
+      base,
+      "nginx.conf",
+      Readable.from([Buffer.from("server {}\n")]),
+      "keepBoth",
+      SESSION_ID,
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(await readFile(join(base, "nginx.conf"), "utf8")).toBe("server {}\n");
+    expect(calls.map((call) => call.program)).toEqual(["tee", "mv"]);
+  });
+
+  it("does not put the password in the file", async () => {
+    // `sudo -S` eats the first line. A driver that forwarded it instead would
+    // put a root password at the top of a config file.
+    const { service, driver } = elevatedServiceFor({ create: true, rename: true });
+
+    await service.receive(
+      USER_ID,
+      driver,
+      base,
+      "secret.conf",
+      Readable.from([Buffer.from("TOKEN=abc\n")]),
+      "keepBoth",
+      SESSION_ID,
+    );
+
+    expect(await readFile(join(base, "secret.conf"), "utf8")).toBe("TOKEN=abc\n");
+  });
+
+  it("escalates only the rename when the directory was writable", async () => {
+    // The other route in: the `.part` is created normally and only the final
+    // move needs root, because the file being replaced is root's.
+    const { service, driver, calls } = elevatedServiceFor({ rename: true });
+
+    const outcome = await service.receive(
+      USER_ID,
+      driver,
+      base,
+      "partly.conf",
+      Readable.from([Buffer.from("data\n")]),
+      "keepBoth",
+      SESSION_ID,
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(calls.map((call) => call.program)).toEqual(["mv"]);
+  });
+
+  it("refuses without a session, and leaves no part file behind", async () => {
+    const { service, driver, calls } = elevatedServiceFor({ create: true, rename: true });
+
+    const outcome = await service.receive(
+      USER_ID,
+      driver,
+      base,
+      "nope.conf",
+      Readable.from([Buffer.from("data\n")]),
+      "keepBoth",
+    );
+
+    expect(outcome.ok).toBe(false);
+    expect(calls).toHaveLength(0);
+    expect((await readdir(base)).filter((name) => name.includes("part"))).toEqual([]);
   });
 });

@@ -6,6 +6,8 @@ import { RateLimitService } from "@audit/rate-limit.service";
 import { toHttp } from "@fs/driver-http";
 import { numberedName, partialName, safeFilename } from "@fs/upload-name";
 import { isDriverError } from "@hosts/drivers/driver-error";
+import { mvArgv, rmArgv } from "@hosts/sudo/sudo-argv";
+import { isPermissionRefusal, SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
 import { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
 import { PathGuardService } from "@hosts/path-guard/path-guard.service";
 
@@ -91,6 +93,7 @@ export class UploadService {
     private readonly factory: HostDriverFactory,
     private readonly guard: PathGuardService,
     private readonly limits: RateLimitService,
+    private readonly sudoRunner: SudoRunnerService,
   ) {}
 
   /**
@@ -134,6 +137,7 @@ export class UploadService {
     requested: string,
     body: Readable,
     conflict: ConflictPolicy,
+    sessionId?: string,
   ): Promise<UploadOutcome> {
     const name = safeFilename(requested);
     if (name === "") {
@@ -159,9 +163,21 @@ export class UploadService {
     const partial = join(directory, partialName(randomBytes(9).toString("hex")));
     let bytes = 0;
     let target: Writable | null = null;
+    /** Settles when `tee` has finished, on the elevated path only (TRE-29). */
+    let elevatedWrite: Promise<void> | null = null;
 
     try {
-      target = await driver.createWriteStream(partial);
+      try {
+        target = await driver.createWriteStream(partial);
+      } catch (error) {
+        // The destination directory is root-owned, so even the `.part` cannot
+        // be created as the login user. `sudo tee` writes it instead, and the
+        // rename below goes the same way (TRE-29).
+        if (!(isPermissionRefusal(error) && this.sudoRunner.isOpen(sessionId, driver.hostId))) throw error;
+        const write = this.sudoRunner.write(driver, sessionId, driver.hostId, partial);
+        target = write.stdin;
+        elevatedWrite = write.done;
+      }
       const limit = maxUploadBytes();
       let spent = 0;
 
@@ -186,6 +202,9 @@ export class UploadService {
         },
         target,
       );
+      // `pipeline` finishing means the bytes reached the pipe, not that `tee`
+      // wrote them. On the elevated path the file exists only once this does.
+      if (elevatedWrite !== null) await elevatedWrite;
 
       // Spent after the fact but in units, so the *next* upload is the one that
       // is refused. Charging up front would mean trusting Content-Length, which
@@ -194,7 +213,7 @@ export class UploadService {
       if (spent > 0) {
         const verdict = await this.limits.consume(LIMITS.uploadedBytes, userId, spent);
         if (!verdict.allowed) {
-          await this.discard(driver, target, partial);
+          await this.discard(driver, target, partial, { sessionId, hostId: driver.hostId });
           throw new UploadRefused(
             "ETOOMUCH",
             RateLimitService.describe(LIMITS.uploadedBytes, verdict.resetSeconds),
@@ -205,21 +224,33 @@ export class UploadService {
 
       const final = await this.settleName(driver, directory, name, conflict);
       if (final === null) {
-        await this.discard(driver, target, partial);
+        await this.discard(driver, target, partial, { sessionId, hostId: driver.hostId });
         return { requested, name, ok: true, bytes: 0, code: "ESKIPPED", message: "Already there; left alone." };
       }
 
       // The one moment the file becomes real. `rename` within a directory is
       // atomic on every filesystem this runs on, so a reader sees the old file
       // or the new one and never a half of either.
-      await driver.rename(partial, final);
+      //
+      // Under sudo it is `mv` rather than SFTP's rename, and it is the reason
+      // `mv` is on the sudo list at all: without it a root-owned file would
+      // have to be written over directly, and an interrupted save would leave
+      // a truncated config rather than the original.
+      try {
+        await driver.rename(partial, final);
+      } catch (error) {
+        // Reached two ways: the directory was root-owned (so the write above
+        // was elevated too), or it was writable but the *target* was not.
+        if (!(isPermissionRefusal(error) && this.sudoRunner.isOpen(sessionId, driver.hostId))) throw error;
+        await this.sudoRunner.run(driver, sessionId, driver.hostId, "mv", mvArgv(partial, final));
+      }
       return { requested, name: basename(final), ok: true, bytes };
     } catch (error) {
       // Whatever happened, the `.part` does not stay. It is hidden and named,
       // so one that survives a hard crash is identifiable — but an error we
       // caught is not a crash, and leaving litter behind would make the
       // difference impossible to see later.
-      await this.discard(driver, target, partial);
+      await this.discard(driver, target, partial, { sessionId, hostId: driver.hostId });
 
       if (error instanceof UploadRefused) throw error;
       if (isDriverError(error)) {
@@ -281,7 +312,12 @@ export class UploadService {
    * large into. Waiting for `close` means the fd is settled before the entry is
    * removed, in either order of events.
    */
-  private async discard(driver: HostDriver, target: Writable | null, path: string): Promise<void> {
+  private async discard(
+    driver: HostDriver,
+    target: Writable | null,
+    path: string,
+    elevated?: { sessionId?: string; hostId: string },
+  ): Promise<void> {
     if (target !== null && !target.closed) {
       target.destroy();
       await new Promise<void>((resolve) => {
@@ -292,9 +328,17 @@ export class UploadService {
       });
     }
 
-    await driver.unlink(path).catch(() => {
-      // Already gone, or never created. Nothing to report: this runs on the
-      // failure path and a second failure here would replace the first.
+    await driver.unlink(path).catch(async () => {
+      // Already gone, or never created, or root's — the last of those is the
+      // one worth retrying, because a `.part` written by `tee` belongs to root
+      // and the login user cannot remove it. Litter in `/etc` is exactly the
+      // kind this file exists to avoid leaving.
+      if (elevated && this.sudoRunner.isOpen(elevated.sessionId, elevated.hostId)) {
+        await this.sudoRunner.run(driver, elevated.sessionId, elevated.hostId, "rm", rmArgv("file", path)).catch(() => {
+          // Nothing to report: this runs on the failure path already, and a
+          // second failure here would replace the first.
+        });
+      }
     });
   }
 

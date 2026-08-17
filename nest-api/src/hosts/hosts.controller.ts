@@ -10,13 +10,14 @@ import type { HostProbeResult } from "@hosts/drivers/ssh-connection.pool";
 import { AcceptHostKeyDto } from "@hosts/dto/accept-host-key.dto";
 import { CreateHostDto } from "@hosts/dto/create-host.dto";
 import { DisksQueryDto } from "@hosts/dto/disks-query.dto";
+import { OpenSudoDto } from "@hosts/dto/open-sudo.dto";
 import { TestHostDto } from "@hosts/dto/test-host.dto";
 import { UpdateHostDto } from "@hosts/dto/update-host.dto";
 import type { DiskMount } from "@hosts/host-disks.service";
 import { HostKeyService } from "@hosts/host-key.service";
 import type { HostMetrics } from "@hosts/host-metrics.service";
 import type { HostSummary } from "@hosts/host-summary.service";
-import { HostsService, type HostView } from "@hosts/hosts.service";
+import { HostsService, type HostView, type SudoRequirementView, type SudoWindowView } from "@hosts/hosts.service";
 import {
   Body,
   Controller,
@@ -61,7 +62,7 @@ export class HostsController {
 
   @Get()
   list(@Req() req: Request): Promise<HostView[]> {
-    return this.hosts.list(userIdOf(req));
+    return this.hosts.list(userIdOf(req), req.sessionID);
   }
 
   /**
@@ -92,7 +93,7 @@ export class HostsController {
 
   @Get(":id")
   get(@Req() req: Request, @Param("id") id: string): Promise<HostView> {
-    return this.hosts.get(userIdOf(req), id);
+    return this.hosts.get(userIdOf(req), id, req.sessionID);
   }
 
   @Get(":id/summary")
@@ -160,7 +161,7 @@ export class HostsController {
     }),
   })
   async update(@Req() req: Request, @Param("id") id: string, @Body() dto: UpdateHostDto): Promise<HostView> {
-    const host = await this.hosts.update(userIdOf(req), id, dto);
+    const host = await this.hosts.update(userIdOf(req), id, dto, req.sessionID);
     this.audit.annotate(req, { hostId: host.id, summary: `Edited the host ${host.label}` });
     return host;
   }
@@ -217,6 +218,79 @@ export class HostsController {
     // host nulls the reference on its activity rows and keeps their story. The
     // id itself is in the payload, which is what an operator actually needs.
     return { ok: true };
+  }
+
+  /**
+   * What opening a sudo window here would take, before anything is typed.
+   *
+   * The client reads this to decide whether to render a password field or a
+   * plain confirm button. On a host whose account has `NOPASSWD` — most cloud
+   * images — a password field would accept anything at all, because sudo never
+   * reads what it is sent. Asking first is what keeps the prompt honest.
+   *
+   * A GET, unaudited and unlimited: it runs `sudo -n id -u`, which changes
+   * nothing, and it is read on the way into a modal the person may then close.
+   */
+  @Get(":id/sudo")
+  sudoRequirement(@Req() req: Request, @Param("id") id: string): Promise<SudoRequirementView> {
+    return this.hosts.sudoRequirement(userIdOf(req), id);
+  }
+
+  /**
+   * Open a sudo window on this host (TRE-29).
+   *
+   * **The password reaches `SudoService` and nothing else.** It is not stored,
+   * not logged, and not in the audit payload — note that `describe` below names
+   * the host and says nothing about the body, which is deliberate rather than
+   * an omission. `redact.ts` would catch the key on the way to a row anyway;
+   * this route does not rely on it.
+   *
+   * Rate limited hard, because this is the one route on the application that
+   * takes a guessable secret belonging to the *machine*. See `LIMITS.sudo`.
+   *
+   * The window is verified before it is opened: a password that `sudo` refuses
+   * must not leave a window behind that appears open and fails on first use.
+   */
+  @Post(":id/sudo")
+  @UseGuards(CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  @Audited({
+    kind: "host.sudo.open",
+    // Granting privilege, which is the category the retention rules keep four
+    // times as long. "Who became root, on what, and when" is exactly the
+    // question somebody comes back to this table for.
+    destructive: true,
+    limit: LIMITS.sudo,
+    describe: (request) => ({
+      summary: "Opened a sudo window",
+      payload: { requestedHostId: request.params.id },
+    }),
+  })
+  async openSudo(@Req() req: Request, @Param("id") id: string, @Body() dto: OpenSudoDto): Promise<SudoWindowView> {
+    const window = await this.hosts.openSudo(userIdOf(req), req.sessionID, id, dto.password);
+    this.audit.annotate(req, { hostId: id, summary: `Opened a sudo window on ${window.hostLabel}` });
+    return window;
+  }
+
+  /**
+   * Close it early. Idempotent: closing a window that is not open is a no-op
+   * reported as one, not a 404 — the button is allowed to lose a race with the
+   * expiry timer.
+   */
+  @Post(":id/sudo/drop")
+  @UseGuards(CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  @Audited({
+    kind: "host.sudo.drop",
+    describe: (request) => ({
+      summary: "Closed a sudo window",
+      payload: { requestedHostId: request.params.id },
+    }),
+  })
+  async dropSudo(@Req() req: Request, @Param("id") id: string): Promise<{ ok: true; wasOpen: boolean }> {
+    const wasOpen = await this.hosts.dropSudo(userIdOf(req), req.sessionID, id);
+    this.audit.annotate(req, { hostId: id });
+    return { ok: true, wasOpen };
   }
 }
 

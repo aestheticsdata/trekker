@@ -1,6 +1,7 @@
 import type { Readable, Writable } from "node:stream";
 import type { ClientChannel, Stats } from "ssh2";
 import { DriverError, fromSftpError } from "@hosts/drivers/driver-error";
+import { openStdin, sendStdin } from "@hosts/drivers/exec-stdin";
 import {
   type ExecOptions,
   type ExecResult,
@@ -19,7 +20,13 @@ import {
   type WriteOptions,
 } from "@hosts/drivers/host-driver";
 import type { HostConnectionSpec, Lease, PoolSettings, SshConnectionPool } from "@hosts/drivers/ssh-connection.pool";
-import { type AllowedProgram, buildRemoteCommand, isAllowedProgram } from "@hosts/drivers/shell-quote";
+import {
+  type AllowedProgram,
+  buildRemoteCommand,
+  isAllowedProgram,
+  isSudoOnlyProgram,
+  type SudoOnlyProgram,
+} from "@hosts/drivers/shell-quote";
 
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
@@ -339,14 +346,24 @@ export class SshDriver implements HostDriver {
    * the remote sshd hands it to a login shell. The program is allowlisted and
    * every argument goes through the single quoting helper — see shell-quote.ts.
    */
-  async exec(program: AllowedProgram, args: readonly string[], options: ExecOptions = {}): Promise<ExecResult> {
+  async exec(
+    program: AllowedProgram | SudoOnlyProgram,
+    args: readonly string[],
+    options: ExecOptions = {},
+  ): Promise<ExecResult> {
     // Widened so the runtime guard survives type erasure — see shell-quote.ts.
     const name: string = program;
-    if (!isAllowedProgram(name)) {
-      throw new DriverError("EPERM", `Program "${name}" is not on the allowlist.`);
+    const sudo = options.sudo !== undefined;
+    if (!(isAllowedProgram(name) || (sudo && isSudoOnlyProgram(name)))) {
+      throw new DriverError(
+        "EPERM",
+        isSudoOnlyProgram(name)
+          ? `Program "${name}" is on the sudo allowlist only and needs sudo to run.`
+          : `Program "${name}" is not on the allowlist.`,
+      );
     }
 
-    const command = buildRemoteCommand(program, args, { nice: options.nice });
+    const command = buildRemoteCommand(program, args, { nice: options.nice, sudo: options.sudo });
     const limit = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
     const lease = await this.pool.acquire(this.spec);
 
@@ -390,6 +407,16 @@ export class SshDriver implements HostDriver {
           signal = exitSignal ?? null;
         });
         channel.on("close", () => finish(() => resolve({ code, signal, stdout, stderr })));
+
+        // Standard input, then EOF — the same contract the local driver keeps,
+        // through the same function so the two cannot drift. The channel is a
+        // duplex stream: closing the write side sends EOF to the remote
+        // program's stdin and leaves its output coming back untouched.
+        //
+        // Attached last on purpose. The listeners above are what settle this
+        // promise, and a command that exits the instant it reads its input has
+        // to find them already in place.
+        sendStdin(channel, options.stdin);
       });
     });
   }
@@ -417,20 +444,26 @@ export class SshDriver implements HostDriver {
    * would hand the caller a truncated walk labelled complete.
    */
   async execStream(
-    program: AllowedProgram,
+    program: AllowedProgram | SudoOnlyProgram,
     args: readonly string[],
     options: ExecStreamOptions = {},
   ): Promise<ExecStream> {
     // Widened so the runtime guard survives type erasure — see shell-quote.ts.
     const name: string = program;
-    if (!isAllowedProgram(name)) {
-      throw new DriverError("EPERM", `Program "${name}" is not on the allowlist.`);
+    const sudo = options.sudo !== undefined;
+    if (!(isAllowedProgram(name) || (sudo && isSudoOnlyProgram(name)))) {
+      throw new DriverError(
+        "EPERM",
+        isSudoOnlyProgram(name)
+          ? `Program "${name}" is on the sudo allowlist only and needs sudo to run.`
+          : `Program "${name}" is not on the allowlist.`,
+      );
     }
     if (options.signal?.aborted) {
       throw new DriverError("EIO", `${program} was cancelled before it started`);
     }
 
-    const command = buildRemoteCommand(program, args, { nice: options.nice });
+    const command = buildRemoteCommand(program, args, { nice: options.nice, sudo: options.sudo });
     const stderrLimit = options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES;
     const lease = await this.pool.acquire(this.spec, { background: true });
 
@@ -451,6 +484,14 @@ export class SshDriver implements HostDriver {
       }
       stderr += chunk.toString("utf8");
     });
+
+    // The password, then EOF — the same contract `exec` keeps, through the same
+    // function. Closing the write side leaves the output coming back untouched,
+    // which is the whole reason a `cat` of a large file can stream through here
+    // rather than being collected into a string first.
+    // Either the driver closes it, or the caller does — never neither.
+    if (options.stdinOpen === true) openStdin(channel, options.stdin);
+    else sendStdin(channel, options.stdin);
 
     const done = new Promise<ExecStreamResult>((resolve, reject) => {
       let settled = false;
@@ -526,7 +567,9 @@ export class SshDriver implements HostDriver {
       });
     });
 
-    return { stdout: channel, done };
+    // The channel is duplex, so it is both halves: the caller reads output from
+    // it and, under `stdinOpen`, writes the payload back down the same object.
+    return options.stdinOpen === true ? { stdout: channel, done, stdin: channel } : { stdout: channel, done };
   }
 
   async dispose(): Promise<void> {
@@ -541,7 +584,7 @@ export class SshDriver implements HostDriver {
  * The lease is the caller's to release — this function borrows nothing and
  * therefore returns nothing to clean up if it throws.
  */
-function openChannel(lease: Lease, command: string, program: AllowedProgram): Promise<ClientChannel> {
+function openChannel(lease: Lease, command: string, program: AllowedProgram | SudoOnlyProgram): Promise<ClientChannel> {
   return new Promise<ClientChannel>((resolve, reject) => {
     lease.client.exec(command, (error, channel) => {
       if (error) {

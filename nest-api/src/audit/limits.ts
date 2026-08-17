@@ -9,11 +9,11 @@
  * script.
  *
  * **Some of these have nothing to limit yet, and that is deliberate.** The
- * operations they name arrive in TRE-27 and TRE-29. They are declared now
+ * operations they name arrive in TRE-27. They are declared now
  * because the limit and the operation should land together rather than the
  * limit being remembered afterwards, and because `TO_ATTACH` below turns
  * "remembered afterwards" into a listed obligation instead of a hope. It works:
- * TRE-23 and TRE-25 were both on that list and both came off it.
+ * TRE-23, TRE-25 and TRE-29 were all on that list and all came off it.
  *
  * **And one of them limits nothing, ever.** `pathRefusal` counts and reports;
  * it refuses nobody. It keeps its place here because it is still a threshold
@@ -265,6 +265,32 @@ export const LIMITS = {
    * the same change, so there is no window in which this is a promise.
    */
   diskScan: rule("limit:scan", "disk scans", 20, 3600, "TREKKER_LIMIT_SCANS_PER_HOUR"),
+
+  /**
+   * Attempts to open a sudo window (TRE-29), per five minutes.
+   *
+   * **This one guards a password field, which makes it different from every
+   * other rule here.** The rest bound how often an authenticated session may
+   * aim an operation it is already allowed to perform. This bounds guessing:
+   * the route takes the host account's login password and hands it to `sudo`,
+   * so without a ceiling a stolen session is an online brute-force oracle
+   * against the machine's root, one request at a time, with the answer coming
+   * back as a status code.
+   *
+   * Five in five minutes, matching `passwordChange` in spirit — a person who
+   * mistypes twice and gets it right on the third try never sees this, and
+   * anything doing better than one guess a minute is not a person.
+   *
+   * Counted per user rather than per host on purpose: the same password often
+   * opens several hosts, so a per-host budget would multiply the guesses
+   * available against one secret by the size of the fleet.
+   *
+   * It arrived here from `TO_ATTACH`, where it sat as `elevation` from TRE-30
+   * until the operation existed. It was renamed on the way: the feature is
+   * called sudo, in the UI and in the code, because that is the word the user
+   * already knows from the terminal.
+   */
+  sudo: rule("limit:sudo", "sudo attempts", 5, 300, "TREKKER_LIMIT_SUDO_ATTEMPTS_PER_5MIN"),
 } as const satisfies Record<string, LimitRule>;
 
 /**
@@ -277,8 +303,4 @@ export const LIMITS = {
  */
 export const TO_ATTACH = {
   hashJobs: { rule: rule("limit:hash", "checksum jobs", 3, 0, "TREKKER_LIMIT_HASHES_IN_FLIGHT"), ticket: "TRE-27" },
-  elevation: {
-    rule: rule("limit:sudo", "elevation attempts", 5, 300, "TREKKER_LIMIT_ELEVATIONS_PER_5MIN"),
-    ticket: "TRE-29",
-  },
 } as const;

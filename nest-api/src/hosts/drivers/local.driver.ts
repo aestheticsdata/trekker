@@ -20,6 +20,7 @@ import { setPriority } from "node:os";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { DriverError, fromNodeError } from "@hosts/drivers/driver-error";
+import { openStdin, sendStdin } from "@hosts/drivers/exec-stdin";
 import {
   type ExecOptions,
   type ExecResult,
@@ -37,7 +38,13 @@ import {
   writeFlags,
   type WriteOptions,
 } from "@hosts/drivers/host-driver";
-import { type AllowedProgram, isAllowedProgram } from "@hosts/drivers/shell-quote";
+import {
+  type AllowedProgram,
+  isAllowedProgram,
+  isSudoOnlyProgram,
+  type SudoMode,
+  type SudoOnlyProgram,
+} from "@hosts/drivers/shell-quote";
 
 /**
  * What `assertReadable` asks `access` about. Its own name because the answer
@@ -264,17 +271,34 @@ export class LocalDriver implements HostDriver {
    * to the program verbatim. A `$(...)` in an argument is eight characters, not
    * a subshell.
    */
-  async exec(program: AllowedProgram, args: readonly string[], options: ExecOptions = {}): Promise<ExecResult> {
+  async exec(
+    program: AllowedProgram | SudoOnlyProgram,
+    args: readonly string[],
+    options: ExecOptions = {},
+  ): Promise<ExecResult> {
     // Widened so the runtime guard survives type erasure — see shell-quote.ts.
     const name: string = program;
-    if (!isAllowedProgram(name)) {
-      throw new DriverError("EPERM", `Program "${name}" is not on the allowlist.`);
+    const sudo = options.sudo !== undefined;
+    if (!(isAllowedProgram(name) || (sudo && isSudoOnlyProgram(name)))) {
+      throw new DriverError(
+        "EPERM",
+        isSudoOnlyProgram(name)
+          ? `Program "${name}" is on the sudo allowlist only and needs sudo to run.`
+          : `Program "${name}" is not on the allowlist.`,
+      );
     }
+
+    // The local equivalent of the remote prefix, and a literal for the same
+    // reason: `sudo` is written here, never named by a caller. There is no
+    // shell either way, so the real program stays an element of the argv array
+    // rather than a word in a string.
+    const binary = sudo ? "sudo" : program;
+    const argv = sudo ? [...sudoFlags(options.sudo), program, ...args] : [...args];
 
     return new Promise<ExecResult>((resolve, reject) => {
       const child = execFile(
-        program,
-        [...args],
+        binary,
+        argv,
         {
           timeout: options.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS,
           maxBuffer: options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
@@ -320,6 +344,7 @@ export class LocalDriver implements HostDriver {
       );
 
       deprioritise(child.pid, options.nice);
+      sendStdin(child.stdin, options.stdin);
     });
   }
 
@@ -341,11 +366,23 @@ export class LocalDriver implements HostDriver {
    * when its pipes have ended, which is the first moment the last record has
    * certainly been read.
    */
-  execStream(program: AllowedProgram, args: readonly string[], options: ExecStreamOptions = {}): Promise<ExecStream> {
+  execStream(
+    program: AllowedProgram | SudoOnlyProgram,
+    args: readonly string[],
+    options: ExecStreamOptions = {},
+  ): Promise<ExecStream> {
     // Widened so the runtime guard survives type erasure — see shell-quote.ts.
     const name: string = program;
-    if (!isAllowedProgram(name)) {
-      return Promise.reject(new DriverError("EPERM", `Program "${name}" is not on the allowlist.`));
+    const sudo = options.sudo !== undefined;
+    if (!(isAllowedProgram(name) || (sudo && isSudoOnlyProgram(name)))) {
+      return Promise.reject(
+        new DriverError(
+          "EPERM",
+          isSudoOnlyProgram(name)
+            ? `Program "${name}" is on the sudo allowlist only and needs sudo to run.`
+            : `Program "${name}" is not on the allowlist.`,
+        ),
+      );
     }
     // `spawn` with an already-aborted signal produces a child that never runs
     // and an AbortError on a listener nobody has attached yet. Refusing here is
@@ -354,15 +391,26 @@ export class LocalDriver implements HostDriver {
       return Promise.reject(new DriverError("EIO", `${program} was cancelled before it started`));
     }
 
-    const child = spawn(program, [...args], {
+    // Piped only when something will be written. `"ignore"` gives the child
+    // /dev/null, which already reads as an immediate EOF — so the default stays
+    // exactly what it was for every caller that predates TRE-29.
+    // stdin piped and then closed immediately, always. It used to be `"ignore"`,
+    // which hands the child /dev/null — and an immediately-closed pipe is the
+    // same EOF, so nothing changes for `du` and the rest. Keeping it one shape
+    // avoids a conditional stdio tuple, which node's overloads answer by typing
+    // every stream as possibly null.
+    const child = spawn(sudo ? "sudo" : program, sudo ? [...sudoFlags(options.sudo), program, ...args] : [...args], {
       shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       signal: options.signal,
       killSignal: "SIGTERM",
       ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
     });
 
     deprioritise(child.pid, options.nice);
+    // Either the driver closes it, or the caller does — never neither.
+    if (options.stdinOpen === true) openStdin(child.stdin, options.stdin);
+    else sendStdin(child.stdin, options.stdin);
 
     const stdout = child.stdout;
     const stderrLimit = options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES;
@@ -410,7 +458,7 @@ export class LocalDriver implements HostDriver {
       });
     });
 
-    return Promise.resolve({ stdout, done });
+    return Promise.resolve(options.stdinOpen === true ? { stdout, done, stdin: child.stdin } : { stdout, done });
   }
 
   async dispose(): Promise<void> {
@@ -431,6 +479,19 @@ export class LocalDriver implements HostDriver {
  * of those is a reason to fail a `du` that is otherwise about to run correctly.
  * The scan records whether it was niced; it does not depend on it.
  */
+/**
+ * The sudo flags, as an argv fragment (TRE-29).
+ *
+ * The local mirror of what `buildRemoteCommand` writes into a string, and it
+ * has to stay in step with it: a probe that asked the remote host one question
+ * and the local host another would report two different kinds of machine for
+ * the same configuration. `sudo` itself is a literal in both, never a name a
+ * caller supplies.
+ */
+function sudoFlags(mode: SudoMode | undefined): string[] {
+  return mode === "probe" ? ["-n"] : ["-S", "-p", ""];
+}
+
 function deprioritise(pid: number | undefined, nice: number | undefined): void {
   if (nice === undefined || pid === undefined) return;
   try {

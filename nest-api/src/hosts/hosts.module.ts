@@ -7,6 +7,8 @@ import { HostMetricsService } from "@hosts/host-metrics.service";
 import { HostSummaryService } from "@hosts/host-summary.service";
 import { HostsController } from "@hosts/hosts.controller";
 import { HostsService } from "@hosts/hosts.service";
+import { SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
+import { SudoService } from "@hosts/sudo/sudo.service";
 import { computeLocalDenylist } from "@hosts/path-guard/local-denylist";
 import { LOCAL_DENYLIST, PathGuardService } from "@hosts/path-guard/path-guard.service";
 import { Global, Module } from "@nestjs/common";
@@ -42,6 +44,10 @@ import { Global, Module } from "@nestjs/common";
     },
     HostDisksService,
     HostKeyService,
+    // Holds sudo passwords in memory, so it must be the one instance the whole
+    // process shares — the module is @Global, which is what makes that true.
+    SudoService,
+    SudoRunnerService,
     HostsService,
   ],
   exports: [
@@ -53,6 +59,8 @@ import { Global, Module } from "@nestjs/common";
     HostMetricsService,
     HostDisksService,
     HostKeyService,
+    SudoService,
+    SudoRunnerService,
   ],
 })
 export class HostsModule {}

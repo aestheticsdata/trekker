@@ -1,11 +1,14 @@
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HttpException } from "@nestjs/common";
 import { RateLimitService } from "@audit/rate-limit.service";
 import { LocalDriver } from "@hosts/drivers/local.driver";
 import type { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
+import { DriverError } from "@hosts/drivers/driver-error";
 import { PathGuardService } from "@hosts/path-guard/path-guard.service";
+import { SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
+import { SudoService } from "@hosts/sudo/sudo.service";
 import { confirmationToken, equivalentCommand, pathDepth, tokenMatches } from "@fs/delete-plan";
 import { DeleteService } from "@fs/delete.service";
 import { isMountPoint, parseMountPoints } from "@fs/mount-table";
@@ -60,7 +63,9 @@ function serviceFor(roots: { path: string; access: "READ" | "WRITE" }[], denylis
 
   const guard = new PathGuardService(prisma, denylist, memoryLimits(), silentAudit);
   const factory = { forHost: () => Promise.resolve(new LocalDriver(HOST_ID)) } as unknown as HostDriverFactory;
-  return new DeleteService(factory, guard, memoryLimits());
+  // A real runner over an empty window store: nothing here opens one, so every
+  // delete takes the ordinary path — which is what must not have changed.
+  return new DeleteService(factory, guard, memoryLimits(), new SudoRunnerService(new SudoService()));
 }
 
 const writeRoot = () => [{ path: base, access: "WRITE" as const }];
@@ -279,3 +284,112 @@ describe("planning", () => {
     expect(result.entriesRemoved).toBe(plan.entries);
   });
 });
+
+/**
+ * Deleting a root-owned entry inside a tree the account may otherwise remove
+ * (TRE-29).
+ *
+ * The driver is real except for `unlink`, which refuses the way a root-owned
+ * file does, and `exec`, which records the elevated call instead of running
+ * `sudo`. The guard, the roots, the denylist and the post-order walk are all
+ * the real thing, because those are what the escalation must not step around.
+ */
+describe("falling back to sudo on delete", () => {
+  const SESSION_ID = "session-under-test";
+
+  function elevatedServiceFor(
+    roots: { path: string; access: "READ" | "WRITE" }[],
+    denylist: string[] = [],
+  ): { service: DeleteService; elevatedCalls: Array<{ program: string; args: readonly string[] }> } {
+    const elevatedCalls: Array<{ program: string; args: readonly string[] }> = [];
+
+    const driver = new LocalDriver(HOST_ID) as LocalDriver & Record<string, unknown>;
+    driver.unlink = (path: string) => Promise.reject(new DriverError("EACCES", "denied", path));
+
+    // Only the elevated calls are intercepted. The delete path reads the mount
+    // table through `exec` before it touches anything (TRE-25), and swallowing
+    // that would fail the request long before escalation was reached.
+    const realExec = driver.exec.bind(driver) as LocalDriver["exec"];
+    driver.exec = async (program: string, args: readonly string[], options: { sudo?: string } = {}) => {
+      if (options.sudo === undefined) return realExec(program as never, args, options as never);
+      elevatedCalls.push({ program, args });
+      // It really removes. A recorder that removed nothing would leave every
+      // directory non-empty, so the post-order `rmdir` above it would fail and
+      // the test would be measuring the fake rather than the walk.
+      const [flag, , target] = args;
+      if (flag === "-d") await rmdir(target);
+      else await unlink(target);
+      return { code: 0, signal: null, stdout: "", stderr: "" };
+    };
+
+    const prisma = {
+      hosts: {
+        findFirst: ({ where }: { where: { id: string; userId: string } }) =>
+          Promise.resolve(
+            where.id === HOST_ID && where.userId === USER_ID
+              ? { id: HOST_ID, userId: USER_ID, transport: "LOCAL", roots, user: { role: "MEMBER" } }
+              : null,
+          ),
+      },
+    } as unknown as PrismaService;
+
+    const guard = new PathGuardService(prisma, denylist, memoryLimits(), silentAudit);
+    const factory = { forHost: () => Promise.resolve(driver) } as unknown as HostDriverFactory;
+    const sudo = new SudoService();
+    sudo.open(SESSION_ID, HOST_ID, "hunter2");
+
+    return {
+      service: new DeleteService(factory, guard, memoryLimits(), new SudoRunnerService(sudo)),
+      elevatedCalls,
+    };
+  }
+
+  it("removes a refused file through rm, one entry at a time", async () => {
+    const dir = await fixture("elevate", ["alpha"]);
+    const { service, elevatedCalls } = elevatedServiceFor(writeRoot());
+
+    // Resolved before the delete, because afterwards there is nothing to
+    // resolve. The guard resolves too, and on macOS /var is a symlink to
+    // /private/var — so the driver sees the resolved form, not the requested one.
+    const resolved = await realpath(join(dir, "alpha"));
+
+    const result = await service.remove(USER_ID, HOST_ID, [join(dir, "alpha")], "alpha", SESSION_ID);
+
+    expect(result.entriesRemoved).toBe(1);
+    expect(elevatedCalls).toEqual([{ program: "rm", args: ["-f", "--", resolved] }]);
+    expect(await exists(resolved)).toBe(false);
+  });
+
+  it("never passes -r, even deleting a whole tree", async () => {
+    // The property that keeps the walk load-bearing rather than decorative. One
+    // `rm` per entry, post-order, each already filtered by the denylist.
+    const dir = await fixture("tree", ["one", "two"]);
+    await mkdir(join(dir, "nested"));
+    await writeFile(join(dir, "nested", "three"), "three");
+    const { service, elevatedCalls } = elevatedServiceFor(writeRoot());
+
+    await service.remove(USER_ID, HOST_ID, [dir], basenameOf(dir), SESSION_ID);
+
+    expect(elevatedCalls.length).toBeGreaterThan(1);
+    for (const call of elevatedCalls) {
+      expect(call.args).not.toContain("-r");
+      expect(call.args).not.toContain("-R");
+      expect(call.args).not.toContain("-rf");
+    }
+  });
+
+  it("does not escalate without a session", async () => {
+    const dir = await fixture("nosession", ["alpha"]);
+    const { service, elevatedCalls } = elevatedServiceFor(writeRoot());
+
+    // Every entry refused and nothing escalated, so the whole request fails —
+    // which is exactly what it did before TRE-29 and must keep doing.
+    await expect(service.remove(USER_ID, HOST_ID, [join(dir, "alpha")], "alpha")).rejects.toThrow(/elevation/);
+    expect(elevatedCalls).toHaveLength(0);
+  });
+});
+
+/** The final segment, for the confirmation token. */
+function basenameOf(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}

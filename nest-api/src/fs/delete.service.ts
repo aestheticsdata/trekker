@@ -18,6 +18,8 @@ import {
 import { isMountPoint, readMountPoints } from "@fs/mount-table";
 import { entryCeiling, MAX_PATHS } from "@fs/permissions.service";
 import { walkTree } from "@fs/tree-walk";
+import { rmArgv } from "@hosts/sudo/sudo-argv";
+import { isPermissionRefusal, SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
 
 import type { HostDriver } from "@hosts/drivers/host-driver";
 import type { WalkedEntry } from "@fs/tree-walk";
@@ -90,6 +92,11 @@ export interface DeleteTarget {
 }
 
 export interface DeleteOutcome {
+  /**
+   * Entries removed as root because the ordinary unlink was refused (TRE-29).
+   * Zero unless a sudo window was open and something inside actually needed it.
+   */
+  elevated?: number;
   path: string;
   ok: boolean;
   entries: number;
@@ -125,6 +132,7 @@ export class DeleteService {
     private readonly factory: HostDriverFactory,
     private readonly guard: PathGuardService,
     private readonly limits: RateLimitService,
+    private readonly sudoRunner: SudoRunnerService,
   ) {}
 
   /**
@@ -180,7 +188,13 @@ export class DeleteService {
    * not the one that was described. The token guards the *selection* — which
    * entries — and that has not changed.
    */
-  async remove(userId: string, hostId: string, paths: readonly string[], token: string): Promise<DeleteResult> {
+  async remove(
+    userId: string,
+    hostId: string,
+    paths: readonly string[],
+    token: string,
+    sessionId?: string,
+  ): Promise<DeleteResult> {
     const expected = confirmationToken(paths);
     if (!tokenMatches(token, expected)) {
       // Deliberately says what was expected. It is not a secret — anything that
@@ -214,7 +228,7 @@ export class DeleteService {
     let bytesFreed = 0;
 
     for (const target of surveyed) {
-      const outcome = await this.removeTree(driver, target);
+      const outcome = await this.removeTree(driver, target, hostId, sessionId);
       results.push(outcome);
       entriesRemoved += outcome.entries;
       bytesFreed += outcome.bytes;
@@ -361,9 +375,15 @@ export class DeleteService {
    * non-empty, so their `rmdir` fails too — which is the truth, and the outcome
    * names the first thing that actually went wrong.
    */
-  private async removeTree(driver: HostDriver, target: Surveyed): Promise<DeleteOutcome> {
+  private async removeTree(
+    driver: HostDriver,
+    target: Surveyed,
+    hostId: string,
+    sessionId?: string,
+  ): Promise<DeleteOutcome> {
     let entries = 0;
     let bytes = 0;
+    let elevated = 0;
     let firstError: unknown = null;
 
     for (const entry of target.details) {
@@ -381,21 +401,37 @@ export class DeleteService {
         // fact and "frees 4.2 MB" before it are the same arithmetic.
         if (entry.kind !== "directory") bytes += entry.size;
       } catch (error) {
+        // A root-owned entry inside a tree the account may otherwise delete
+        // (TRE-29). Retried one entry at a time, exactly as the walk found it —
+        // `rmArgv` never produces `-r`, so this cannot become a recursive root
+        // delete that skips the checks above.
+        if (isPermissionRefusal(error) && this.sudoRunner.isOpen(sessionId, hostId)) {
+          try {
+            await this.sudoRunner.run(driver, sessionId, hostId, "rm", rmArgv(entry.kind, entry.path));
+            entries += 1;
+            elevated += 1;
+            if (entry.kind !== "directory") bytes += entry.size;
+            continue;
+          } catch (elevatedError) {
+            firstError ??= elevatedError;
+            continue;
+          }
+        }
         firstError ??= error;
       }
     }
 
     if (firstError !== null && entries === 0) {
-      return { ...failureOf(target.requested, firstError), entries: 0, bytes: 0 };
+      return { ...failureOf(target.requested, firstError), entries: 0, bytes: 0, elevated };
     }
 
     if (firstError !== null) {
       const partial = failureOf(target.requested, firstError);
       this.logger.warn(`Partial delete of ${target.requested}: ${entries} removed, first failure ${partial.code}`);
-      return { ...partial, ok: false, entries, bytes };
+      return { ...partial, ok: false, entries, bytes, elevated };
     }
 
-    return { path: target.requested, ok: true, entries, bytes };
+    return { path: target.requested, ok: true, entries, bytes, elevated };
   }
 
   private async driverFor(hostId: string, userId: string): Promise<HostDriver> {

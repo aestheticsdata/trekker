@@ -7,6 +7,9 @@ import { toHttp } from "@fs/driver-http";
 import { octalMode } from "@fs/file-row";
 import { IdResolverService } from "@fs/id-resolver.service";
 import { walkTree } from "@fs/tree-walk";
+import type { SudoOnlyProgram } from "@hosts/drivers/shell-quote";
+import { chmodArgv, chownArgv } from "@hosts/sudo/sudo-argv";
+import { isPermissionRefusal, SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
 
 /**
  * chmod and chown (TRE-21) — the first thing in this application that changes
@@ -38,11 +41,29 @@ export function entryCeiling(): number {
 /** One request may name this many paths. A selection, not a filesystem. */
 export const MAX_PATHS = 1_000;
 
+/**
+ * The same change, spelled as a command, for when SFTP is refused (TRE-29).
+ *
+ * Every operation that can be elevated has to supply one, and the type is what
+ * makes that a compile error rather than an omission: SFTP cannot be sudo'd, so
+ * an operation with no command form simply cannot escalate, and finding that
+ * out at the call site beats finding it out on a root-owned file.
+ */
+export interface ElevatedForm {
+  program: SudoOnlyProgram;
+  argv: (path: string) => string[];
+}
+
 export interface PathOutcome {
   path: string;
   ok: boolean;
   /** Entries actually changed under this path. 1 unless recursive. */
   entries: number;
+  /**
+   * How many of this path's entries had to go through sudo (TRE-29). Absent or
+   * zero on every operation that needed no privilege it did not already have.
+   */
+  elevated?: number;
   /** Driver code when it failed — EPERM, EACCES, ENOENT. */
   code?: string;
   message?: string;
@@ -52,6 +73,12 @@ export interface ChangeResult {
   results: PathOutcome[];
   changed: number;
   failed: number;
+  /**
+   * Entries changed as root because the ordinary attempt was refused (TRE-29).
+   * Zero when no sudo window was open, and zero when one was but nothing
+   * needed it — which is the common case and worth being able to tell apart.
+   */
+  elevated: number;
   /** Symlinks passed over during a recursive walk. */
   skippedLinks: number;
   /** Directories a recursive walk could not read; nothing under them changed. */
@@ -92,6 +119,7 @@ export class PermissionsService {
     private readonly factory: HostDriverFactory,
     private readonly guard: PathGuardService,
     private readonly ids: IdResolverService,
+    private readonly sudoRunner: SudoRunnerService,
   ) {}
 
   /**
@@ -131,8 +159,17 @@ export class PermissionsService {
     paths: readonly string[],
     mode: number,
     recursive: boolean,
+    sessionId?: string,
   ): Promise<ChangeResult> {
-    return this.apply(userId, hostId, paths, recursive, (driver, target) => driver.chmod(target, mode));
+    return this.apply(
+      userId,
+      hostId,
+      paths,
+      recursive,
+      (driver, target) => driver.chmod(target, mode),
+      { program: "chmod", argv: (target) => chmodArgv(mode, target) },
+      sessionId,
+    );
   }
 
   /**
@@ -147,6 +184,7 @@ export class PermissionsService {
     owner: string | undefined,
     group: string | undefined,
     recursive: boolean,
+    sessionId?: string,
   ): Promise<ChangeResult> {
     if (owner === undefined && group === undefined) {
       throw new BadRequestException("Give an owner, a group, or both.");
@@ -161,8 +199,11 @@ export class PermissionsService {
       paths,
       recursive,
       // -1 is POSIX for "leave this one alone", and both drivers pass it
-      // through: chown(path, -1, gid) changes the group and nothing else.
+      // through: chown(path, -1, gid) changes the group and nothing else. The
+      // command has no such convention, which is what `chownArgv` is for.
       (host, path) => host.chown(path, uid, gid),
+      { program: "chown", argv: (target) => chownArgv(uid, gid, target) },
+      sessionId,
       driver,
     );
   }
@@ -181,6 +222,8 @@ export class PermissionsService {
     paths: readonly string[],
     recursive: boolean,
     change: (driver: HostDriver, path: string) => Promise<void>,
+    elevated: ElevatedForm,
+    sessionId?: string,
     existing?: HostDriver,
   ): Promise<ChangeResult> {
     if (paths.length === 0) throw new BadRequestException("No paths given.");
@@ -197,6 +240,7 @@ export class PermissionsService {
     const refused: string[] = [];
     let skippedLinks = 0;
     let changed = 0;
+    let elevatedEntries = 0;
 
     for (const path of paths) {
       // Validated one at a time, and a refusal on one path does not cancel the
@@ -245,9 +289,10 @@ export class PermissionsService {
         return false;
       });
 
-      const outcome = await this.applyTo(driver, path, permitted, change);
+      const outcome = await this.applyTo(driver, path, permitted, change, elevated, sessionId, hostId);
       results.push(outcome);
       changed += outcome.entries;
+      if (outcome.elevated) elevatedEntries += outcome.elevated;
     }
 
     const failed = results.filter((result) => !result.ok).length;
@@ -258,7 +303,7 @@ export class PermissionsService {
     // client has to know which.
     if (failed === results.length) throw allFailed(results);
 
-    return { results, changed, failed, skippedLinks, unreadable, refused };
+    return { results, changed, failed, skippedLinks, unreadable, refused, elevated: elevatedEntries };
   }
 
   /** One path and everything the walk found under it. */
@@ -267,22 +312,52 @@ export class PermissionsService {
     reported: string,
     targets: readonly string[],
     change: (driver: HostDriver, path: string) => Promise<void>,
+    elevated: ElevatedForm,
+    sessionId: string | undefined,
+    hostId: string,
   ): Promise<PathOutcome> {
     let entries = 0;
+    let viaSudo = 0;
     for (const target of targets) {
       try {
         await change(driver, target);
         entries += 1;
       } catch (error) {
+        // Refused for want of privilege, with a window open: this is the case
+        // the whole ticket exists for. Retried through `sudo chmod` rather than
+        // SFTP, because SFTP cannot be elevated at all.
+        //
+        // Tried the ordinary way first on every entry, deliberately. A tree
+        // where four files are root-owned and four thousand are not runs four
+        // commands as root, not four thousand — and the four thousand keep
+        // their existing code path, which is the one that is already tested.
+        if (isPermissionRefusal(error) && this.sudoRunner.isOpen(sessionId, hostId)) {
+          try {
+            await this.sudoRunner.run(driver, sessionId, hostId, elevated.program, elevated.argv(target));
+            entries += 1;
+            viaSudo += 1;
+            continue;
+          } catch (elevatedError) {
+            // The refusal that gets reported is this one, not the original: it
+            // is the last thing tried and the one whose message says what is
+            // actually in the way.
+            const outcome = failure(reported, elevatedError);
+            outcome.entries = entries;
+            outcome.elevated = viaSudo;
+            return outcome;
+          }
+        }
+
         // The first failure ends this path. Continuing would report a count
         // that mixes changed and unchanged entries under one "ok", and a
         // half-applied recursive chmod is worth stopping to look at.
         const outcome = failure(reported, error);
         outcome.entries = entries;
+        outcome.elevated = viaSudo;
         return outcome;
       }
     }
-    return { path: reported, ok: true, entries };
+    return { path: reported, ok: true, entries, elevated: viaSudo };
   }
 
   /**

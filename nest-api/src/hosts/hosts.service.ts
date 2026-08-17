@@ -1,5 +1,7 @@
 import { homedir } from "node:os";
+import { isDriverError } from "@hosts/drivers/driver-error";
 import { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
+import type { ExecResult, HostDriver } from "@hosts/drivers/host-driver";
 import { HostConnectionSpec, HostProbeResult, SshAuth, SshConnectionPool } from "@hosts/drivers/ssh-connection.pool";
 import type { CreateHostDto } from "@hosts/dto/create-host.dto";
 import type { HostRootInput, RootAccessInput } from "@hosts/dto/host-root.dto";
@@ -8,7 +10,17 @@ import type { UpdateHostDto } from "@hosts/dto/update-host.dto";
 import { DiskMount, DiskOptions, HostDisksService } from "@hosts/host-disks.service";
 import { HostMetrics, HostMetricsService } from "@hosts/host-metrics.service";
 import { HostSummary, HostSummaryService } from "@hosts/host-summary.service";
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { SudoService } from "@hosts/sudo/sudo.service";
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+  UnprocessableEntityException,
+} from "@nestjs/common";
 import { SecretStoreService } from "@secrets/secret-store.service";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -34,6 +46,92 @@ export interface HostView {
   }>;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Milliseconds left on this *session's* sudo window for this host, or 0
+   * (TRE-29).
+   *
+   * Per session, not per user, because the window is — two browsers signed into
+   * the same account see different numbers here and that is correct. Zero on
+   * every route that has no session to ask about, which is why it is a number
+   * rather than an optional: absent and expired would render the same and one
+   * of them would be a bug nobody could see.
+   */
+  sudoRemainingMs: number;
+}
+
+/** An open sudo window, as the client sees it. Never carries the password. */
+export interface SudoWindowView {
+  hostId: string;
+  hostLabel: string;
+  /** Whether a password was actually required. False on a NOPASSWD host. */
+  neededPassword: boolean;
+  expiresAt: Date;
+  remainingMs: number;
+}
+
+/**
+ * What this host would want in order to open a window.
+ *
+ * `"none"` is not a degenerate case, it is the common one: most cloud images
+ * ship their default account with `NOPASSWD: ALL`. The client shows a confirm
+ * button for it and a password field for `"password"`, which is the difference
+ * between a real check and a field that accepts anything.
+ */
+export type SudoRequirement = "none" | "password" | "not-a-sudoer" | "no-sudo-binary";
+
+export interface SudoRequirementView {
+  hostId: string;
+  needs: SudoRequirement;
+}
+
+/** Why `sudo` would not run, in the ways worth telling apart. */
+type SudoProbe = "ok" | "bad-password" | "not-a-sudoer" | "no-sudo-binary" | "unknown";
+
+/**
+ * The refusal for a probe that failed, with the remedy attached.
+ *
+ * 401 for a password that did not work, because that is what it is and the
+ * client shows the field again. 422 for the other two: the request was
+ * well-formed and correctly authenticated, and what is wrong is the host's
+ * configuration — nothing the person retyping their password can fix.
+ */
+function sudoRefusal(probe: Exclude<SudoProbe, "ok"> | "password-required", host: HostView): HttpException {
+  if (probe === "password-required") {
+    // The client asked the wrong question — it should have read the
+    // requirement first and shown the field. Not an authentication failure, so
+    // not a 401: nothing was rejected, nothing was offered.
+    return new BadRequestException({
+      code: "ESUDOPASSWORDNEEDED",
+      message: `sudo on ${host.label} asks for a password, and none was given.`,
+    });
+  }
+  if (probe === "bad-password") {
+    return new UnauthorizedException({
+      code: "ESUDOAUTH",
+      message:
+        `${host.username ?? "That account"} could not authenticate to sudo on ${host.label}. ` +
+        "Either the password is wrong, or the account has no password set — which is common when " +
+        "the host is reached with an SSH key. sudo cannot use the key; it needs a password.",
+    });
+  }
+  if (probe === "not-a-sudoer") {
+    return new UnprocessableEntityException({
+      code: "ENOTSUDOER",
+      message:
+        `${host.username ?? "That account"} is not permitted to run sudo on ${host.label}. ` +
+        "An administrator has to grant it before Trekker can use it.",
+    });
+  }
+  if (probe === "no-sudo-binary") {
+    return new UnprocessableEntityException({
+      code: "ENOSUDO",
+      message: `There is no sudo on ${host.label}, so there is nothing for this to use.`,
+    });
+  }
+  return new UnprocessableEntityException({
+    code: "ESUDOFAILED",
+    message: `sudo on ${host.label} refused, and did not say why in a way this recognises.`,
+  });
 }
 
 @Injectable()
@@ -48,18 +146,26 @@ export class HostsService {
     private readonly summaries: HostSummaryService,
     private readonly metrics: HostMetricsService,
     private readonly disks: HostDisksService,
+    private readonly sudo: SudoService,
   ) {}
 
-  async list(userId: string): Promise<HostView[]> {
+  async list(userId: string, sessionId?: string): Promise<HostView[]> {
     const hosts = await this.prisma.hosts.findMany({
       where: { userId },
       include: { credential: true, knownKeys: true, roots: true },
       orderBy: { createdAt: "asc" },
     });
-    return hosts.map(toView);
+    // The remaining time is read here rather than polled on its own route: the
+    // badge and the `#` prompt need it on every host the pane can switch to,
+    // and a second request per host to answer "is sudo open" would be three
+    // round trips to draw a chip (TRE-29 §4).
+    return hosts.map((host) => ({
+      ...toView(host),
+      sudoRemainingMs: sessionId === undefined ? 0 : this.sudo.remainingMs(sessionId, host.id),
+    }));
   }
 
-  async get(userId: string, id: string): Promise<HostView> {
+  async get(userId: string, id: string, sessionId?: string): Promise<HostView> {
     const host = await this.prisma.hosts.findFirst({
       where: { id, userId },
       include: { credential: true, knownKeys: true, roots: true },
@@ -67,7 +173,10 @@ export class HostsService {
     // A host that is not yours is a 404, never a 403 — the response must not
     // confirm the id exists (TRE-12).
     if (!host) throw new NotFoundException("Host not found");
-    return toView(host);
+    return {
+      ...toView(host),
+      sudoRemainingMs: sessionId === undefined ? 0 : this.sudo.remainingMs(sessionId, id),
+    };
   }
 
   async create(userId: string, dto: CreateHostDto): Promise<HostView> {
@@ -161,10 +270,12 @@ export class HostsService {
       });
 
     this.logger.log(`Host created: ${created.slug} (${created.transport}) for user ${userId}`);
-    return toView(created);
+    // Zero, and provably so: this host did not exist a moment ago, so nothing
+    // can hold a sudo window on it.
+    return { ...toView(created), sudoRemainingMs: 0 };
   }
 
-  async update(userId: string, id: string, dto: UpdateHostDto): Promise<HostView> {
+  async update(userId: string, id: string, dto: UpdateHostDto, sessionId?: string): Promise<HostView> {
     const host = await this.prisma.hosts.findFirst({ where: { id, userId } });
     if (!host) throw new NotFoundException("Host not found");
 
@@ -305,7 +416,12 @@ export class HostsService {
       this.disks.forget(id);
     }
 
-    return toView(updated);
+    // Read rather than zeroed: editing a host does not close a window on it, and
+    // a response saying otherwise would make the badge flicker off after a save.
+    return {
+      ...toView(updated),
+      sudoRemainingMs: sessionId === undefined ? 0 : this.sudo.remainingMs(sessionId, id),
+    };
   }
 
   async remove(userId: string, id: string): Promise<void> {
@@ -379,6 +495,146 @@ export class HostsService {
     await this.get(userId, id);
     const driver = await this.factory.forHost(id, userId);
     return this.disks.forHost(driver, options);
+  }
+
+  /**
+   * What opening a sudo window on this host would take (TRE-29).
+   *
+   * **Asked before the modal is shown, and that ordering is the whole point.**
+   * A great many machines — every cloud image with a `NOPASSWD: ALL` line for
+   * its default account — never ask for a password at all. On one of those,
+   * `sudo` ignores whatever Trekker sends it and succeeds regardless, so a
+   * password field would accept anything typed into it: the wrong password, a
+   * blank one, anything. It would look like a check and be theatre. So the host
+   * is asked first, with `sudo -n`, and the client renders the form the answer
+   * calls for.
+   */
+  async sudoRequirement(userId: string, id: string): Promise<SudoRequirementView> {
+    await this.get(userId, id);
+    const driver = await this.factory.forHost(id, userId);
+    return { hostId: id, needs: await this.probeSudoMode(driver) };
+  }
+
+  /**
+   * Open a sudo window, after proving sudo actually works (TRE-29).
+   *
+   * **The check is the point, not a nicety.** Storing a password and
+   * discovering at the first `rm` that it was mistyped would mean a badge
+   * counting down next to a window that grants nothing, and a refusal arriving
+   * attached to whichever operation happened to be first. So `sudo` is asked
+   * one harmless question here — `id -u`, which answers `0` when it worked —
+   * and the window only exists if that came back right.
+   *
+   * `password` is optional because on a host that asks for none there is
+   * nothing to give, and demanding one would mean inventing a value for a field
+   * nobody can fill. When one *is* required and none arrives, this refuses
+   * rather than sending an empty string for sudo to reject: the client asked
+   * the wrong question and should be told so.
+   */
+  async openSudo(userId: string, sessionId: string, id: string, password?: string): Promise<SudoWindowView> {
+    const host = await this.get(userId, id);
+    const driver = await this.factory.forHost(id, userId);
+
+    const needs = await this.probeSudoMode(driver);
+    if (needs === "not-a-sudoer" || needs === "no-sudo-binary") throw sudoRefusal(needs, host);
+    if (needs === "password" && password === undefined) throw sudoRefusal("password-required", host);
+
+    // Empty on a host that wants none, which is also what will be sent to every
+    // later `sudo -S`: it does not read stdin, so there is nothing to send.
+    const held = needs === "password" ? (password as string) : "";
+    if (needs === "password") {
+      const probe = await this.probeSudo(driver, held);
+      if (probe !== "ok") throw sudoRefusal(probe, host);
+    }
+
+    const expiresAt = this.sudo.open(sessionId, id, held);
+    // The label, never the password, and never whether one was needed for this
+    // particular account — that last one is a fact about the host and it is
+    // already in the audit row for the request.
+    this.logger.log(`sudo window opened on ${host.label} (${id})`);
+    return {
+      hostId: id,
+      hostLabel: host.label,
+      neededPassword: needs === "password",
+      expiresAt: new Date(expiresAt),
+      remainingMs: this.sudo.remainingMs(sessionId, id),
+    };
+  }
+
+  /** Close a window early. False if there was nothing open. */
+  async dropSudo(userId: string, sessionId: string, id: string): Promise<boolean> {
+    // Ownership first, so this cannot be used to probe which host ids exist.
+    await this.get(userId, id);
+    return this.sudo.drop(sessionId, id);
+  }
+
+  /**
+   * Which kind of host this is, asked with `sudo -n` so it can never prompt.
+   *
+   * Three answers matter. `-n` succeeding means the account may sudo with no
+   * password — nothing to ask for. `-n` failing with "a password is required"
+   * means there is. Anything about sudoers means the account may not sudo at
+   * all, and no password would help.
+   *
+   * A cached sudo timestamp cannot make this lie the dangerous way round. Each
+   * exec is its own channel with no tty, so there is no timestamp to inherit
+   * from a person's terminal session; and were one ever to apply, `-n` would
+   * succeed and Trekker would skip a prompt it did not need, not accept a
+   * wrong password as though it were right.
+   */
+  private async probeSudoMode(driver: HostDriver): Promise<SudoRequirement> {
+    let result: ExecResult;
+    try {
+      result = await driver.exec("id", ["-u"], { sudo: "probe" });
+    } catch (error) {
+      if (isDriverError(error) && error.code === "ENOENT") return "no-sudo-binary";
+      throw error;
+    }
+
+    if (result.code === 0 && result.stdout.trim() === "0") return "none";
+
+    const stderr = result.stderr.toLowerCase();
+    if (/not in the sudoers file|is not allowed to run|may not run sudo|not permitted to run/.test(stderr)) {
+      return "not-a-sudoer";
+    }
+    // `sudo: a password is required` is what `-n` says when it would have
+    // prompted. Anything else unrecognised is treated the same way: ask for a
+    // password and let the real attempt produce the specific failure.
+    return "password";
+  }
+
+  /**
+   * The real attempt, with the password on stdin.
+   *
+   * `id -u` prints `0` when it ran as root, so a successful probe proves both
+   * halves at once: sudo accepted the password, and what came back really was
+   * root.
+   *
+   * The failures are told apart by what sudo says, because they need different
+   * remedies and a single "sudo failed" would send the operator looking in the
+   * wrong place. **`bad-password` and an account with no password set are not
+   * distinguishable here** — PAM reports both as an authentication failure —
+   * which is why that message names both.
+   */
+  private async probeSudo(driver: HostDriver, password: string): Promise<SudoProbe> {
+    let result: ExecResult;
+    try {
+      result = await driver.exec("id", ["-u"], { sudo: "password", stdin: `${password}\n` });
+    } catch (error) {
+      if (isDriverError(error) && error.code === "ENOENT") return "no-sudo-binary";
+      throw error;
+    }
+
+    if (result.code === 0 && result.stdout.trim() === "0") return "ok";
+
+    const stderr = result.stderr.toLowerCase();
+    if (/not in the sudoers file|is not allowed to run|may not run sudo|not permitted to run/.test(stderr)) {
+      return "not-a-sudoer";
+    }
+    if (/incorrect password|sorry, try again|authentication failure|no password was provided/.test(stderr)) {
+      return "bad-password";
+    }
+    return "unknown";
   }
 
   // ---- internals ----------------------------------------------------------
@@ -578,7 +834,7 @@ function toView(host: {
     verifiedAt: Date | null;
   }>;
   roots: Array<{ path: string; access: string }>;
-}): HostView {
+}): Omit<HostView, "sudoRemainingMs"> {
   return {
     id: host.id,
     slug: host.slug,

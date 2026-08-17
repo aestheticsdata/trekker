@@ -6,7 +6,10 @@ import { LIMITS } from "@audit/limits";
 import { RateLimitService } from "@audit/rate-limit.service";
 import { LocalDriver } from "@hosts/drivers/local.driver";
 import type { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
+import { DriverError } from "@hosts/drivers/driver-error";
 import { PathGuardService } from "@hosts/path-guard/path-guard.service";
+import { SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
+import { SudoService } from "@hosts/sudo/sudo.service";
 import type { IdResolverService } from "@fs/id-resolver.service";
 import { PermissionsService, describeMode, entryCeiling, parseMode, specialBits } from "@fs/permissions.service";
 import { walkTree } from "@fs/tree-walk";
@@ -86,8 +89,60 @@ function serviceFor(
 
   const guard = new PathGuardService(prisma, denylist, memoryLimits(), silentAudit);
   const factory = { forHost: () => Promise.resolve(new LocalDriver(HOST_ID)) } as unknown as HostDriverFactory;
-  return new PermissionsService(factory, guard, ids);
+  // A real runner over a real (empty) window store: nothing here opens one, so
+  // `isOpen` is always false and every change takes the ordinary path. That is
+  // the point — TRE-29 must not have altered what happens without a window.
+  return new PermissionsService(factory, guard, ids, new SudoRunnerService(new SudoService()));
 }
+
+/**
+ * The same service, over a driver that refuses the way a root-owned file does,
+ * with a sudo window already open (TRE-29).
+ *
+ * The driver is a real `LocalDriver` with two methods replaced: `chmod` throws
+ * whatever the test asks for, and `exec` records the elevated call instead of
+ * running `sudo`. Everything else — the guard, the roots, the denylist, the
+ * walk — is the real thing, because those are what the escalation must not be
+ * able to step around.
+ */
+function elevatedServiceFor(
+  roots: { path: string; access: "READ" | "WRITE" }[],
+  refusal: DriverError,
+  denylist: string[] = [join(base, "install")],
+): { service: PermissionsService; elevatedCalls: Array<{ program: string; args: readonly string[] }> } {
+  const elevatedCalls: Array<{ program: string; args: readonly string[] }> = [];
+
+  const driver = new LocalDriver(HOST_ID) as LocalDriver & Record<string, unknown>;
+  driver.chmod = () => Promise.reject(refusal);
+  driver.exec = (program: string, args: readonly string[]) => {
+    elevatedCalls.push({ program, args });
+    return Promise.resolve({ code: 0, signal: null, stdout: "", stderr: "" });
+  };
+
+  const prisma = {
+    hosts: {
+      findFirst: ({ where }: { where: { id: string; userId: string } }) =>
+        Promise.resolve(
+          where.id === HOST_ID && where.userId === USER_ID
+            ? { id: HOST_ID, userId: USER_ID, transport: "LOCAL", roots, user: { role: "MEMBER" } }
+            : null,
+        ),
+    },
+  } as unknown as PrismaService;
+
+  const guard = new PathGuardService(prisma, denylist, memoryLimits(), silentAudit);
+  const factory = { forHost: () => Promise.resolve(driver) } as unknown as HostDriverFactory;
+
+  const sudo = new SudoService();
+  sudo.open(SESSION_ID, HOST_ID, "hunter2");
+
+  return {
+    service: new PermissionsService(factory, guard, ids, new SudoRunnerService(sudo)),
+    elevatedCalls,
+  };
+}
+
+const SESSION_ID = "session-under-test";
 
 const writeRoot = () => [{ path: base, access: "WRITE" as const }];
 
@@ -580,5 +635,78 @@ describe("route wiring", () => {
     // would break every cold load.
     expect(guardsOn("list")).toContain(SessionAuthGuard);
     expect(guardsOn("list")).not.toContain(CsrfGuard);
+  });
+});
+
+/**
+ * Escalation, and the two things it must never become (TRE-29).
+ *
+ * Sudo widens *permission*, never *reach*. The guard, the roots and the
+ * denylist all run above the retry and are unchanged by it, so the tests that
+ * matter most here are the ones where escalation is available and the answer is
+ * still no.
+ */
+describe("falling back to sudo", () => {
+  it("retries a permission refusal as root, with the mode in octal", async () => {
+    const target = join(base, "escalate.txt");
+    await writeFile(target, "x");
+    const { service, elevatedCalls } = elevatedServiceFor(writeRoot(), new DriverError("EACCES", "denied", target));
+
+    const result = await service.chmod(USER_ID, HOST_ID, [target], 0o640, false, SESSION_ID);
+
+    expect(result.changed).toBe(1);
+    expect(result.elevated).toBe(1);
+    expect(elevatedCalls).toEqual([{ program: "chmod", args: ["0640", "--", target] }]);
+  });
+
+  it("does not retry a failure sudo could not fix", async () => {
+    // A missing file is missing as root too. Escalating here would put a root
+    // operation in the audit log for a request that was never going to work.
+    const target = join(base, "gone.txt");
+    await writeFile(target, "x");
+    const { service, elevatedCalls } = elevatedServiceFor(writeRoot(), new DriverError("ENOENT", "no such", target));
+
+    await expect(service.chmod(USER_ID, HOST_ID, [target], 0o640, false, SESSION_ID)).rejects.toThrow();
+    expect(elevatedCalls).toHaveLength(0);
+  });
+
+  it("does not escalate without a session", async () => {
+    // The window is keyed by session. No session, no window, whatever is held.
+    const target = join(base, "nosession.txt");
+    await writeFile(target, "x");
+    const { service, elevatedCalls } = elevatedServiceFor(writeRoot(), new DriverError("EACCES", "denied", target));
+
+    await expect(service.chmod(USER_ID, HOST_ID, [target], 0o640, false)).rejects.toThrow();
+    expect(elevatedCalls).toHaveLength(0);
+  });
+
+  it("still refuses a path outside the roots, window open or not", async () => {
+    // Sudo does not widen the allowlist. The guard runs before any of this.
+    const outside = join(base, "outside.txt");
+    await writeFile(outside, "x");
+    const { service, elevatedCalls } = elevatedServiceFor(
+      [{ path: join(base, "inside"), access: "WRITE" }],
+      new DriverError("EACCES", "denied", outside),
+    );
+
+    await expect(service.chmod(USER_ID, HOST_ID, [outside], 0o640, false, SESSION_ID)).rejects.toThrow();
+    // Never reached the driver at all, let alone sudo.
+    expect(elevatedCalls).toHaveLength(0);
+  });
+
+  it("still steps over a denylisted entry, window open or not", async () => {
+    // The install tree holds the master key. Root is exactly the privilege that
+    // would make reading it possible, which is why the denylist must win here.
+    const install = join(base, "install");
+    await mkdir(install, { recursive: true });
+    await writeFile(join(install, "master.key"), "secret");
+    const { service, elevatedCalls } = elevatedServiceFor(writeRoot(), new DriverError("EACCES", "denied", install));
+
+    const result = await service.chmod(USER_ID, HOST_ID, [base], 0o700, true, SESSION_ID);
+
+    expect(result.refused).toContain(join(install, "master.key"));
+    for (const call of elevatedCalls) {
+      expect(call.args).not.toContain(join(install, "master.key"));
+    }
   });
 });

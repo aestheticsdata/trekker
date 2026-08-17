@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import { HostsService } from "@hosts/hosts.service";
+import { SudoService } from "@hosts/sudo/sudo.service";
 import type { CreateHostDto } from "@hosts/dto/create-host.dto";
 import type { UpdateHostDto } from "@hosts/dto/update-host.dto";
 import type { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
@@ -94,6 +95,9 @@ function prismaFor() {
     {} as unknown as HostSummaryService,
     {} as unknown as HostMetricsService,
     {} as unknown as HostDisksService,
+    // Real rather than a stub: it holds no state until something opens a
+    // window, and nothing in this file does. Its own spec covers it.
+    new SudoService(),
   );
 
   return { service, rootWrites, created: () => rootWrites.filter((write) => write.kind === "create") };

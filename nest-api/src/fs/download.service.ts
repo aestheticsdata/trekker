@@ -10,6 +10,7 @@ import { zipTree } from "@fs/zip-stream";
 import { isDriverError } from "@hosts/drivers/driver-error";
 import { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
 import { PathGuardService } from "@hosts/path-guard/path-guard.service";
+import { isPermissionRefusal, SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
 
 import type { HostDriver } from "@hosts/drivers/host-driver";
 import type { Readable } from "node:stream";
@@ -36,6 +37,12 @@ import type { Readable } from "node:stream";
  * fleet, and "who took what, when, how much of it" is the question asked
  * afterwards. So this is a GET that opens and settles its own row.
  */
+
+/**
+ * 416. Nest's `HttpStatus` does not name it, and the number is the contract the
+ * client reads — a resumable download that gets anything else retries forever.
+ */
+const RANGE_NOT_SATISFIABLE = 416;
 
 /** Everything decided before a byte is written, which is all of it. */
 export interface DownloadPlan {
@@ -77,6 +84,7 @@ export class DownloadService {
     private readonly guard: PathGuardService,
     private readonly limits: RateLimitService,
     private readonly audit: AuditService,
+    private readonly sudoRunner: SudoRunnerService,
   ) {}
 
   /**
@@ -198,7 +206,7 @@ export class DownloadService {
     });
 
     const started = Date.now();
-    const stream = await this.stream(plan, range);
+    const stream = await this.stream(plan, range, sessionId);
 
     return {
       stream,
@@ -227,8 +235,8 @@ export class DownloadService {
    * session-shaped half. Splitting it here is what keeps the two routes from
    * growing two ideas of how a file is read.
    */
-  async stream(plan: DownloadPlan, range: ByteRange | null = null): Promise<Readable> {
-    return plan.kind === "directory" ? this.archive(plan) : this.file(plan.driver, plan.realPath, range);
+  async stream(plan: DownloadPlan, range: ByteRange | null = null, sessionId?: string): Promise<Readable> {
+    return plan.kind === "directory" ? this.archive(plan) : this.file(plan.driver, plan.realPath, range, sessionId);
   }
 
   private async archive(plan: DownloadPlan): Promise<Readable> {
@@ -240,10 +248,40 @@ export class DownloadService {
     return zipTree(plan.driver, plan.realPath, walked.details).stream;
   }
 
-  private async file(driver: HostDriver, realPath: string, range: ByteRange | null): Promise<Readable> {
+  private async file(
+    driver: HostDriver,
+    realPath: string,
+    range: ByteRange | null,
+    sessionId?: string,
+  ): Promise<Readable> {
     try {
       return await driver.createReadStream(realPath, range === null ? {} : { start: range.start, end: range.end });
     } catch (error) {
+      // A root-owned file, with a window open (TRE-29). SFTP cannot be
+      // elevated, so the bytes come from `sudo cat` instead — streamed, never
+      // collected, so this stays the claim the rest of the file makes.
+      if (isPermissionRefusal(error) && this.sudoRunner.isOpen(sessionId, driver.hostId)) {
+        // **`cat` cannot take a window.** Nothing on either allowlist can:
+        // `tail -c +N` would give a start with no end, and bounding it needs a
+        // second program and a pipe, which is exactly what shell-quote.ts
+        // exists to prevent. So a root-owned file downloads whole or not at
+        // all, and a resumed download of one is refused in those words rather
+        // than silently answered with the entire file — which a client asking
+        // for bytes 1000-2000 would write over the top of what it already had.
+        if (range !== null) {
+          throw new HttpException(
+            {
+              statusCode: RANGE_NOT_SATISFIABLE,
+              code: "ENORANGESUDO",
+              message:
+                "This file can only be read with sudo, and a sudo read cannot start partway through. " +
+                "Download it from the beginning.",
+            },
+            RANGE_NOT_SATISFIABLE,
+          );
+        }
+        return this.sudoRunner.stream(driver, sessionId, driver.hostId, "cat", ["--", realPath]);
+      }
       if (isDriverError(error)) throw toHttp(error);
       throw error;
     }

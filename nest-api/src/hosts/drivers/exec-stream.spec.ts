@@ -127,3 +127,127 @@ describe("execStream", () => {
     expect((await running.done).code).toBe(0);
   });
 });
+
+/**
+ * The streaming form under sudo (TRE-29).
+ *
+ * Reading a root-owned file has to come through here rather than through
+ * `exec`: `exec` collects into a string with a `maxOutputBytes` ceiling, which
+ * is right for `df` and wrong for `cat` on a real file. So `execStream` needs
+ * the same two things `exec` grew — a sudo prefix, and a stdin to put the
+ * password on.
+ *
+ * The stdin case is tested without sudo on purpose. `tail` reading its input is
+ * the same pipe the password would travel down, and proving it with an
+ * allowlisted program keeps the test independent of how the machine running the
+ * suite happens to have sudo configured.
+ */
+describe("execStream stdin", () => {
+  it("writes stdin and closes it", async () => {
+    const driver = new LocalDriver("host-1");
+    const running = await driver.execStream("tail", ["-n", "1"], { stdin: "one\ntwo\nthree\n" });
+
+    const out = await collect(running.stdout);
+    const result = await running.done;
+
+    expect(result.code).toBe(0);
+    expect(out).toBe("three\n");
+  });
+
+  it("closes stdin when there is nothing to send", async () => {
+    // The same hang `exec` had. `tail` with no file waits on stdin for EOF, and
+    // a stream path that left the pipe open would never finish.
+    const driver = new LocalDriver("host-1");
+    const running = await driver.execStream("tail", ["-n", "1"], { timeoutMs: 5_000 });
+
+    const out = await collect(running.stdout);
+    const result = await running.done;
+
+    expect(result.code).toBe(0);
+    expect(out).toBe("");
+  });
+});
+
+describe("execStream's sudo guard", () => {
+  it("refuses a sudo-only program without sudo", async () => {
+    const driver = new LocalDriver("host-1");
+    await expect(driver.execStream("cat", ["/etc/hosts"])).rejects.toMatchObject({ code: "EPERM" });
+  });
+
+  it("still refuses a program on neither list, sudo or not", async () => {
+    const driver = new LocalDriver("host-1");
+    await expect(driver.execStream("sh" as never, ["-c", "id"], { sudo: "password" })).rejects.toMatchObject({
+      code: "EPERM",
+    });
+  });
+
+  it("admits a sudo-only program once sudo is asked for", async () => {
+    // As in `exec-stdin.spec.ts`: reaching the program is the assertion, since
+    // what real sudo then does depends on the machine running the suite.
+    const driver = new LocalDriver("host-1");
+    const refusal = await driver
+      .execStream("cat", ["/nonexistent-trekker-probe"], { sudo: "password", timeoutMs: 5_000 })
+      .then(() => null)
+      .catch((error: unknown) => error as { code?: string });
+
+    expect(refusal?.code).not.toBe("EPERM");
+  });
+});
+
+/**
+ * A stdin the caller keeps writing to (TRE-29).
+ *
+ * Writing a root-owned file means `sudo tee`, and that is the one place where
+ * the password and the payload share a pipe: `sudo -S` consumes exactly one
+ * line, then execs `tee`, which reads everything after it. So the driver has to
+ * write the password, *not* close, and hand the rest of the pipe back.
+ *
+ * Modelled here with `tail` rather than `tee` for the same reason as elsewhere
+ * — it is allowlisted and needs no privilege — and the shape is identical: a
+ * first line written by the driver, the rest written by the caller.
+ */
+describe("execStream with a stdin the caller finishes", () => {
+  it("writes the first line, then lets the caller write the rest", async () => {
+    const driver = new LocalDriver("host-1");
+    const running = await driver.execStream("tail", ["-n", "2"], { stdin: "first\n", stdinOpen: true });
+
+    expect(running.stdin).toBeDefined();
+    running.stdin?.end("second\nthird\n");
+
+    const out = await collect(running.stdout);
+    const result = await running.done;
+
+    expect(result.code).toBe(0);
+    // All three lines reached the program: the driver's, then the caller's.
+    expect(out).toBe("second\nthird\n");
+  });
+
+  it("does not hand back a stdin unless it was asked to", async () => {
+    // The default has to stay closed-and-gone, or every existing caller grows a
+    // pipe nobody ends and a command that never finishes.
+    const driver = new LocalDriver("host-1");
+    const running = await driver.execStream("tail", ["-n", "1"], { stdin: "only\n" });
+
+    expect(running.stdin).toBeUndefined();
+    const out = await collect(running.stdout);
+    await running.done;
+    expect(out).toBe("only\n");
+  });
+
+  it("finishes only once the caller closes the pipe", async () => {
+    // `tail` cannot answer until it sees EOF, so a `done` that settled early
+    // would be settling on a command that had not read its input yet.
+    const driver = new LocalDriver("host-1");
+    const running = await driver.execStream("tail", ["-n", "1"], { stdin: "a\n", stdinOpen: true });
+
+    let settled = false;
+    void running.done.then(() => (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+
+    running.stdin?.end("b\n");
+    const out = await collect(running.stdout);
+    await running.done;
+    expect(out).toBe("b\n");
+  });
+});

@@ -1,5 +1,5 @@
 import type { Readable, Writable } from "node:stream";
-import type { AllowedProgram } from "@hosts/drivers/shell-quote";
+import type { AllowedProgram, SudoMode, SudoOnlyProgram } from "@hosts/drivers/shell-quote";
 
 /**
  * One interface, two implementations (TRE-9). This is the structural decision
@@ -63,6 +63,37 @@ export interface ExecOptions {
    * prefix is not an allowlist entry.
    */
   nice?: number;
+  /**
+   * Written to the program's standard input, which is then closed. Absent
+   * closes it immediately, so a program that reads stdin sees EOF rather than
+   * waiting for input that is not coming.
+   *
+   * There is one caller: `sudo -S` takes the password here (TRE-29). It is
+   * deliberately not an argument, and this is the reason the option exists at
+   * all — an argument is visible in the host's process list to every account
+   * on the machine, and stdin is not.
+   *
+   * **Nothing given here may be logged, captured, or copied into an error.**
+   * Both drivers keep it out of the command string; the rest is the caller's
+   * to uphold.
+   */
+  stdin?: string;
+  /**
+   * Run the program as root, and admit `SUDO_ONLY_PROGRAMS` (TRE-29).
+   *
+   * Rendered as a literal prefix, never a program a caller can name. Setting
+   * it does two things at once, and the second is the important one: without
+   * it `cat`, `tee`, `rm`, `chmod` and `chown` are refused by both drivers
+   * exactly as `sh` is, so the ability to run them on a host does not exist
+   * outside a sudo window.
+   *
+   * `"password"` for real work, `"probe"` to find out whether this host would
+   * have asked for one — see `SudoMode`.
+   *
+   * The driver does not check whether that window is open. It renders and runs
+   * what it is asked for; deciding who may ask is the service's job.
+   */
+  sudo?: SudoMode;
 }
 
 /**
@@ -87,6 +118,31 @@ export interface ExecStreamOptions {
   maxStderrBytes?: number;
   /** A ceiling for callers that do want one. Absent means none. */
   timeoutMs?: number;
+  /**
+   * As `ExecOptions.stdin`. Written and closed before any output is read.
+   *
+   * Closing matters here as much as it does on `exec`: a program that reads
+   * stdin waits for EOF, and a stream nobody ever ends is a walk that produces
+   * nothing and never finishes.
+   */
+  stdin?: string;
+  /**
+   * As `ExecOptions.sudo` (TRE-29).
+   *
+   * The streaming form is the one that matters for reading a root-owned file:
+   * `exec` collects output into a string under `maxOutputBytes`, which is the
+   * right shape for `df` and the wrong one for `cat` on a real file.
+   */
+  sudo?: SudoMode;
+  /**
+   * Keep standard input open after writing `stdin`, and hand it back on
+   * `ExecStream.stdin` (TRE-29).
+   *
+   * For `sudo tee`, where the password is the first line and the file's
+   * contents are everything after it. **The caller must then close it** —
+   * nothing else will, and a command waiting for EOF waits forever.
+   */
+  stdinOpen?: boolean;
 }
 
 export interface ExecStreamResult {
@@ -109,6 +165,15 @@ export interface ExecStream {
    * exited: exit can arrive before the last bytes do.
    */
   done: Promise<ExecStreamResult>;
+  /**
+   * The rest of standard input, present only under `stdinOpen` (TRE-29).
+   *
+   * Absent by default, and deliberately so: every caller that predates this
+   * gets a stdin that was written and closed for it, and handing one of them a
+   * pipe to end would turn a forgotten `end()` into a command that never
+   * finishes.
+   */
+  stdin?: Writable;
 }
 
 export interface WriteOptions {
@@ -189,7 +254,7 @@ export interface HostDriver {
    * the caller's point of view — see shell-quote.ts for how that is upheld on
    * the SSH side, where the protocol forces a string.
    */
-  exec(program: AllowedProgram, args: readonly string[], options?: ExecOptions): Promise<ExecResult>;
+  exec(program: AllowedProgram | SudoOnlyProgram, args: readonly string[], options?: ExecOptions): Promise<ExecResult>;
 
   /**
    * The same, read as it arrives (TRE-32). Same allowlist, same quoting.
@@ -199,7 +264,11 @@ export interface HostDriver {
    * channel lifecycle to keep compiling. Callers check for it and say so when
    * a driver cannot stream, rather than assuming.
    */
-  execStream?(program: AllowedProgram, args: readonly string[], options?: ExecStreamOptions): Promise<ExecStream>;
+  execStream?(
+    program: AllowedProgram | SudoOnlyProgram,
+    args: readonly string[],
+    options?: ExecStreamOptions,
+  ): Promise<ExecStream>;
 
   /** Releases anything the driver holds. The local driver holds nothing. */
   dispose(): Promise<void>;

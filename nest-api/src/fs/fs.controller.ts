@@ -195,7 +195,7 @@ export class FsController {
     const { driver, real } = await this.upload.destination(userId, query.hostId, query.path);
 
     const { outcomes, refusal } = await receiveMultipart(req, (filename, stream) =>
-      this.upload.receive(userId, driver, real, filename, stream, conflict),
+      this.upload.receive(userId, driver, real, filename, stream, conflict, req.sessionID),
     );
 
     const uploaded = outcomes.filter((outcome) => outcome.ok && outcome.code !== "ESKIPPED").length;
@@ -311,12 +311,29 @@ export class FsController {
   })
   async chmod(@Req() req: Request, @Body() dto: ChangeModeDto): Promise<ChangeResult> {
     const mode = parseMode(dto.mode);
-    const result = await this.permissions.chmod(userIdOf(req), dto.hostId, dto.paths, mode, dto.recursive === true);
+    const result = await this.permissions.chmod(
+      userIdOf(req),
+      dto.hostId,
+      dto.paths,
+      mode,
+      dto.recursive === true,
+      req.sessionID,
+    );
 
     this.audit.annotate(req, {
+      // `elevated` in the summary and not only in the payload, because "what
+      // did this session do as root" has to be answerable by reading the strip
+      // rather than by opening every row (TRE-29).
       hostId: dto.hostId,
-      summary: `chmod ${describeMode(mode)} on ${count(result.changed, "entry", "entries")}`,
-      payload: { changed: result.changed, failed: result.failed, skippedLinks: result.skippedLinks },
+      summary:
+        `chmod ${describeMode(mode)} on ${count(result.changed, "entry", "entries")}` +
+        (result.elevated > 0 ? `, ${count(result.elevated, "as root", "as root")}` : ""),
+      payload: {
+        changed: result.changed,
+        failed: result.failed,
+        skippedLinks: result.skippedLinks,
+        elevated: result.elevated,
+      },
     });
     return result;
   }
@@ -346,11 +363,20 @@ export class FsController {
       dto.owner,
       dto.group,
       dto.recursive === true,
+      req.sessionID,
     );
 
     this.audit.annotate(req, {
       hostId: dto.hostId,
-      payload: { changed: result.changed, failed: result.failed, skippedLinks: result.skippedLinks },
+      summary:
+        `chown on ${count(result.changed, "entry", "entries")}` +
+        (result.elevated > 0 ? `, ${count(result.elevated, "as root", "as root")}` : ""),
+      payload: {
+        changed: result.changed,
+        failed: result.failed,
+        skippedLinks: result.skippedLinks,
+        elevated: result.elevated,
+      },
     });
     return result;
   }
@@ -488,12 +514,20 @@ export class FsController {
     },
   })
   async deletePaths(@Req() req: Request, @Body() dto: DeleteDto): Promise<DeleteResult> {
-    const result = await this.remove.remove(userIdOf(req), dto.hostId, dto.paths, dto.confirmation);
+    const result = await this.remove.remove(userIdOf(req), dto.hostId, dto.paths, dto.confirmation, req.sessionID);
 
+    const elevated = result.results.reduce((total, outcome) => total + (outcome.elevated ?? 0), 0);
     this.audit.annotate(req, {
       hostId: dto.hostId,
-      summary: `deleted ${count(result.entriesRemoved, "entry", "entries")}, ${result.bytesFreed} bytes`,
-      payload: { entriesRemoved: result.entriesRemoved, bytesFreed: result.bytesFreed, failed: result.failed },
+      summary:
+        `deleted ${count(result.entriesRemoved, "entry", "entries")}, ${result.bytesFreed} bytes` +
+        (elevated > 0 ? `, ${count(elevated, "as root", "as root")}` : ""),
+      payload: {
+        entriesRemoved: result.entriesRemoved,
+        bytesFreed: result.bytesFreed,
+        failed: result.failed,
+        elevated,
+      },
     });
     return result;
   }

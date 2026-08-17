@@ -180,7 +180,14 @@ async function main(): Promise<void> {
     console.log("\n== allowlist ==");
     check(
       "an unlisted program is refused locally",
-      (await codeOf(() => driver.exec("rm" as never, ["-rf", "/"]))) === "EPERM",
+      (await codeOf(() => driver.exec("sh" as never, ["-c", "id"]))) === "EPERM",
+    );
+    // `rm` stopped being unlisted in TRE-29 — it is on the sudo-only list, which
+    // is a different claim and worth its own line: reachable with sudo, refused
+    // exactly like `sh` without it.
+    check(
+      "a sudo-only program is refused without sudo",
+      (await codeOf(() => driver.exec("rm", ["-rf", "/"]))) === "EPERM",
     );
     let builderThrew = false;
     try {

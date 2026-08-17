@@ -1,7 +1,9 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Put, Req, Res, UseGuards } from "@nestjs/common";
 import type { Request, Response } from "express";
+import { AuditService } from "@audit/audit.service";
 import { Audited, NotAudited } from "@audit/audited.decorator";
 import { LIMITS } from "@audit/limits";
+import { SudoService } from "@hosts/sudo/sudo.service";
 import { RedisService } from "@redis/redis.service";
 import { clearCsrfToken, getOrCreateCsrfToken, rotateCsrfToken } from "@users/csrf-token.util";
 import { AddUserDto } from "@users/dto/add-user.dto";
@@ -20,6 +22,8 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly redisService: RedisService,
+    private readonly sudo: SudoService,
+    private readonly audit: AuditService,
   ) {}
 
   @Get("me")
@@ -161,6 +165,14 @@ export class UsersController {
   })
   logout(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<{ ok: true }> {
     clearCsrfToken(req);
+    // Before `destroy`, and deliberately not inside its callback: the sudo
+    // windows are keyed by `sessionID`, and a failed destroy must not be the
+    // reason a root password stays in memory (TRE-29). Dropping them for a
+    // session that then survives costs one re-prompt; the other order costs a
+    // held password with nothing left to close it.
+    const dropped = this.sudo.dropSession(req.sessionID);
+    if (dropped > 0) this.audit.annotate(req, { summary: `Signed out, closing ${count(dropped, "sudo window")}` });
+
     return new Promise((resolve, reject) => {
       // destroy() removes the Redis entry. Clearing the cookie alone would
       // leave a usable session behind for anyone who copied it.
@@ -179,4 +191,9 @@ export class UsersController {
 /** Behind nginx, req.ip is the proxy unless `trust proxy` is set — it is. */
 function clientIp(req: Request): string {
   return req.ip ?? req.socket?.remoteAddress ?? "unknown";
+}
+
+/** "1 sudo window", "2 sudo windows" — the same helper the fs routes use. */
+function count(n: number, singular: string, plural = `${singular}s`): string {
+  return `${n} ${n === 1 ? singular : plural}`;
 }
