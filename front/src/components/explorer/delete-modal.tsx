@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@auth/context/AuthContext";
+import { CommandLine } from "@components/ui/command-line";
 import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
 import { formatSize } from "@helpers/listing";
@@ -176,11 +177,14 @@ function DeletePanel({
         <div className="flex flex-col gap-2 px-3.5 py-2.5">
           <RiskLine plan={plan.data} />
 
-          {/* The operation in a language the reader already trusts. Display
-              only — nothing in this application runs a shell. */}
-          <code className="bg-chrome border-line-strong text-ink-muted block overflow-x-auto border px-2.5 py-1.75 font-mono text-2xs/[1.6] whitespace-pre">
-            {plan.data.command}
-          </code>
+          {/* Drawn by the shared component since TRE-29, so that the prompt
+              character here and the one in the permissions modal agree about
+              whether this session is elevated. */}
+          <CommandLine
+            hostId={hostId}
+            command={plan.data.command}
+            className="overflow-x-auto whitespace-pre"
+          />
 
           <label className="flex flex-col gap-1">
             <span className="text-ink-faint font-mono text-2xs tracking-label">

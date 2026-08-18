@@ -90,6 +90,14 @@
   /* Text on an accent fill — the ⌘K chip and the active segmented cell. */
   --color-on-accent: #04202f;
   --color-warning: #c98a3e;
+  /* The same idea as `danger-wash` below, for the sudo chrome (TRE-29): the
+   * surface a warning-coloured *label* sits on, rather than a warning-coloured
+   * fill that carries dark text. It has to be dark, and the obvious shortcut —
+   * `bg-warning/10` over whatever is behind it — is what it exists to replace.
+   * That composite lands at 4.41:1 over `app`, under AA, because tinting a
+   * backdrop toward amber moves it *closer* to amber text. Measured, not
+   * eyeballed: `pnpm verify:contrast`. */
+  --color-warning-wash: #241a0f;
   --color-danger: #7f2f2f;
   --color-danger-mid: #aa3333;
   --color-danger-soft: #e39a9a;

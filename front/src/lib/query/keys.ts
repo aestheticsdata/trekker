@@ -50,6 +50,12 @@ export const QUERY_KEYS = {
    * changed under the cursor would scatter those answers across a different one.
    */
   TRANSFER_PLAN: "transferPlan",
+  /**
+   * What one host would want in order to open a sudo window (TRE-29). Its own
+   * key rather than part of the hosts list's: answering it costs a round trip
+   * to the machine, and only the modal ever asks.
+   */
+  SUDO_REQUIREMENT: "sudoRequirement",
   ACTIVITY: "activity",
   /** The layout the account left, asked for only on a cold open (TRE-51). */
   LAYOUT: "layout",

@@ -142,12 +142,18 @@ const prodEnv = {
   // wanted. Read per request, so raising it takes effect without a restart.
   // TREKKER_RECURSIVE_ENTRY_CEILING: "10000",
   //
+  // How long a sudo window stays open, in minutes (TRE-29). Fifteen is the
+  // default and the number the UI shows; the modal reads this back from the
+  // API rather than hardcoding it, so lowering it here lowers what the dialog
+  // promises too. Read at boot — a change needs a reload.
+  // TREKKER_SUDO_WINDOW_MINUTES: "15",
+  //
   // Declared but not yet attached — the operations they govern do not exist.
   // Each is removed from `TO_ATTACH` by the ticket named beside it:
   //   TREKKER_LIMIT_HASHES_IN_FLIGHT           TRE-27
-  //   TREKKER_LIMIT_ELEVATIONS_PER_5MIN        TRE-29
   //
   // Attached and overridable, all optional, defaults shown:
+  //   TREKKER_LIMIT_SUDO_ATTEMPTS_PER_5MIN     5        TRE-29
   //   TREKKER_LIMIT_DELETES_PER_MIN            10       TRE-25
   //   TREKKER_LIMIT_DELETED_ENTRIES_PER_HOUR   50000    TRE-25
   //   TREKKER_LIMIT_DOWNLOADS_PER_MIN          120      TRE-26
@@ -195,6 +201,14 @@ module.exports = {
       // dist/src, not dist: the Prisma client is generated to ../generated, so
       // tsc's root covers the whole package and the layout is mirrored.
       script: "dist/src/main.js",
+      // ⚠️ Single fork, and TRE-29 made that load-bearing rather than merely
+      // sufficient. A sudo window — and the password behind it — lives in this
+      // process's memory, keyed by session and host, and nowhere else. Under
+      // cluster mode the workers would each hold a different set, so a window
+      // opened on one request would be missing from the next, at random, with
+      // no error to read. Moving that state to Redis to make clustering safe
+      // would give away the property it exists for: that the password is never
+      // written anywhere a second process could read it.
       instances: 1,
       exec_mode: "fork",
       autorestart: true,

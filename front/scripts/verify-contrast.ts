@@ -36,6 +36,16 @@ import { fileURLToPath } from "node:url";
 
 import { WARN_CHIP_FILL, WARN_CHIP_INK } from "../src/helpers/disks.ts";
 import { AGE_BUCKETS, HEAT, HEAT_OFF_INK, PANE_SURFACES } from "../src/helpers/heat.ts";
+import {
+  COMMAND_SURFACE,
+  ELEVATE_FILL,
+  ELEVATE_INK,
+  MODAL_SURFACE,
+  PROMPT_ELEVATED_INK,
+  PROMPT_INK,
+  SUDO_INK,
+  SUDO_SURFACE,
+} from "../src/helpers/sudo.ts";
 import { TOOLTIP_INK, TOOLTIP_LABEL_INK, TOOLTIP_SUBJECT_INK, TOOLTIP_SURFACE } from "../src/helpers/tooltip.ts";
 import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK } from "../src/helpers/treemap.ts";
 
@@ -82,6 +92,18 @@ for (const [index, band] of [...BAND_CLASS, BAND_REST_CLASS].entries()) {
 
 console.log("\n--- the chrome's warning chip ---");
 check("stale marker", WARN_CHIP_INK, WARN_CHIP_FILL);
+
+/*
+ * The sudo chrome (TRE-29). Every one of these says whether the next operation
+ * runs as root, which makes an unreadable one worse than no indicator at all —
+ * it would be an indicator somebody stops checking.
+ */
+console.log("\n--- the sudo chrome (TRE-29) ---");
+check("badge and modal header", SUDO_INK, SUDO_SURFACE);
+check("# on a command preview", PROMPT_ELEVATED_INK, COMMAND_SURFACE);
+check("$ on a command preview", PROMPT_INK, COMMAND_SURFACE);
+check("the elevated note", PROMPT_ELEVATED_INK, MODAL_SURFACE);
+check("the elevate button", ELEVATE_INK, ELEVATE_FILL);
 
 console.log("\n--- the tooltip bubble (TRE-76) ---");
 check("subject", TOOLTIP_SUBJECT_INK, TOOLTIP_SURFACE);

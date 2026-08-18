@@ -40,6 +40,21 @@ export interface HostView {
   credentialKind: CredentialKind | null;
   roots: HostRoot[];
   fingerprints: HostFingerprint[];
+  /**
+   * Milliseconds left on *this browser session's* sudo window for this host,
+   * or 0 (TRE-29).
+   *
+   * Per session rather than per account, because the window is: two browsers
+   * signed into the same login see different numbers here and both are right.
+   * A number rather than an optional for the reason the API gives it as one —
+   * absent and expired would render identically, and one of them would be a
+   * bug nobody could see.
+   *
+   * A reading, not a clock. It is true as of the moment `GET /hosts` answered
+   * and goes stale from there, so whatever counts down from it has to anchor
+   * itself to an instant rather than re-reading this field every second.
+   */
+  sudoRemainingMs: number;
 }
 
 /** What a create or a patch may carry. Every field optional on the wire. */

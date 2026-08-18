@@ -10,7 +10,7 @@ import type { UpdateHostDto } from "@hosts/dto/update-host.dto";
 import { DiskMount, DiskOptions, HostDisksService } from "@hosts/host-disks.service";
 import { HostMetrics, HostMetricsService } from "@hosts/host-metrics.service";
 import { HostSummary, HostSummaryService } from "@hosts/host-summary.service";
-import { SudoService } from "@hosts/sudo/sudo.service";
+import { SUDO_WINDOW_MS, SudoService } from "@hosts/sudo/sudo.service";
 import {
   BadRequestException,
   ConflictException,
@@ -82,6 +82,16 @@ export type SudoRequirement = "none" | "password" | "not-a-sudoer" | "no-sudo-bi
 export interface SudoRequirementView {
   hostId: string;
   needs: SudoRequirement;
+  /**
+   * How long a window opened now would last.
+   *
+   * Sent because the modal states the duration before anything is typed, and
+   * the duration is configurable (`TREKKER_SUDO_WINDOW_MINUTES`). A client that
+   * wrote "fifteen minutes" from its own constant would be telling a confident
+   * lie on an install configured for five — in the one dialog in this
+   * application where the reader is deciding how much to trust it.
+   */
+  windowMs: number;
 }
 
 /** Why `sudo` would not run, in the ways worth telling apart. */
@@ -512,7 +522,7 @@ export class HostsService {
   async sudoRequirement(userId: string, id: string): Promise<SudoRequirementView> {
     await this.get(userId, id);
     const driver = await this.factory.forHost(id, userId);
-    return { hostId: id, needs: await this.probeSudoMode(driver) };
+    return { hostId: id, needs: await this.probeSudoMode(driver), windowMs: SUDO_WINDOW_MS };
   }
 
   /**

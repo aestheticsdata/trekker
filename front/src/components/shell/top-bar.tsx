@@ -3,6 +3,8 @@
 import { Sparkline } from "@components/shell/sparkline";
 import { Tooltip } from "@components/ui/tooltip";
 
+import type { ReactNode } from "react";
+
 /**
  * The 34px top bar (TRE-14 §2, trued up against mockup 2a by TRE-42): who you
  * are looking at, what is saved, and how the machine is doing.
@@ -44,11 +46,22 @@ export function TopBar({
   host,
   stats,
   views = [],
+  sudo,
   onOpenPalette,
 }: {
   host: HostChip | null;
   stats: MachineStats | null;
   views?: readonly SavedView[];
+  /**
+   * The sudo badge for the host named in the chip (TRE-29).
+   *
+   * A slot rather than a pair of props, and for the reason stated at the top of
+   * this file: the badge counts down once a second, and anything that ticks has
+   * to own its own state or it repaints whatever passed it the number. Handing
+   * it in as a node keeps that inside the badge and keeps this bar what it says
+   * it is.
+   */
+  sudo?: ReactNode;
   onOpenPalette?: () => void;
 }) {
   const shown = views.slice(0, VISIBLE_VIEWS);
@@ -104,6 +117,11 @@ export function TopBar({
           </span>
         </span>
       )}
+
+      {/* Beside the chip rather than inside it: the chip describes the host,
+          this describes what this session may do to it, and a bordered control
+          nested in a bordered chip reads as one thing with a seam. */}
+      {host && sudo}
 
       {views.length > 0 && (
         <nav

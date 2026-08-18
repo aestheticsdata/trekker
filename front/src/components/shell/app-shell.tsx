@@ -23,6 +23,7 @@ export function AppShell({
   host = null,
   stats = null,
   views = [],
+  sudo,
   selection = null,
   viewMode,
   onViewModeChange,
@@ -44,6 +45,8 @@ export function AppShell({
   host?: HostChip | null;
   stats?: MachineStats | null;
   views?: readonly SavedView[];
+  /** The top bar's sudo badge for the active host (TRE-29), passed straight through. */
+  sudo?: ReactNode;
   selection?: SelectionSummary | null;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
@@ -93,6 +96,7 @@ export function AppShell({
               host={host}
               stats={stats}
               views={views}
+              sudo={sudo}
             />
             <Toolbar
               viewMode={viewMode}

@@ -1,6 +1,7 @@
 "use client";
 
 import { Explorer } from "@components/explorer/explorer";
+import { SudoBadge } from "@components/hosts/sudo-badge";
 import { AppShell } from "@components/shell/app-shell";
 import { DiskUsage } from "@components/shell/disk-usage";
 import { M2_ACTIONS } from "@components/shell/toolbar";
@@ -214,6 +215,10 @@ export default function HomePage() {
         load: metrics?.history ?? [],
       }}
       views={[]}
+      // Only ever for the host the chip names — the window is per host, and a
+      // badge that followed anything else would be reporting on a machine the
+      // reader is not looking at (TRE-29).
+      sudo={activeHost ? <SudoBadge host={activeHost} /> : null}
       selection={selection ? summarise(selection) : null}
       viewMode={shared.view}
       onViewModeChange={(view) => void setShared({ view })}

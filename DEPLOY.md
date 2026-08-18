@@ -510,6 +510,64 @@ Local sanity check of the whole envelope, no database needed:
 pnpm --filter ./nest-api verify:secrets
 ```
 
+## Sudo on the hosts Trekker manages
+
+Not the deploy user — the account each *managed host* is reached with. Half of
+what is worth looking at on a server is root-owned, and without sudo Trekker is
+a read-only viewer for most of the filesystem (TRE-29).
+
+**The account has to be permitted to run sudo, and that is the whole
+requirement.** Nothing has to be installed and no sudoers rule has to be
+written for Trekker specifically: it runs `sudo` the way a person at that
+terminal would, with the account's own login password.
+
+If the account is not a sudoer, or the host has no `sudo` at all, nothing
+breaks. The badge says so in words when it is pressed, and root-owned paths
+stay read-only. That is a legitimate configuration, not a half-installed one.
+
+### Do not add `NOPASSWD`
+
+It is the obvious way to make the prompt go away, and it hands over more than
+it looks like it does.
+
+Trekker holds each host's SSH credential encrypted under `TREKKER_MASTER_KEY`.
+With a password prompt in front of sudo, anyone who obtains that key gets the
+*login user* on those hosts and stops there — root still costs them a secret
+Trekker has never stored and cannot leak, because it is only ever held in
+memory for the length of an open window. Add `NOPASSWD` and that second wall is
+gone: the stored credential alone is now sufficient for root, so the master key
+becomes a root key for every host on the list. The blast radius of a database
+disclosure changes shape entirely, and it changes quietly — nothing in the
+application looks any different afterwards.
+
+**Most cloud images already ship this way.** Their default account has
+`(ALL) NOPASSWD: ALL`, so the paragraph above is describing the state your
+fleet is probably in rather than a mistake you are about to make. Check per
+host, on the host:
+
+```bash
+sudo -n -l
+```
+
+Trekker asks the same question itself before it draws anything — `GET
+/api/hosts/:id/sudo` runs `sudo -n id -u` — and renders a password field or a
+plain confirm button according to the answer, because a password field on a
+`NOPASSWD` host would accept the wrong password, or a blank one, and report
+success. The dialog also says out loud that on such a host the window records
+an intent rather than adding a check. Only a change on the server makes it a
+real one: give the account a password and drop the `NOPASSWD` from its sudoers
+entry.
+
+### What the deploy has to do about it
+
+Nothing. No migration, no new secret, no nginx block. The one thing to preserve
+is `instances: 1` with `exec_mode: "fork"` in `ecosystem.config.js` — a window
+and its password live in that one process's memory, and cluster workers would
+each hold a different set of them. `TREKKER_SUDO_WINDOW_MINUTES` shortens the
+window from fifteen if this install wants stricter habits; the dialog reads the
+number back from the API, so it never promises a duration the server will not
+honour.
+
 ## Database backup
 
 Not set up yet, and now overdue — there is a schema as of TRE-6. A sibling app's

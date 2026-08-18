@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@auth/context/AuthContext";
+import { CommandLine } from "@components/ui/command-line";
 import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
@@ -341,8 +342,12 @@ function PermissionsPanel({
           </Notice>
         )}
 
-        <div className="bg-chrome border-line mt-2.5 truncate border px-2.5 py-2 font-mono text-cmd/[1.6]">
-          <span className="text-ink-link">$</span> <span className="text-ink-muted">{command}</span>
+        <div className="mt-2.5">
+          <CommandLine
+            hostId={hostId}
+            command={command}
+            className="truncate"
+          />
         </div>
 
         {failure && <Notice tone="bad">{failure}</Notice>}
