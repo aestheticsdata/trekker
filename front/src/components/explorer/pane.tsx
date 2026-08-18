@@ -68,6 +68,7 @@ export function Pane({
   glob,
   hiddenByGlob,
   volume,
+  cut = null,
   heat,
   now,
   callbacks,
@@ -91,6 +92,17 @@ export function Pane({
    * this pane.
    */
   volume: DiskMount | null;
+  /**
+   * The names a cut is holding out of this directory (TRE-71 §3), or null when
+   * it is holding none of them.
+   *
+   * They render dimmed until the paste completes or the clipboard is cleared,
+   * because without it nothing on screen distinguishes an app holding three
+   * files from an app holding nothing — and a `⌘V` twenty minutes later is
+   * then a surprise. Dimmed rather than hidden: the files are still here, and a
+   * cut that is never pasted must not look like a delete that already happened.
+   */
+  cut?: ReadonlySet<string> | null;
   heat: boolean;
   /** Passed in so every row in a render ages against the same instant. */
   now: number;
@@ -258,6 +270,7 @@ export function Pane({
                     key={row.name}
                     row={row}
                     selected={selected.has(row.name)}
+                    cut={cut?.has(row.name) ?? false}
                     cursor={active && pane.cur === row.name}
                     paneActive={active}
                     largest={largest}
@@ -584,6 +597,7 @@ function ColumnHeader({
 function Row({
   row,
   selected,
+  cut,
   cursor,
   paneActive,
   largest,
@@ -594,6 +608,8 @@ function Row({
 }: {
   row: FileRow;
   selected: boolean;
+  /** Held by a cut, and so on its way out of this directory (TRE-71 §3). */
+  cut: boolean;
   cursor: boolean;
   paneActive: boolean;
   largest: number;
@@ -631,7 +647,12 @@ function Row({
         selected
           ? `${paneActive ? "bg-pane-sel" : "bg-pane-sel-idle"} border-on-pane-strong`
           : "hover:bg-pane-hover border-transparent"
-      } ${cursor ? "outline-on-pane-strong -outline-offset-1 outline-1 outline-dotted" : ""}`}
+      } ${cursor ? "outline-on-pane-strong -outline-offset-1 outline-1 outline-dotted" : ""} ${
+        // The whole row, selection background included: what is dimmed is the
+        // entry, not its text, and a highlighted row at full strength under
+        // faded columns would read as a rendering fault rather than a state.
+        cut ? "opacity-50" : ""
+      }`}
     >
       <span
         className={`text-on-pane-bright rounded-[1.5px] py-0.5 text-center font-mono text-tag font-bold tracking-normal ${tag.className}`}

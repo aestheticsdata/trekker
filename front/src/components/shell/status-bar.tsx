@@ -23,10 +23,23 @@ export interface SelectionSummary {
 export function StatusBar({
   selection,
   hint,
+  clipboard = null,
+  onClearClipboard,
   onShowStrip,
 }: {
   selection: SelectionSummary | null;
   hint?: string;
+  /**
+   * What the clipboard is holding, in one sentence (TRE-71 §3), or null while
+   * it holds nothing.
+   *
+   * The bar is where it belongs: a clipboard is a thing the app is holding
+   * rather than a thing on screen, and this is the only line that is about the
+   * session rather than about the row under the cursor.
+   */
+  clipboard?: string | null;
+  /** Clicking that line clears it — the plainest way out, and the one `⎋` also is. */
+  onClearClipboard?: () => void;
   /**
    * Present only while the disk-usage strip is collapsed (TRE-33 §2). The bar
    * is where the mockup puts the way back: a strip that hides itself and leaves
@@ -60,6 +73,16 @@ export function StatusBar({
         </>
       ) : (
         <span className="text-ink-faint min-w-0 flex-1 truncate">{hint ?? "No selection"}</span>
+      )}
+
+      {clipboard && (
+        <button
+          type="button"
+          onClick={onClearClipboard}
+          className="text-brand hover:text-ink max-w-64 flex-none truncate"
+        >
+          {clipboard} ✕
+        </button>
       )}
 
       {onShowStrip && (

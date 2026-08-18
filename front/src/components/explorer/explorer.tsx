@@ -20,6 +20,7 @@ import { HostManager } from "@components/hosts/host-manager";
 import { CollapsiblePane } from "@components/ui/collapsible-pane";
 import { useToast } from "@components/ui/toast";
 import { useUploads } from "@components/ui/uploads";
+import { cutNamesIn, describeClipboard, nameList, resolvePaste, splitHeld } from "@helpers/clipboard";
 import { volumeFor } from "@helpers/disks";
 import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
 import { ApiError } from "@lib/api/client";
@@ -40,6 +41,7 @@ import type { PermissionsTarget } from "@components/explorer/permissions-modal";
 import type { RenameMode, RenameTarget } from "@components/explorer/rename-modal";
 import type { TransferTarget } from "@components/explorer/transfer-modal";
 import type { SplitMode } from "@components/shell/toolbar";
+import type { Clipboard, ClipboardMode } from "@helpers/clipboard";
 import type { SortKey } from "@helpers/listing";
 import type { DiskMount } from "@lib/api/disks";
 import type { FileRow } from "@lib/api/fs";
@@ -69,6 +71,16 @@ export interface PaneUrl {
   path: string;
   sort: SortKey;
   dir: 1 | -1;
+}
+
+/** A paste that has become a transfer (TRE-71 §4). */
+interface PasteInFlight {
+  target: TransferTarget;
+  /**
+   * What was held when it started. Its mode decides whether the clipboard
+   * survives the paste, and its directory is the one the names are leaving.
+   */
+  source: Clipboard;
 }
 
 export function Explorer({
@@ -105,6 +117,9 @@ export function Explorer({
   onUploadRequestedChange,
   transferMode,
   onTransferMode,
+  onClipboardChange,
+  clearClipboardRequested,
+  onClearClipboardRequestedChange,
 }: {
   hosts: readonly HostView[];
   /** True while the hosts query is in flight, so an unbound pane waits rather
@@ -184,6 +199,22 @@ export function Explorer({
    */
   transferMode: "copy" | "move" | null;
   onTransferMode: (mode: "copy" | "move" | null) => void;
+  /**
+   * What the clipboard is holding, in the one sentence the status bar shows
+   * (TRE-71 §3) — null when it is holding nothing.
+   *
+   * A string rather than the store itself: the bar is up in the shell and has
+   * no business knowing about hosts, directories and modes, and it is the same
+   * inversion `onSelectionChange` already resolves this way.
+   */
+  onClipboardChange: (held: string | null) => void;
+  /**
+   * The click on that line, which clears (TRE-71 §3). A request rather than a
+   * state, like the toolbar's download: the button is up in the shell and the
+   * store is down here, and there is no dialogue for it to be the state of.
+   */
+  clearClipboardRequested: boolean;
+  onClearClipboardRequestedChange: (requested: boolean) => void;
 }) {
   const [memory, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
   const { csrfToken } = useAuth();
@@ -194,11 +225,23 @@ export function Explorer({
   const filePicker = useRef<HTMLInputElement>(null);
   /** Set once a host has been bound automatically, so it happens per pane once. */
   const [seeded, setSeeded] = useState<[boolean, boolean]>([false, false]);
+  /**
+   * The paste that is being decided, if any (TRE-71 §4).
+   *
+   * It opens the modal TRE-24 already built rather than one of its own, so the
+   * conflict list, the blanket strategy and the free-space refusal are the ones
+   * F5 already meets — a second conflict UI is the thing this ticket is most
+   * able to invent and least able to justify.
+   */
+  const [paste, setPaste] = useState<PasteInFlight | null>(null);
 
   const views: [PaneView, PaneView] = [
     { ...memory.panes[0], hostId: panes[0].host, path: panes[0].path, sort: panes[0].sort, dir: panes[0].dir },
     { ...memory.panes[1], hostId: panes[1].host, path: panes[1].path, sort: panes[1].sort, dir: panes[1].dir },
   ];
+
+  /** What `⌘X` or `⌘C` is holding (TRE-71 §1), or null for nothing. */
+  const clip = memory.clip;
 
   const defaultHost = hosts.find((host) => host.transport === "LOCAL") ?? hosts[0] ?? null;
 
@@ -291,6 +334,24 @@ export function Explorer({
   const inspected = inspecting ? activeView.rows.filter((row) => inspecting.has(row.name)) : [];
   const cursorRow = activeView.rows.find((row) => row.name === activePane.cur) ?? null;
   const cursorPath = cursorRow ? joinPath(activePane.path, cursorRow.name) : null;
+
+  /**
+   * Whether anything is up over the panes.
+   *
+   * The clipboard's four keys stand down for all of it. `⌘V` behind the
+   * transfer modal would stack a second one over the first, and `⎋` closes
+   * whatever is open long before it gets to mean "never mind" to a pane —
+   * `Overlay` listens on this same window, so a clipboard emptied on the way
+   * out of a dialog would be two things happening on one keypress.
+   */
+  const overlayOpen =
+    manageHostsFor !== null ||
+    permissionsOpen ||
+    renameMode !== null ||
+    createMode !== null ||
+    deleteOpen ||
+    transferMode !== null ||
+    paste !== null;
 
   useEffect(() => {
     onSelectionChange(cursorRow && cursorPath ? { row: cursorRow, path: cursorPath } : null);
@@ -454,6 +515,139 @@ export function Explorer({
         : { tone: "info", message: "Nothing to transfer", detail: "Select an entry, or put the cursor on one" },
     );
   }, [transferEmpty, otherPane.hostId, onTransferMode, push]);
+
+  /**
+   * Taking a selection (TRE-71 §1, §2).
+   *
+   * The same rule every other operation here follows — what is selected, else
+   * the row under the cursor — and names rather than rows, because names are
+   * what the store holds and what a fresh listing is checked against. The rows
+   * on screen are from whenever this pane last loaded, which is precisely what
+   * a paste is not allowed to trust.
+   */
+  const heldNames = activePane.sel.length > 0 ? activePane.sel : activePane.cur ? [activePane.cur] : [];
+  const take = (mode: ClipboardMode) => {
+    if (activePane.hostId === null || heldNames.length === 0) {
+      push({
+        tone: "info",
+        message: mode === "cut" ? "Nothing to cut" : "Nothing to copy",
+        detail: "Select an entry, or put the cursor on one",
+      });
+      return;
+    }
+    dispatch({ type: "hold", mode, hostId: activePane.hostId, directory: activePane.path, names: heldNames });
+  };
+
+  /**
+   * Putting it down (TRE-71 §4).
+   *
+   * `POST /transfers`, copy or move by the held mode, aimed at the directory
+   * the active pane is showing. Another host is the same call and not a special
+   * case, which is the whole reason a clipboard was cheap to add: TRE-23
+   * already moves bytes between two machines and answers for the conflicts.
+   *
+   * What happens before that call is the interesting half. The held names were
+   * true when they were taken, and a paste that trusts them hands the server a
+   * source path that may no longer resolve — over which it refuses the whole
+   * job rather than the one entry. So the source directory is listed again
+   * first, and whatever has gone is dropped and named.
+   */
+  const putDown = async () => {
+    // Read before any await: the pane the key was pressed in is the
+    // destination, and listing another machine is a round trip during which
+    // somebody can point that pane somewhere else.
+    const destination = { hostId: activePane.hostId, path: activePane.path };
+    const decision = resolvePaste(clip, destination);
+
+    if (decision.kind === "empty") {
+      // Silently. Nothing is held, nothing was promised, and the menu's
+      // disabled `paste` entry is where that gets explained (TRE-70).
+      return;
+    }
+    if (decision.kind === "unbound") {
+      push({ tone: "info", message: "No host on this pane", detail: "Bind one from the sidebar first" });
+      return;
+    }
+    if (decision.kind === "sameDirectory") {
+      // A no-op, not an error: a move onto its own directory has nothing to do
+      // and nothing to report, and a modal about zero items would be a worse
+      // way to say so than one line.
+      push({ tone: "info", message: "Already here", detail: "These were cut from this directory" });
+      return;
+    }
+
+    const { source, operation } = decision;
+
+    let entries: readonly string[];
+    try {
+      const listing = await queryClient.fetchQuery({
+        queryKey: [QUERY_KEYS.DIRECTORY, source.hostId, source.directory],
+        queryFn: () => fetchListing(source.hostId, source.directory),
+        // Asked again, never served from the cache: the point of this call is
+        // to find out what changed since the cut, and a cached answer is from
+        // before it.
+        staleTime: 0,
+      });
+      entries = listing.entries.map((entry) => entry.name);
+    } catch (error) {
+      push({
+        tone: "warning",
+        message: "Could not read where these came from",
+        detail: error instanceof ApiError ? error.message : source.directory,
+      });
+      return;
+    }
+
+    const { present, missing } = splitHeld(source.names, entries);
+
+    if (present.length === 0) {
+      // Nothing held still exists, so there is no job to start and nothing left
+      // worth holding — the argument §1 makes against a clipboard that outlives
+      // a reload, arriving a few minutes earlier.
+      dispatch({ type: "release" });
+      push({ tone: "info", message: "Nothing left to paste", detail: `${nameList(missing)} no longer there` });
+      return;
+    }
+    if (missing.length > 0) {
+      push({
+        tone: "info",
+        message: "Some of these are gone",
+        detail: `${nameList(missing)} — the rest still ${operation}`,
+      });
+    }
+
+    setPaste({
+      source,
+      target: {
+        operation,
+        srcHostId: source.hostId,
+        srcPaths: present.map((name) => joinPath(source.directory, name)),
+        // Not null: `resolvePaste` answers `unbound` for a pane without a host.
+        dstHostId: destination.hostId as string,
+        dstPath: destination.path,
+      },
+    });
+  };
+
+  /**
+   * What the status bar says while something is held, and its click (TRE-71 §3).
+   *
+   * The sentence goes up rather than the store, so the bar needs to know
+   * nothing about hosts and modes; the click comes back as a request, the way
+   * the toolbar's download does, because the button is up in the shell and the
+   * store is down here.
+   */
+  const heldLabel =
+    clip === null ? null : describeClipboard(clip, hosts.find((host) => host.id === clip.hostId)?.label ?? null);
+  useEffect(() => {
+    onClipboardChange(heldLabel);
+  }, [heldLabel, onClipboardChange]);
+
+  useEffect(() => {
+    if (!clearClipboardRequested) return;
+    onClearClipboardRequestedChange(false);
+    dispatch({ type: "release" });
+  }, [clearClipboardRequested, onClearClipboardRequestedChange]);
 
   /**
    * What a download is aimed at (TRE-26).
@@ -700,6 +894,15 @@ export function Explorer({
           onActiveChange(index);
           onDeleteOpenChange(true);
           return true;
+        case "Escape":
+          // The one key that reliably means "never mind", and with nothing else
+          // open there is nothing else to press. Ours only while something is
+          // held and nothing is over the panes — every dialog in this app
+          // listens for `⎋` on this same window, and clearing the clipboard on
+          // the way out of one would be two things happening on one keypress.
+          if (overlayOpen || clip === null) return false;
+          dispatch({ type: "release" });
+          return true;
         default:
           return false;
       }
@@ -737,6 +940,16 @@ export function Explorer({
     inFields: false,
     onPress: () => onDuplicateRequestedChange(true),
   });
+
+  // ⌘X, ⌘C and ⌘V (TRE-71 §2). Out of the fields, like ⌘A and ⌘D: inside the
+  // glob input these three mean what they mean in every text field, and a file
+  // manager that takes them there has broken the one control it has.
+  //
+  // No menu need be open. The one TRE-70 draws is a second way to reach these,
+  // not the way.
+  useShortcut({ enabled: !overlayOpen, key: "x", inFields: false, onPress: () => take("cut") });
+  useShortcut({ enabled: !overlayOpen, key: "c", inFields: false, onPress: () => take("copy") });
+  useShortcut({ enabled: !overlayOpen, key: "v", inFields: false, onPress: () => void putDown() });
 
   const callbacksFor = (index: PaneIndex): PaneCallbacks => ({
     onFocus: () => onActiveChange(index),
@@ -876,6 +1089,9 @@ export function Explorer({
                   glob={index === active ? glob.trim() : ""}
                   hiddenByGlob={index === active ? view.hiddenByGlob : 0}
                   volume={volumes[index]}
+                  // The names this pane should draw dimmed, which is only ever
+                  // a cut and only ever where it was taken from (TRE-71 §3).
+                  cut={cutNamesIn(clip, pane.hostId, pane.path)}
                   heat={heat}
                   now={now}
                   callbacks={callbacksFor(index)}
@@ -985,6 +1201,32 @@ export function Explorer({
             // to take those names away, and handing the next action a list of
             // ghosts is the mistake the delete modal already avoids this way.
             dispatch({ type: "selectNone", pane: active });
+          }}
+        />
+      )}
+
+      {paste && (
+        <TransferModal
+          target={paste.target}
+          hosts={hosts}
+          onClose={() => setPaste(null)}
+          onStarted={() => {
+            // A copy is kept, because pasting the same files into three
+            // directories is exactly what a copy is for (§4).
+            if (paste.source.mode !== "cut") return;
+
+            // A cut is spent the moment the job is accepted: the bytes are on
+            // their way and the rows it dimmed are about to stop existing.
+            dispatch({ type: "release" });
+            // And any pane standing where they were stops naming them. The
+            // transfer modal clears the pane it was started from for this
+            // reason; a paste has to look for that pane instead, because the
+            // one it was started from is the destination.
+            for (const index of [0, 1] as const) {
+              if (views[index].hostId === paste.source.hostId && views[index].path === paste.source.directory) {
+                dispatch({ type: "selectNone", pane: index });
+              }
+            }
           }}
         />
       )}

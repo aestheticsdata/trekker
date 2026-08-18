@@ -1,5 +1,6 @@
 import { joinPath, parentPath } from "@helpers/listing";
 
+import type { Clipboard, ClipboardMode } from "@helpers/clipboard";
 import type { SortDirection, SortKey } from "@helpers/listing";
 
 /**
@@ -43,6 +44,21 @@ export interface PaneView extends PaneMemory {
 
 export interface ExplorerState {
   panes: [PaneMemory, PaneMemory];
+  /**
+   * What `⌘X` or `⌘C` is holding, or null for nothing (TRE-71 §1).
+   *
+   * Beside the panes rather than inside one, because there is one clipboard and
+   * not two: a `⌘V` whose meaning depended on which pane had focus would be a
+   * rule nothing on screen explains. It sits here for the same reason the tabs
+   * and the history stacks do — it is memory around where the panes are, and it
+   * survives navigation, a pane switch and a re-sort, which are exactly the
+   * things done between taking something and putting it down.
+   *
+   * Not in the URL, and so not across a reload. A clipboard remembered from
+   * yesterday holds paths that may not exist on a host that may not answer, and
+   * offering to paste them is worse than having forgotten them.
+   */
+  clip: Clipboard | null;
 }
 
 export type PaneIndex = 0 | 1;
@@ -56,7 +72,7 @@ function newPane(path: string): PaneMemory {
 }
 
 export function initialState(path = "/"): ExplorerState {
-  return { panes: [newPane(path), newPane(path)] };
+  return { panes: [newPane(path), newPane(path)], clip: null };
 }
 
 export type ExplorerAction =
@@ -84,19 +100,53 @@ export type ExplorerAction =
    * "created, then selected" one gesture instead of two.
    */
   | { type: "reveal"; pane: PaneIndex; name: string }
-  | { type: "cursor"; pane: PaneIndex; name: string | null };
+  | { type: "cursor"; pane: PaneIndex; name: string | null }
+  /**
+   * `⌘X` and `⌘C` (TRE-71 §1). Taking a new selection replaces what is
+   * held — there is no stack, because a clipboard with a history is one whose
+   * `⌘V` cannot be predicted from anything on screen.
+   */
+  | { type: "hold"; mode: ClipboardMode; hostId: string; directory: string; names: readonly string[] }
+  /** A click on the status bar, `⎋` in a pane, and a cut that has been pasted. */
+  | { type: "release" };
+
+/** The actions a single pane answers. The two clipboard ones are not among them. */
+type PaneAction = Extract<ExplorerAction, { pane: PaneIndex }>;
 
 export function explorerReducer(state: ExplorerState, action: ExplorerAction): ExplorerState {
-  return {
-    ...state,
-    panes: state.panes.map((pane, index) => (index === action.pane ? paneReducer(pane, action) : pane)) as [
-      PaneMemory,
-      PaneMemory,
-    ],
-  };
+  // The clipboard is not a pane's, so these two never reach `paneReducer` —
+  // which is also why they are the only actions here without a `pane`.
+  switch (action.type) {
+    case "hold":
+      return action.names.length === 0
+        ? state
+        : {
+            ...state,
+            clip: {
+              mode: action.mode,
+              hostId: action.hostId,
+              directory: action.directory,
+              // Copied: the caller hands over the pane's own selection array,
+              // which the next click rewrites.
+              names: [...action.names],
+            },
+          };
+
+    case "release":
+      return state.clip === null ? state : { ...state, clip: null };
+
+    default:
+      return {
+        ...state,
+        panes: state.panes.map((pane, index) => (index === action.pane ? paneReducer(pane, action) : pane)) as [
+          PaneMemory,
+          PaneMemory,
+        ],
+      };
+  }
 }
 
-function paneReducer(pane: PaneMemory, action: ExplorerAction): PaneMemory {
+function paneReducer(pane: PaneMemory, action: PaneAction): PaneMemory {
   switch (action.type) {
     case "navigate":
       return navigate(pane, action.path, action.history !== false);

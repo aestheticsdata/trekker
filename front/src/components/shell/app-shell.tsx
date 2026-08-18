@@ -25,6 +25,8 @@ export function AppShell({
   views = [],
   sudo,
   selection = null,
+  clipboard = null,
+  onClearClipboard,
   viewMode,
   onViewModeChange,
   splitMode,
@@ -48,6 +50,9 @@ export function AppShell({
   /** The top bar's sudo badge for the active host (TRE-29), passed straight through. */
   sudo?: ReactNode;
   selection?: SelectionSummary | null;
+  /** What the clipboard is holding (TRE-71 §3), passed straight to the status bar. */
+  clipboard?: string | null;
+  onClearClipboard?: () => void;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   splitMode?: SplitMode;
@@ -126,6 +131,8 @@ export function AppShell({
 
             <StatusBar
               selection={selection}
+              clipboard={clipboard}
+              onClearClipboard={onClearClipboard}
               onShowStrip={onShowStrip}
             />
           </div>

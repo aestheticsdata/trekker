@@ -81,6 +81,17 @@ export default function HomePage() {
    * and the `copy` button mean copy; F6 and `move` mean move.
    */
   const [transferMode, setTransferMode] = useState<"copy" | "move" | null>(null);
+  /**
+   * What the explorer's clipboard is holding, in the sentence the status bar
+   * shows (TRE-71 §3), and the click that empties it.
+   *
+   * The store itself is down in the explorer, beside the pane state — this is
+   * the same inversion `selection` already resolves: the bar is up here, and
+   * what it describes is down there. The clear is a request for the reason the
+   * download is one, since there is no dialogue for it to be the state of.
+   */
+  const [clipboard, setClipboard] = useState<string | null>(null);
+  const [clearClipboardRequested, setClearClipboardRequested] = useState(false);
 
   /**
    * Whether the layout has been moved by hand yet (TRE-62 §4).
@@ -220,6 +231,8 @@ export default function HomePage() {
       // reader is not looking at (TRE-29).
       sudo={activeHost ? <SudoBadge host={activeHost} /> : null}
       selection={selection ? summarise(selection) : null}
+      clipboard={clipboard}
+      onClearClipboard={() => setClearClipboardRequested(true)}
       viewMode={shared.view}
       onViewModeChange={(view) => void setShared({ view })}
       splitMode={shared.split}
@@ -291,6 +304,9 @@ export default function HomePage() {
         onUploadRequestedChange={setUploadRequested}
         transferMode={transferMode}
         onTransferMode={setTransferMode}
+        onClipboardChange={setClipboard}
+        clearClipboardRequested={clearClipboardRequested}
+        onClearClipboardRequestedChange={setClearClipboardRequested}
       />
     </AppShell>
   );
