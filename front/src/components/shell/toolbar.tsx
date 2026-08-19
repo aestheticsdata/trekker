@@ -2,6 +2,8 @@
 
 import { Tooltip } from "@components/ui/tooltip";
 
+import type { Action } from "@components/shell/actions";
+
 /**
  * The 30px toolbar (TRE-14 §3, trued up against mockup 2a by TRE-42).
  *
@@ -24,39 +26,13 @@ import { Tooltip } from "@components/ui/tooltip";
 export type ViewMode = "list" | "detail";
 export type SplitMode = "split" | "left" | "right";
 
-export interface ToolbarAction {
-  id: string;
-  label: string;
-  /** "F5", "⌦" — rendered next to the label, and how the app teaches itself. */
-  hint?: string;
-  /** Absent means enabled. Present means disabled, and this is the tooltip. */
-  unavailableReason?: string;
-  danger?: boolean;
-  onSelect?: () => void;
-}
-
-/** Everything M2 owns, declared once so the toolbar and the palette agree. */
-export const M2_ACTIONS: readonly ToolbarAction[] = [
-  // F7 rather than the ⇧⌘N the design spec drew (TRE-69). Chrome and Firefox
-  // both take ⇧⌘N for a private window at the window manager, so the page never
-  // receives the key — a hint advertising it would teach a shortcut that does
-  // nothing. F7 is `mkdir` in the two-pane managers this app is shaped after,
-  // which is also where its F2, F3, F5 and F6 come from.
-  { id: "new", label: "new", hint: "F7" },
-  { id: "copy", label: "copy", hint: "F5" },
-  { id: "move", label: "move", hint: "F6" },
-  { id: "duplicate", label: "duplicate", hint: "⌘D" },
-  { id: "compare", label: "compare", hint: "⇄", unavailableReason: "Pane comparison arrives in TRE-28" },
-  { id: "chmod", label: "permissions", unavailableReason: "chmod and chown arrive in TRE-21" },
-  // `rename`, not `regex rename`: the long label pushed `rm` off the right edge
-  // at a 12px `--ui-base`, and the modal's own name/pattern switch says the
-  // regex is there better than a toolbar label can. This buys the row six
-  // characters, it does not teach it to overflow — that is TRE-72.
-  { id: "rename", label: "rename", hint: "F2", unavailableReason: "Regex rename arrives in TRE-22" },
-  { id: "download", label: "download", hint: "F3", unavailableReason: "Downloads arrive in TRE-26" },
-  { id: "upload", label: "upload", hint: "↑", unavailableReason: "Uploads arrive in TRE-65" },
-  { id: "rm", label: "rm", hint: "⌦", danger: true },
-];
+/**
+ * The action row's entries come from `components/shell/actions.ts` (TRE-70 §4),
+ * resolved against the active pane's selection before they get here. This file
+ * draws them and decides nothing: which exist and which are live is one
+ * registry, so the row, the context menu and TRE-36's palette cannot disagree
+ * about what is possible right now.
+ */
 
 /** The listing columns the glob sits beside. Placeholder until TRE-16's table owns them. */
 const DEFAULT_COLUMNS: readonly string[] = ["share", "mode", "owner", "age"];
@@ -73,7 +49,7 @@ export function Toolbar({
   onHeatChange,
   inspector = false,
   onInspectorChange,
-  actions = M2_ACTIONS,
+  actions = [],
 }: {
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
@@ -88,7 +64,7 @@ export function Toolbar({
   /** The inspector's other switch (TRE-17 §4); ⌘I is the first. */
   inspector?: boolean;
   onInspectorChange?: (open: boolean) => void;
-  actions?: readonly ToolbarAction[];
+  actions?: readonly Action[];
 }) {
   return (
     <div className="bg-app border-line flex h-toolbar shrink-0 items-center gap-2.25 border-b px-2.5">
@@ -164,7 +140,7 @@ export function Toolbar({
   );
 }
 
-function ActionButton({ action }: { action: ToolbarAction }) {
+function ActionButton({ action }: { action: Action }) {
   const disabled = action.unavailableReason !== undefined;
 
   return (

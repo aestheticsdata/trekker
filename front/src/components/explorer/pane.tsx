@@ -55,6 +55,15 @@ export interface PaneCallbacks {
   onClearGlob: () => void;
   /** Files dropped onto this pane, bound for the directory it is showing (TRE-65). */
   onFilesDropped: (files: readonly File[]) => void;
+  /**
+   * A right-click inside the listing (TRE-70 §1).
+   *
+   * `name` is the row under the pointer, or null for the empty area below the
+   * rows, the `..` row, the path row and the tab strip — all of which mean the
+   * directory. Which entries the menu then carries is the explorer's to decide;
+   * this only says where the pointer was and what was under it.
+   */
+  onContextMenu: (point: { x: number; y: number }, name: string | null) => void;
 }
 
 export function Pane({
@@ -142,6 +151,24 @@ export function Pane({
   /** Whether files are being dragged over this pane right now (TRE-65). */
   const [dropping, setDropping] = useState(false);
 
+  /**
+   * Right-click, in the parts of the pane that have something better to offer
+   * than the browser does (TRE-70 §1).
+   *
+   * Narrow on purpose. An app that swallows right-click everywhere takes away
+   * "copy this path" and gives nothing back for it, so the breadcrumb keeps the
+   * native menu by saying so, and so does anything else that marks itself.
+   */
+  const openMenu = (event: React.MouseEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("[data-native-menu]")) return;
+    event.preventDefault();
+    callbacks.onContextMenu(
+      { x: event.clientX, y: event.clientY },
+      target?.closest<HTMLElement>("[data-row]")?.dataset.row ?? null,
+    );
+  };
+
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: focusing a pane is a pointer affordance; ⇥ is the keyboard route and lives in the explorer
     <div
@@ -180,6 +207,7 @@ export function Pane({
         active={active}
         host={host}
         callbacks={callbacks}
+        onMenu={openMenu}
       />
 
       <PathRow
@@ -191,6 +219,7 @@ export function Pane({
         volume={volume}
         shownBytes={shownBytes}
         callbacks={callbacks}
+        onMenu={openMenu}
       />
 
       <ColumnHeader
@@ -199,8 +228,10 @@ export function Pane({
         onSort={callbacks.onSort}
       />
 
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the keyboard route is ⇧F10 and the Menu key, and it lives in the explorer beside the rest of the keys */}
       <div
         ref={list.scrollRef}
+        onContextMenu={openMenu}
         className="relative min-h-16.5 flex-auto overflow-x-hidden overflow-y-auto"
       >
         {/* The row height, asked of the browser rather than written down here.
@@ -317,14 +348,20 @@ function TabStrip({
   active,
   host,
   callbacks,
+  onMenu,
 }: {
   pane: PaneView;
   active: boolean;
   host: HostView | null;
   callbacks: PaneCallbacks;
+  onMenu: (event: React.MouseEvent) => void;
 }) {
   return (
-    <div className="bg-line flex h-tabstrip flex-none @container">
+    // biome-ignore lint/a11y/noStaticElementInteractions: see the listing's own note — the keyboard route is in the explorer
+    <div
+      onContextMenu={onMenu}
+      className="bg-line flex h-tabstrip flex-none @container"
+    >
       {pane.tabs.map((tabPath, index) => {
         const current = index === pane.tab;
         const label = tabPath === "/" ? "/" : (tabPath.split("/").filter(Boolean).pop() ?? "/");
@@ -381,6 +418,7 @@ function PathRow({
   volume,
   shownBytes,
   callbacks,
+  onMenu,
 }: {
   pane: PaneView;
   active: boolean;
@@ -390,11 +428,14 @@ function PathRow({
   volume: DiskMount | null;
   shownBytes: number;
   callbacks: PaneCallbacks;
+  onMenu: (event: React.MouseEvent) => void;
 }) {
   const badge = badgeFor(meta, volume, shownBytes);
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: see the listing's own note — the keyboard route is in the explorer
     <div
+      onContextMenu={onMenu}
       className={`border-pane-line text-on-pane-data flex h-pathrow flex-none items-center gap-1.5 overflow-hidden border-b px-1.75 font-mono text-xs @container ${
         active ? "bg-pane-bar-active" : "bg-pane-bar"
       }`}
@@ -442,8 +483,12 @@ function PathRow({
 
       {/* Right-aligned: when the path is too long it is the leading segments
           that should fall off the left, not the directory you are in. */}
+      {/* The one part of the path row that keeps the browser's menu (§1).
+          Copying a path out of here by hand is a real thing people do, and the
+          app has nothing better to offer over the text itself. */}
       <nav
         aria-label="Breadcrumb"
+        data-native-menu
         className="flex min-w-0 flex-auto items-center justify-end overflow-hidden"
       >
         <span className="flex flex-none items-center">
@@ -633,6 +678,10 @@ function Row({
     <div
       data-row={row.name}
       onMouseDown={(event) => {
+        // The right button belongs to the menu, which has its own target rule
+        // (TRE-70 §2): a row inside the selection leaves it alone, and this
+        // handler would have replaced it with one name on the way past.
+        if (event.button === 2) return;
         // preventDefault keeps a drag from selecting text — and, as a side
         // effect, keeps focus where it is. If that is the glob input, every
         // later keystroke is swallowed by it, so the focus move it suppressed

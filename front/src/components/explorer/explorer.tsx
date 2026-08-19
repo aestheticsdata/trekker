@@ -17,18 +17,22 @@ import { PermissionsModal } from "@components/explorer/permissions-modal";
 import { RenameModal } from "@components/explorer/rename-modal";
 import { TransferModal } from "@components/explorer/transfer-modal";
 import { HostManager } from "@components/hosts/host-manager";
+import { resolveActions } from "@components/shell/actions";
 import { CollapsiblePane } from "@components/ui/collapsible-pane";
+import { ContextMenu } from "@components/ui/context-menu";
 import { useToast } from "@components/ui/toast";
 import { useUploads } from "@components/ui/uploads";
 import { cutNamesIn, describeClipboard, nameList, resolvePaste, splitHeld } from "@helpers/clipboard";
 import { volumeFor } from "@helpers/disks";
 import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
+import { createBookmark } from "@lib/api/bookmarks";
 import { ApiError } from "@lib/api/client";
 import { fetchDisks } from "@lib/api/disks";
 import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
 import { startTransfer } from "@lib/api/transfers";
 import { QUERY_KEYS } from "@lib/query/keys";
+import { useSignedLink } from "@lib/query/use-signed-link";
 import { warmDirectory } from "@lib/query/warm-directory";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useRef, useState } from "react";
@@ -40,9 +44,11 @@ import type { PaneIndex, PaneView } from "@components/explorer/pane-state";
 import type { PermissionsTarget } from "@components/explorer/permissions-modal";
 import type { RenameMode, RenameTarget } from "@components/explorer/rename-modal";
 import type { TransferTarget } from "@components/explorer/transfer-modal";
+import type { ActionContext, ActionId, TargetKind } from "@components/shell/actions";
 import type { SplitMode } from "@components/shell/toolbar";
 import type { Clipboard, ClipboardMode } from "@helpers/clipboard";
 import type { SortKey } from "@helpers/listing";
+import type { Point } from "@helpers/menu";
 import type { DiskMount } from "@lib/api/disks";
 import type { FileRow } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
@@ -120,6 +126,7 @@ export function Explorer({
   onClipboardChange,
   clearClipboardRequested,
   onClearClipboardRequestedChange,
+  onActionContextChange,
 }: {
   hosts: readonly HostView[];
   /** True while the hosts query is in flight, so an unbound pane waits rather
@@ -215,6 +222,16 @@ export function Explorer({
    */
   clearClipboardRequested: boolean;
   onClearClipboardRequestedChange: (requested: boolean) => void;
+  /**
+   * What the toolbar's action row should be resolved against (TRE-70 §4).
+   *
+   * The row is up in the shell and what it would act on is down here, which is
+   * the inversion `onSelectionChange` already resolves this way — except that
+   * this one carries no handlers and no reasons, only the facts. The page runs
+   * `resolveActions` on it, so the row and the menu are answering the same
+   * question with the same function.
+   */
+  onActionContextChange: (context: ActionContext) => void;
 }) {
   const [memory, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
   const { csrfToken } = useAuth();
@@ -234,6 +251,17 @@ export function Explorer({
    * able to invent and least able to justify.
    */
   const [paste, setPaste] = useState<PasteInFlight | null>(null);
+  /**
+   * The open context menu, or null (TRE-70 §5).
+   *
+   * One for both panes, holding which pane opened it, where the pointer was and
+   * which row was under it — `null` for the empty area, `..`, the path row and
+   * the tab strip, all of which mean the directory. Everything else the menu
+   * shows is derived from those three, so there is no second copy of the
+   * selection to keep in step.
+   */
+  const [menu, setMenu] = useState<{ pane: PaneIndex; point: Point; name: string | null } | null>(null);
+  const signedLink = useSignedLink();
 
   const views: [PaneView, PaneView] = [
     { ...memory.panes[0], hostId: panes[0].host, path: panes[0].path, sort: panes[0].sort, dir: panes[0].dir },
@@ -351,7 +379,8 @@ export function Explorer({
     createMode !== null ||
     deleteOpen ||
     transferMode !== null ||
-    paste !== null;
+    paste !== null ||
+    menu !== null;
 
   useEffect(() => {
     onSelectionChange(cursorRow && cursorPath ? { row: cursorRow, path: cursorPath } : null);
@@ -650,6 +679,206 @@ export function Explorer({
   }, [clearClipboardRequested, onClearClipboardRequestedChange]);
 
   /**
+   * The same, for the toolbar's row (TRE-70 §4).
+   *
+   * Its target is the rule every one of its buttons already follows: what is
+   * selected, else the row under the cursor. Reported on a signature rather than
+   * on the object, because the object is new on every render and this effect
+   * would otherwise be an infinite loop rather than an update.
+   */
+  const toolbarSelected = new Set(activePane.sel);
+  const toolbarEntries =
+    activePane.sel.length > 0
+      ? activeView.rows.filter((row) => toolbarSelected.has(row.name))
+      : cursorRow
+        ? [cursorRow]
+        : [];
+  const toolbarKinds = toolbarEntries.map((row) => row.type);
+  const toolbarContext: ActionContext = {
+    kind: "entries",
+    entries: toolbarKinds,
+    hostId: activePane.hostId,
+    otherHostId: otherPane.hostId,
+    holding: clip !== null,
+  };
+  const toolbarKey = `${activePane.hostId}|${otherPane.hostId}|${clip !== null}|${toolbarKinds.join(",")}`;
+  useEffect(() => {
+    onActionContextChange(toolbarContext);
+    // `toolbarContext` is rebuilt every render and `toolbarKey` is what actually
+    // changed about it.
+  }, [toolbarKey, onActionContextChange]);
+
+  /**
+   * What the open menu is about (TRE-70 §2).
+   *
+   * The target decides which entries **exist**; the context decides which are
+   * **enabled**. Both are derived here rather than stored, because the pane's
+   * selection is the answer to "what would this act on" for every other surface
+   * in the app and a menu with its own copy of it is a menu that can disagree
+   * with the status bar.
+   *
+   * The selection was already put right when the menu opened: a row outside it
+   * became it, a row inside it left it alone. So by the time this runs, `sel` is
+   * what was right-clicked — except in the one case a pane can have no
+   * selection at all, where the clicked name stands in for it.
+   */
+  const menuView = menu ? views[menu.pane] : null;
+  const menuKind: TargetKind = menu === null || menu.name === null ? "directory" : "entries";
+  const menuNames =
+    menuKind === "entries" && menuView ? (menuView.sel.length > 0 ? menuView.sel : menu?.name ? [menu.name] : []) : [];
+  // Indexed rather than searched, like everywhere else that asks the selection a
+  // question once per row (TRE-19 §2).
+  const menuWanted = new Set(menuNames);
+  const menuEntries = menu ? rendered[menu.pane].rows.filter((row) => menuWanted.has(row.name)) : [];
+
+  const menuContext: ActionContext = {
+    kind: menuKind,
+    entries: menuEntries.map((row) => row.type),
+    hostId: menuView?.hostId ?? null,
+    otherHostId: menu ? views[menu.pane === 0 ? 1 : 0].hostId : null,
+    holding: clip !== null,
+  };
+
+  /** The header, which is also the menu's accessible name. */
+  const menuLabel =
+    menu === null
+      ? ""
+      : menuKind === "directory"
+        ? (menuView?.path ?? "/")
+        : menuEntries.length === 1
+          ? menuEntries[0].name
+          : `${menuEntries.length} entries`;
+
+  /** The clipboard, for the two entries that talk to the operating system's. */
+  const toClipboard = async (text: string, message: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      push({ tone: "success", message, detail: text });
+    } catch {
+      // Refused on an insecure origin and in some configurations. Say what
+      // happened rather than reporting a failure of the thing being copied.
+      push({ tone: "warning", message: "Could not copy", detail: "This browser refused clipboard access." });
+    }
+  };
+
+  const addFavourite = (hostId: string, path: string) => {
+    const label = path === "/" ? "/" : (path.split("/").filter(Boolean).pop() ?? "/");
+    void createBookmark({ hostId, path, label }, csrfToken).then(
+      () => {
+        void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.BOOKMARKS] });
+        push({ tone: "success", message: "Added to favourites", detail: path });
+      },
+      (error: unknown) => {
+        push({
+          tone: "warning",
+          message: "Could not add that favourite",
+          detail: error instanceof ApiError ? error.message : path,
+        });
+      },
+    );
+  };
+
+  /**
+   * What choosing an entry does (TRE-70 §4).
+   *
+   * Every one of these is the thing the toolbar button or the shortcut already
+   * does — the same setter, opening the same modal, against the same target.
+   * None of them is a second path to a dialogue, which is what keeps the menu
+   * from developing its own opinions about what `rm` means.
+   */
+  const chooseAction = (id: string) => {
+    const opened = menu;
+    setMenu(null);
+    if (opened === null) return;
+
+    const index = opened.pane;
+    const view = views[index];
+    const hostId = view.hostId;
+    const first = menuEntries[0] ?? null;
+
+    switch (id as ActionId) {
+      case "newDir":
+        onCreateMode("dir");
+        return;
+      case "newFile":
+        onCreateMode("file");
+        return;
+      case "open":
+        if (first) open(index, first);
+        return;
+      case "openOther": {
+        if (!first || hostId === null) return;
+        const other = index === 0 ? 1 : 0;
+        // A link is followed to where it points, exactly as `open` follows it —
+        // the other pane should land where double-clicking would have.
+        const path =
+          first.type === "link" && first.linkTarget
+            ? resolveTarget(view.path, first.linkTarget)
+            : joinPath(view.path, first.name);
+        // Both writes, as `go` issues them — and the host too, because the pane
+        // over there may be on another machine or on none.
+        dispatch({ type: "navigate", pane: other, path });
+        onPaneChange(other, { host: hostId, path });
+        return;
+      }
+      case "cut":
+        take("cut");
+        return;
+      case "copy":
+        take("copy");
+        return;
+      case "paste":
+        void putDown();
+        return;
+      case "duplicate":
+        onDuplicateRequestedChange(true);
+        return;
+      case "copyTo":
+        onTransferMode("copy");
+        return;
+      case "moveTo":
+        onTransferMode("move");
+        return;
+      case "refresh":
+        // Its own row because a listing can go stale from another machine
+        // entirely, and F5 is spent on copy.
+        void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, hostId, view.path] });
+        return;
+      case "rename":
+        // One entry opens on the name and a selection on the pattern, which is
+        // the rule F2 already follows.
+        onRenameMode(menuEntries.length === 1 ? "name" : "pattern");
+        return;
+      case "chmod":
+        onPermissionsOpenChange(true);
+        return;
+      case "download":
+        onDownloadRequestedChange(true);
+        return;
+      case "upload":
+        onUploadRequestedChange(true);
+        return;
+      case "link":
+        if (first && hostId !== null) signedLink.mutate({ hostId, path: joinPath(view.path, first.name) });
+        return;
+      case "copyPath":
+        void toClipboard(first ? joinPath(view.path, first.name) : view.path, "Path copied");
+        return;
+      case "copyName":
+        if (first) void toClipboard(first.name, "Name copied");
+        return;
+      case "favourite":
+        if (hostId !== null) addFavourite(hostId, first ? joinPath(view.path, first.name) : view.path);
+        return;
+      case "rm":
+        onDeleteOpenChange(true);
+        return;
+      default:
+        return;
+    }
+  };
+
+  /**
    * What a download is aimed at (TRE-26).
    *
    * The selection, or the row under the cursor — the same rule the rename and
@@ -820,8 +1049,9 @@ export function Explorer({
   };
 
   useKeyboard({
-    // The manager is a modal: ↓ over it belongs to nothing behind it.
-    enabled: manageHostsFor === null,
+    // The manager is a modal: ↓ over it belongs to nothing behind it. So is an
+    // open menu — `↓` over one belongs to the menu (TRE-70 §6).
+    enabled: manageHostsFor === null && menu === null,
     onKey: (event) => {
       const index = active;
       const names = rendered[index].rows.map((row) => row.name);
@@ -894,6 +1124,30 @@ export function Explorer({
           onActiveChange(index);
           onDeleteOpenChange(true);
           return true;
+        case "ContextMenu":
+        case "F10": {
+          // ⇧F10 and the Menu key, because without them the whole feature needs
+          // a mouse and the rest of this app does not (TRE-70 §6). Plain F10 is
+          // the browser's, and stays the browser's.
+          if (event.key === "F10" && !event.shiftKey) return false;
+          const row = rendered[index].rows.find((candidate) => candidate.name === views[index].cur);
+          // Anchored to the cursor row by asking the DOM where it landed, which
+          // is the only thing that knows: the listing is virtualised and a row's
+          // position is a scroll offset, not an index (TRE-19).
+          const element = row
+            ? document.querySelector<HTMLElement>(`[data-pane="${index}"] [data-row="${CSS.escape(row.name)}"]`)
+            : null;
+          const rect = element?.getBoundingClientRect() ?? null;
+          setMenu({
+            pane: index,
+            // Its bottom-left corner, so the menu opens under the row rather
+            // than over it. With no cursor row there is nothing to anchor to and
+            // the menu is about the directory anyway.
+            point: rect ? { x: rect.left, y: rect.bottom } : { x: window.innerWidth / 4, y: window.innerHeight / 3 },
+            name: row?.name ?? null,
+          });
+          return true;
+        }
         case "Escape":
           // The one key that reliably means "never mind", and with nothing else
           // open there is nothing else to press. Ours only while something is
@@ -1000,6 +1254,31 @@ export function Explorer({
     onHostMenu: () => onManageHosts(index),
     onClearGlob: () => onGlobChange(""),
     onFilesDropped: (files) => uploadInto(index, files),
+    onContextMenu: (point, name) => {
+      // The inactive pane is activated first, or the menu, the status bar and
+      // the toolbar would describe three different things (§2).
+      onActiveChange(index);
+
+      // A row **outside** the selection becomes the selection and takes the
+      // cursor: a menu acting on entries the operator cannot see is merely
+      // confusing for most of these and unforgivable for `rm`. A row **inside**
+      // it leaves the selection alone, which is the only way to act on a
+      // multi-selection without destroying it on the way to the menu.
+      if (name !== null && !views[index].sel.includes(name)) {
+        dispatch({
+          type: "click",
+          pane: index,
+          name,
+          names: rendered[index].rows.map((row) => row.name),
+          extend: false,
+          toggle: false,
+        });
+      }
+
+      // Assigned rather than toggled: a right-click while one is already open
+      // moves it, rather than stacking a second or dismissing the first (§5).
+      setMenu({ pane: index, point, name });
+    },
   });
 
   // Pointing at a directory is a reliable signal that it is about to be
@@ -1072,6 +1351,9 @@ export function Explorer({
             >
               {/* biome-ignore lint/a11y/noStaticElementInteractions: a cache warm-up on hover, with no behaviour of its own */}
               <div
+                // Named so ⇧F10 can find the cursor row inside *this* pane: two
+                // panes can be showing the same directory, and the same name.
+                data-pane={index}
                 className="flex min-h-0 min-w-0 flex-1"
                 onMouseOver={(event) => prefetchFromEvent(pane, view.rows, event.target)}
                 onFocus={(event) => prefetchFromEvent(pane, view.rows, event.target)}
@@ -1228,6 +1510,16 @@ export function Explorer({
               }
             }
           }}
+        />
+      )}
+
+      {menu && (
+        <ContextMenu
+          point={menu.point}
+          label={menuLabel}
+          rows={resolveActions(menuContext, "menu")}
+          onChoose={chooseAction}
+          onClose={() => setMenu(null)}
         />
       )}
 

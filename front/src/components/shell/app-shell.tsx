@@ -7,8 +7,9 @@ import { ToastProvider } from "@components/ui/toast";
 import { TransferProvider } from "@components/ui/transfers";
 import { UploadProvider } from "@components/ui/uploads";
 
+import type { Action } from "@components/shell/actions";
 import type { SelectionSummary } from "@components/shell/status-bar";
-import type { SplitMode, ToolbarAction, ViewMode } from "@components/shell/toolbar";
+import type { SplitMode, ViewMode } from "@components/shell/toolbar";
 import type { HostChip, MachineStats, SavedView } from "@components/shell/top-bar";
 import type { ReactNode } from "react";
 
@@ -67,7 +68,7 @@ export function AppShell({
   inspector?: boolean;
   onInspectorChange?: (open: boolean) => void;
   /** The action row, with whatever M2 has actually built wired up (TRE-21). */
-  actions?: readonly ToolbarAction[];
+  actions?: readonly Action[];
   /** The 176px left rail (TRE-18). Rendered beside the panes, inside the bars. */
   sidebar?: ReactNode;
   /**

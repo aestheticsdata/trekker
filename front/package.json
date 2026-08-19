@@ -11,6 +11,7 @@
     "test": "echo 'no front tests yet — test tooling lands with TRE-39'",
     "verify:clipboard": "node scripts/verify-clipboard.ts",
     "verify:contrast": "node scripts/verify-contrast.ts",
+    "verify:menu": "node scripts/verify-menu.ts",
     "verify:permissions": "node scripts/verify-permissions.ts",
     "verify:virtual": "node scripts/verify-virtual.ts"
   },

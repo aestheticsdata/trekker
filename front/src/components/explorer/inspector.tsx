@@ -1,7 +1,5 @@
 "use client";
 
-import { useAuth } from "@auth/context/AuthContext";
-import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import {
   ageDays,
@@ -15,12 +13,11 @@ import {
   typeTag,
 } from "@helpers/listing";
 import { describeMode, permissionRows } from "@helpers/permissions";
-import { ApiError } from "@lib/api/client";
 import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
-import { mintLink } from "@lib/api/link";
 import { QUERY_KEYS } from "@lib/query/keys";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useSignedLink } from "@lib/query/use-signed-link";
+import { useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 
 import type { SortDirection, SortKey } from "@helpers/listing";
@@ -95,8 +92,6 @@ export function Inspector({
   /** Opens the permissions modal on whatever is selected (TRE-21). */
   onEditPermissions: () => void;
 }) {
-  const { csrfToken } = useAuth();
-  const { push } = useToast();
   const one = selected.length === 1 ? selected[0] : null;
 
   /**
@@ -112,42 +107,14 @@ export function Inspector({
   /**
    * Minting a signed link (TRE-66), which ends in the clipboard.
    *
-   * The URL *is* the grant — anything that can read it can fetch the file — so
-   * it is never rendered into the page. Showing it would put a working
-   * credential on screen for a shoulder, a screenshot or a screen share, and it
-   * would be shown for as long as the panel stayed open. Straight to the
-   * clipboard, and the toast says when it expires rather than what it is.
+   * The hook is shared with the context menu's own entry (TRE-70): the rule
+   * that the URL is never rendered into the page is one that survives in a
+   * single place and rots in two.
    */
-  const link = useMutation({
-    mutationFn: () => mintLink(host?.id as string, joinPath(path, one?.name ?? ""), csrfToken),
-    throwOnError: false,
-    onSuccess: async (minted) => {
-      const expires = new Date(minted.expiresAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-      try {
-        await navigator.clipboard.writeText(minted.url);
-        push({ tone: "success", message: "Link copied", detail: `${minted.filename} · expires at ${expires}` });
-      } catch {
-        // Clipboard access is refused on an insecure origin and in some
-        // configurations. The link exists either way, so say so rather than
-        // reporting a failure that did not happen — and do not print the URL,
-        // for the reason above.
-        push({
-          tone: "warning",
-          message: "Link created, but not copied",
-          detail: "This browser refused clipboard access. Try again from a secure origin.",
-        });
-      }
-    },
-    onError: (error) => {
-      push({
-        tone: "danger",
-        message: "No link",
-        detail: error instanceof ApiError ? error.message : "The link could not be created.",
-      });
-    },
-  });
+  const link = useSignedLink();
 
-  const signedLink = host && one && one.type === "file" ? () => link.mutate() : null;
+  const signedLink =
+    host && one && one.type === "file" ? () => link.mutate({ hostId: host.id, path: joinPath(path, one.name) }) : null;
 
   // One stat call serves two panels: the selected entry, or — with nothing
   // selected — the directory itself, whose mode and owner the listing does not

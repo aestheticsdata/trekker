@@ -2,9 +2,9 @@
 
 import { Explorer } from "@components/explorer/explorer";
 import { SudoBadge } from "@components/hosts/sudo-badge";
+import { isRule, resolveActions } from "@components/shell/actions";
 import { AppShell } from "@components/shell/app-shell";
 import { DiskUsage } from "@components/shell/disk-usage";
-import { M2_ACTIONS } from "@components/shell/toolbar";
 import { Sidebar } from "@components/sidebar/sidebar";
 import { formatInstant, formatSize } from "@helpers/listing";
 import { fetchHostMetrics, fetchHostSummary, fetchHosts } from "@lib/api/hosts";
@@ -19,6 +19,7 @@ import type { CreateMode } from "@components/explorer/create-modal";
 import type { PaneUrl } from "@components/explorer/explorer";
 import type { PaneIndex } from "@components/explorer/pane-state";
 import type { RenameMode } from "@components/explorer/rename-modal";
+import type { ActionContext, ActionId } from "@components/shell/actions";
 import type { SelectionSummary } from "@components/shell/status-bar";
 import type { FileRow } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
@@ -92,6 +93,14 @@ export default function HomePage() {
    */
   const [clipboard, setClipboard] = useState<string | null>(null);
   const [clearClipboardRequested, setClearClipboardRequested] = useState(false);
+  /**
+   * What the toolbar's row is aimed at (TRE-70 §4) — reported up by the
+   * explorer, which is where the selection lives.
+   *
+   * Null until the explorer's first render, which is one paint with an action
+   * row that has nothing to say. That is honest: it has nothing to say yet.
+   */
+  const [actionContext, setActionContext] = useState<ActionContext | null>(null);
 
   /**
    * Whether the layout has been moved by hand yet (TRE-62 §4).
@@ -110,22 +119,22 @@ export default function HomePage() {
   };
 
   /**
-   * The toolbar's action row, with the ones M2 has built wired up (TRE-21,
-   * TRE-22).
+   * The toolbar's action row (TRE-70 §4).
    *
-   * The row is declared in the toolbar so the palette can share it, and each
-   * action stays disabled until its ticket lands — which is also the honest
-   * signal for the four that are still inert. Replacing the entry rather than
-   * mutating the shared list keeps the default list a description of what
-   * exists rather than of what this page happens to enable.
+   * What exists and what each entry needs is `resolveActions`, run against the
+   * context the explorer reports up. This page attaches the handlers and
+   * nothing else — it used to also decide availability, by replacing an
+   * action's `unavailableReason` with a handler, which meant the row and the
+   * menu could disagree about the same selection and nobody would find out
+   * until someone tried the other route.
    */
-  const OPENERS: Record<string, () => void> = {
+  const OPENERS: Partial<Record<ActionId, () => void>> = {
     // The button says `new`, so it opens on the directory — which is what the
     // key it advertises means everywhere else. The file is one click away
     // inside the modal.
-    new: () => setCreateMode("dir"),
-    copy: () => setTransferMode("copy"),
-    move: () => setTransferMode("move"),
+    newDir: () => setCreateMode("dir"),
+    copyTo: () => setTransferMode("copy"),
+    moveTo: () => setTransferMode("move"),
     duplicate: () => setDuplicateRequested(true),
     chmod: () => setPermissionsOpen(true),
     // The toolbar button opens the pattern whatever is selected — it is the
@@ -135,8 +144,10 @@ export default function HomePage() {
     upload: () => setUploadRequested(true),
     rm: () => setDeleteOpen(true),
   };
-  const actions = M2_ACTIONS.map((action) =>
-    action.id in OPENERS ? { ...action, unavailableReason: undefined, onSelect: OPENERS[action.id] } : action,
+  // The toolbar's shape carries no rules, so this drops nothing — it is how the
+  // row's type narrows from "action or rule" to "action".
+  const actions = (actionContext ? resolveActions(actionContext, "toolbar") : []).flatMap((row) =>
+    isRule(row) ? [] : [{ ...row, onSelect: OPENERS[row.id] }],
   );
 
   const { data: hosts, isPending: hostsPending } = useQuery({
@@ -307,6 +318,7 @@ export default function HomePage() {
         onClipboardChange={setClipboard}
         clearClipboardRequested={clearClipboardRequested}
         onClearClipboardRequestedChange={setClearClipboardRequested}
+        onActionContextChange={setActionContext}
       />
     </AppShell>
   );
