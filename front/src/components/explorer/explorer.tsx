@@ -11,6 +11,7 @@ import {
   forwardTarget,
   initialState,
   openTarget,
+  PARENT_NAME,
   upTarget,
 } from "@components/explorer/pane-state";
 import { PermissionsModal } from "@components/explorer/permissions-modal";
@@ -553,8 +554,12 @@ export function Explorer({
    * what the store holds and what a fresh listing is checked against. The rows
    * on screen are from whenever this pane last loaded, which is precisely what
    * a paste is not allowed to trust.
+   *
+   * The cursor is read through `cursorRow` rather than raw, because it can be
+   * standing on `..` (TRE-77) — and that is a directory to walk into, not a
+   * name to hand a transfer.
    */
-  const heldNames = activePane.sel.length > 0 ? activePane.sel : activePane.cur ? [activePane.cur] : [];
+  const heldNames = activePane.sel.length > 0 ? activePane.sel : cursorRow ? [cursorRow.name] : [];
   const take = (mode: ClipboardMode) => {
     if (activePane.hostId === null || heldNames.length === 0) {
       push({
@@ -1054,7 +1059,15 @@ export function Explorer({
     enabled: manageHostsFor === null && menu === null,
     onKey: (event) => {
       const index = active;
-      const names = rendered[index].rows.map((row) => row.name);
+      const up = upTarget(views[index].path);
+      // The rows the cursor can stand on: the listing, plus the `..` the pane
+      // draws above it when there is one (TRE-77). ⌘A below, and the rename,
+      // delete and download targets, keep asking `rows` alone — a same-looking
+      // expression over a different set, and deliberately so. `..` is a place
+      // to put the cursor and never a thing to operate on, which is why the
+      // reducer refuses it a place in the selection.
+      const rowNames = rendered[index].rows.map((row) => row.name);
+      const names = up ? [PARENT_NAME, ...rowNames] : rowNames;
 
       switch (event.key) {
         case "Tab":
@@ -1067,12 +1080,20 @@ export function Explorer({
           dispatch({ type: "move", pane: index, delta: -1, names });
           return true;
         case "Enter": {
+          // `..` is answered ahead of the lookup, because `rows` does not carry
+          // it: ⏎ on the cursor's row means what a double-click on that row
+          // means, and on this one that is up.
+          if (views[index].cur === PARENT_NAME) {
+            if (up) go(index, up);
+            return true;
+          }
           const row = rendered[index].rows.find((candidate) => candidate.name === views[index].cur);
           if (row) open(index, row);
           return true;
         }
         case "Backspace": {
-          const up = upTarget(views[index].path);
+          // Still one keypress, and still the cheap route: making `..` a row
+          // took the single click away from it and nothing else (TRE-77).
           if (up) go(index, up);
           return true;
         }
@@ -1130,19 +1151,27 @@ export function Explorer({
           // a mouse and the rest of this app does not (TRE-70 §6). Plain F10 is
           // the browser's, and stays the browser's.
           if (event.key === "F10" && !event.shiftKey) return false;
-          const row = rendered[index].rows.find((candidate) => candidate.name === views[index].cur);
+          // `..` is a row the cursor can stand on and never one the menu is
+          // about (TRE-77): what it offers there is the directory's shape, the
+          // same as a right-click on it or on the empty area below the rows.
+          // But it is a row *on screen*, with an outline round it, so the menu
+          // still has to open under it rather than at the fallback below.
+          const onParent = views[index].cur === PARENT_NAME;
+          const row = onParent
+            ? undefined
+            : rendered[index].rows.find((candidate) => candidate.name === views[index].cur);
           // Anchored to the cursor row by asking the DOM where it landed, which
           // is the only thing that knows: the listing is virtualised and a row's
           // position is a scroll offset, not an index (TRE-19).
-          const element = row
-            ? document.querySelector<HTMLElement>(`[data-pane="${index}"] [data-row="${CSS.escape(row.name)}"]`)
-            : null;
+          const selector = onParent ? "[data-parent-row]" : row ? `[data-row="${CSS.escape(row.name)}"]` : null;
+          const element = selector ? document.querySelector<HTMLElement>(`[data-pane="${index}"] ${selector}`) : null;
           const rect = element?.getBoundingClientRect() ?? null;
           setMenu({
             pane: index,
             // Its bottom-left corner, so the menu opens under the row rather
-            // than over it. With no cursor row there is nothing to anchor to and
-            // the menu is about the directory anyway.
+            // than over it. The fallback is for a pane with no cursor at all, or
+            // one whose cursor row has been scrolled out of the window and so is
+            // not in the DOM to be measured.
             point: rect ? { x: rect.left, y: rect.bottom } : { x: window.innerWidth / 4, y: window.innerHeight / 3 },
             name: row?.name ?? null,
           });
@@ -1205,81 +1234,100 @@ export function Explorer({
   useShortcut({ enabled: !overlayOpen, key: "c", inFields: false, onPress: () => take("copy") });
   useShortcut({ enabled: !overlayOpen, key: "v", inFields: false, onPress: () => void putDown() });
 
-  const callbacksFor = (index: PaneIndex): PaneCallbacks => ({
-    onFocus: () => onActiveChange(index),
-    onCd: (path) => go(index, path),
-    onUp: () => {
-      const up = upTarget(views[index].path);
-      if (up) go(index, up);
-    },
-    onBack: () => {
-      const target = backTarget(views[index]);
-      if (!target) return;
-      dispatch({ type: "stacks", pane: index, ...target });
-      onPaneChange(index, { path: target.path });
-    },
-    onForward: () => {
-      const target = forwardTarget(views[index]);
-      if (!target) return;
-      dispatch({ type: "stacks", pane: index, ...target });
-      onPaneChange(index, { path: target.path });
-    },
-    onOpen: (row) => open(index, row),
-    onNewTab: () => dispatch({ type: "newTab", pane: index, path: views[index].path }),
-    onSelectTab: (tab) => {
-      const path = memory.panes[index].tabs[tab];
-      if (path === undefined) return;
-      dispatch({ type: "selectTab", pane: index, tab });
-      onPaneChange(index, { path });
-    },
-    onSort: (key: SortKey) => {
-      // Second click on the same column reverses it. A different column starts
-      // ascending — except size, where the question is always "what is eating
-      // the disk", so the first click puts the biggest at the top.
-      const pane = views[index];
-      onPaneChange(
-        index,
-        pane.sort === key ? { dir: pane.dir === 1 ? -1 : 1 } : { sort: key, dir: key === "size" ? -1 : 1 },
-      );
-    },
-    onRowClick: (name, modifiers) =>
-      dispatch({
-        type: "click",
-        pane: index,
-        name,
-        names: rendered[index].rows.map((row) => row.name),
-        extend: modifiers.extend,
-        toggle: modifiers.toggle,
-      }),
-    onHostMenu: () => onManageHosts(index),
-    onClearGlob: () => onGlobChange(""),
-    onFilesDropped: (files) => uploadInto(index, files),
-    onContextMenu: (point, name) => {
-      // The inactive pane is activated first, or the menu, the status bar and
-      // the toolbar would describe three different things (§2).
-      onActiveChange(index);
+  const callbacksFor = (index: PaneIndex): PaneCallbacks => {
+    /**
+     * The rows a click can land on, `..` included (TRE-77).
+     *
+     * A function rather than a value because this runs on every render for both
+     * panes and the array is only wanted when somebody clicks — walking ten
+     * thousand rows twice a paint to answer nothing is the shape TRE-19 spent
+     * its time removing.
+     *
+     * `..` is in it so a ⇧-click that runs off the top of the listing still
+     * extends to the first real row rather than falling back to a plain click.
+     * The reducer keeps it out of the selection the range produces.
+     */
+    const clickNames = () => {
+      const rowNames = rendered[index].rows.map((row) => row.name);
+      return upTarget(views[index].path) ? [PARENT_NAME, ...rowNames] : rowNames;
+    };
 
-      // A row **outside** the selection becomes the selection and takes the
-      // cursor: a menu acting on entries the operator cannot see is merely
-      // confusing for most of these and unforgivable for `rm`. A row **inside**
-      // it leaves the selection alone, which is the only way to act on a
-      // multi-selection without destroying it on the way to the menu.
-      if (name !== null && !views[index].sel.includes(name)) {
+    return {
+      onFocus: () => onActiveChange(index),
+      onCd: (path) => go(index, path),
+      onUp: () => {
+        const up = upTarget(views[index].path);
+        if (up) go(index, up);
+      },
+      onBack: () => {
+        const target = backTarget(views[index]);
+        if (!target) return;
+        dispatch({ type: "stacks", pane: index, ...target });
+        onPaneChange(index, { path: target.path });
+      },
+      onForward: () => {
+        const target = forwardTarget(views[index]);
+        if (!target) return;
+        dispatch({ type: "stacks", pane: index, ...target });
+        onPaneChange(index, { path: target.path });
+      },
+      onOpen: (row) => open(index, row),
+      onNewTab: () => dispatch({ type: "newTab", pane: index, path: views[index].path }),
+      onSelectTab: (tab) => {
+        const path = memory.panes[index].tabs[tab];
+        if (path === undefined) return;
+        dispatch({ type: "selectTab", pane: index, tab });
+        onPaneChange(index, { path });
+      },
+      onSort: (key: SortKey) => {
+        // Second click on the same column reverses it. A different column starts
+        // ascending — except size, where the question is always "what is eating
+        // the disk", so the first click puts the biggest at the top.
+        const pane = views[index];
+        onPaneChange(
+          index,
+          pane.sort === key ? { dir: pane.dir === 1 ? -1 : 1 } : { sort: key, dir: key === "size" ? -1 : 1 },
+        );
+      },
+      onRowClick: (name, modifiers) =>
         dispatch({
           type: "click",
           pane: index,
           name,
-          names: rendered[index].rows.map((row) => row.name),
-          extend: false,
-          toggle: false,
-        });
-      }
+          names: clickNames(),
+          extend: modifiers.extend,
+          toggle: modifiers.toggle,
+        }),
+      onHostMenu: () => onManageHosts(index),
+      onClearGlob: () => onGlobChange(""),
+      onFilesDropped: (files) => uploadInto(index, files),
+      onContextMenu: (point, name) => {
+        // The inactive pane is activated first, or the menu, the status bar and
+        // the toolbar would describe three different things (§2).
+        onActiveChange(index);
 
-      // Assigned rather than toggled: a right-click while one is already open
-      // moves it, rather than stacking a second or dismissing the first (§5).
-      setMenu({ pane: index, point, name });
-    },
-  });
+        // A row **outside** the selection becomes the selection and takes the
+        // cursor: a menu acting on entries the operator cannot see is merely
+        // confusing for most of these and unforgivable for `rm`. A row **inside**
+        // it leaves the selection alone, which is the only way to act on a
+        // multi-selection without destroying it on the way to the menu.
+        if (name !== null && !views[index].sel.includes(name)) {
+          dispatch({
+            type: "click",
+            pane: index,
+            name,
+            names: clickNames(),
+            extend: false,
+            toggle: false,
+          });
+        }
+
+        // Assigned rather than toggled: a right-click while one is already open
+        // moves it, rather than stacking a second or dismissing the first (§5).
+        setMenu({ pane: index, point, name });
+      },
+    };
+  };
 
   // Pointing at a directory is a reliable signal that it is about to be
   // opened, whether the pointer is a mouse or the keyboard cursor.

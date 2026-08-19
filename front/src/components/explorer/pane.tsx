@@ -1,6 +1,6 @@
 "use client";
 
-import { pathOf } from "@components/explorer/pane-state";
+import { cursorWindowIndex, PARENT_NAME, pathOf } from "@components/explorer/pane-state";
 import { useRowWindow } from "@components/explorer/row-window";
 import { Tooltip } from "@components/ui/tooltip";
 import { ageIndex, HEAT, HEAT_OFF_BAR, HEAT_OFF_INK } from "@helpers/heat";
@@ -129,7 +129,11 @@ export function Pane({
   // tall like the rest, so counting it into the window keeps the arithmetic
   // exact and the whole listing under one scroll container.
   const upRow = path === "/" ? 0 : 1;
-  const cursorIndex = pane.cur === null ? -1 : rows.findIndex((row) => row.name === pane.cur);
+  // Skipped outright for `..`, which is not in `rows` and would cost a full
+  // walk of the listing to be told so.
+  const cursorRowIndex =
+    pane.cur === null || pane.cur === PARENT_NAME ? -1 : rows.findIndex((row) => row.name === pane.cur);
+  const cursorIndex = cursorWindowIndex(pane.cur, cursorRowIndex, upRow === 1);
 
   const list = useRowWindow({
     count: rows.length + upRow,
@@ -138,7 +142,7 @@ export function Pane({
     // Kept in view by index: the row the cursor names is usually not mounted,
     // so there is nothing to call `scrollIntoView` on. An inactive pane chases
     // nothing — its cursor is not the one the arrow keys are moving.
-    cursor: active && cursorIndex >= 0 ? cursorIndex + upRow : -1,
+    cursor: active ? cursorIndex : -1,
   });
 
   const selectedBytes = rows.reduce((sum, row) => (selected.has(row.name) ? sum + row.size : sum), 0);
@@ -283,15 +287,44 @@ export function Pane({
 
                 if (upRow === 1 && index === 0) {
                   return (
-                    <button
+                    // biome-ignore lint/a11y/noStaticElementInteractions: `..` is a row, and rows are driven by the pane's roving cursor rather than by per-row tab stops — the keyboard route up is ⌫ and the ↰ button in the path row, both of which stay one action (TRE-77)
+                    <div
                       key=".."
-                      type="button"
-                      onClick={callbacks.onUp}
-                      className="text-on-pane-muted hover:bg-pane-hover grid h-row w-full grid-cols-[0.875rem_1fr] items-center gap-1.25 px-2.25 text-left font-mono text-xs"
+                      // Marked, but not with `data-row`. The context menu and
+                      // the hover prefetch both find their target through that
+                      // one and neither has anything to say about `..`, so a
+                      // right-click here opens the directory's menu — which is
+                      // what a right-click on the empty area below the rows
+                      // already does (TRE-70 §2).
+                      //
+                      // This attribute answers a different question: where on
+                      // screen the row is. ⇧F10 anchors its menu under whatever
+                      // the cursor is standing on, and the listing is
+                      // virtualised, so the DOM is the only thing that knows
+                      // (TRE-19).
+                      data-parent-row
+                      onMouseDown={(event) => pressRow(event, PARENT_NAME, callbacks.onRowClick)}
+                      onDoubleClick={callbacks.onUp}
+                      // Two columns, not the eight of `GRID`: there is no size,
+                      // mode, owner or age to put in the other six. The glyph
+                      // column keeps the type tag's width, so `↰` lands under
+                      // the tags and the name under the names.
+                      //
+                      // Everything around those columns is a row's, down to the
+                      // transparent left border and the negative margin
+                      // cancelling it, because the dotted cursor outline has to
+                      // fall on exactly the rectangle it falls on one row below
+                      // — and `min-w` has to match, or the outline stops short
+                      // in a pane scrolled to the right.
+                      className={`text-on-pane-muted hover:bg-pane-hover grid h-row min-w-101 -ml-0.5 cursor-pointer grid-cols-[0.875rem_1fr] items-center gap-1.25 border-l-2 border-transparent px-2.25 font-mono text-xs ${
+                        active && pane.cur === PARENT_NAME
+                          ? "outline-on-pane-strong -outline-offset-1 outline-1 outline-dotted"
+                          : ""
+                      }`}
                     >
                       <span className="text-center">↰</span>
                       <span>..</span>
-                    </button>
+                    </div>
                   );
                 }
 
@@ -639,6 +672,30 @@ function ColumnHeader({
   );
 }
 
+/**
+ * What pressing a row does before the click reaches the reducer.
+ *
+ * Shared by the entries and by `..` (TRE-77), so the one row in the listing
+ * that is not a `FileRow` answers a press exactly as its neighbours do — which
+ * is the whole point of making it a row. Where the press lands the cursor and
+ * what it does to the selection is the reducer's; this is only the pointer's
+ * half of it.
+ */
+function pressRow(event: React.MouseEvent, name: string, onClick: PaneCallbacks["onRowClick"]) {
+  // The right button belongs to the menu, which has its own target rule
+  // (TRE-70 §2): a row inside the selection leaves it alone, and this
+  // handler would have replaced it with one name on the way past.
+  if (event.button === 2) return;
+  // preventDefault keeps a drag from selecting text — and, as a side
+  // effect, keeps focus where it is. If that is the glob input, every
+  // later keystroke is swallowed by it, so the focus move it suppressed
+  // has to be done by hand.
+  event.preventDefault();
+  const focused = document.activeElement as HTMLElement | null;
+  if (focused && focused !== document.body) focused.blur();
+  onClick(name, { extend: event.shiftKey, toggle: event.metaKey || event.ctrlKey });
+}
+
 function Row({
   row,
   selected,
@@ -677,20 +734,7 @@ function Row({
     // biome-ignore lint/a11y/noStaticElementInteractions: rows are driven by the pane's roving cursor and ⏎, not by per-row tab stops — a thousand-row listing must not add a thousand of them
     <div
       data-row={row.name}
-      onMouseDown={(event) => {
-        // The right button belongs to the menu, which has its own target rule
-        // (TRE-70 §2): a row inside the selection leaves it alone, and this
-        // handler would have replaced it with one name on the way past.
-        if (event.button === 2) return;
-        // preventDefault keeps a drag from selecting text — and, as a side
-        // effect, keeps focus where it is. If that is the glob input, every
-        // later keystroke is swallowed by it, so the focus move it suppressed
-        // has to be done by hand.
-        event.preventDefault();
-        const focused = document.activeElement as HTMLElement | null;
-        if (focused && focused !== document.body) focused.blur();
-        onClick(row.name, { extend: event.shiftKey, toggle: event.metaKey || event.ctrlKey });
-      }}
+      onMouseDown={(event) => pressRow(event, row.name, onClick)}
       onDoubleClick={() => onOpen(row)}
       className={`grid h-row cursor-pointer items-center font-mono text-xs ${GRID} -ml-0.5 border-l-2 ${
         selected

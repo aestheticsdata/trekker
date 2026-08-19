@@ -33,6 +33,18 @@ export interface PaneMemory {
   cur: string | null;
 }
 
+/**
+ * The name the cursor holds while it stands on the `..` row (TRE-77).
+ *
+ * A name, like every other value `cur` takes, and safe as one: the API refuses
+ * `..` as an entry name at every point one could arrive — the rename plan, the
+ * create endpoint, the path guard's segment check — so no listing can carry a
+ * row called this. Everything that resolves the cursor through `rows.find(...)`
+ * therefore answers null for it without being taught to, which is the right
+ * answer: `..` is a place to stand, not a thing to operate on.
+ */
+export const PARENT_NAME = "..";
+
 /** A pane's memory joined with what the URL owns — what a `Pane` renders from. */
 export interface PaneView extends PaneMemory {
   /** Null until a host is bound. */
@@ -166,11 +178,30 @@ function paneReducer(pane: PaneMemory, action: PaneAction): PaneMemory {
         : { ...pane, tab: action.tab, sel: [], cur: null };
 
     case "click": {
+      // `..` is a row the cursor can stand on and never one the selection can
+      // hold (TRE-77). `sel` is what `rm`, chmod, the transfer and the rename
+      // pattern are aimed at, and a list containing `..` is a list pointing at
+      // the parent directory.
+      //
+      // Landing on it moves the cursor and leaves the selection exactly as it
+      // was, rather than replacing it the way a click on a real row does. The
+      // alternative makes the one unselectable row in the listing the quickest
+      // way to lose a fifty-entry selection — a worse trade than a cursor that
+      // has stepped off what is highlighted, which is a state every two-pane
+      // manager this app is shaped after allows.
+      if (action.name === PARENT_NAME) return { ...pane, cur: PARENT_NAME };
+
       if (action.extend && pane.cur) {
         const from = action.names.indexOf(pane.cur);
         const to = action.names.indexOf(action.name);
         if (from > -1 && to > -1) {
-          const sel = action.names.slice(Math.min(from, to), Math.max(from, to) + 1);
+          // Filtered rather than assumed clean: `names` carries `..` so the
+          // cursor can walk onto it, so a range that reaches the top of the
+          // listing contains it. Refusing it here rather than at the four
+          // callers is what keeps the rule in one place.
+          const sel = action.names
+            .slice(Math.min(from, to), Math.max(from, to) + 1)
+            .filter((name) => name !== PARENT_NAME);
           // The cursor follows the click, as it does in every file manager and
           // in the mockup: an arrow key afterwards carries on past the end of
           // the range rather than jumping back into the middle of it.
@@ -191,7 +222,11 @@ function paneReducer(pane: PaneMemory, action: PaneAction): PaneMemory {
       const current = pane.cur === null ? -1 : action.names.indexOf(pane.cur);
       const next = Math.max(0, Math.min(action.names.length - 1, current < 0 ? 0 : current + action.delta));
       const name = action.names[next];
-      return { ...pane, cur: name, sel: [name] };
+      // The same rule as `click` above: the cursor may land on `..`, the
+      // selection may not follow it there, and what was selected stays so —
+      // arrowing over `..` on the way to the row below must not be a way to
+      // lose it.
+      return name === PARENT_NAME ? { ...pane, cur: name } : { ...pane, cur: name, sel: [name] };
     }
 
     case "selectAll": {
@@ -271,6 +306,24 @@ export function forwardTarget(pane: PaneView): { path: string; hist: string[]; f
 /** Where "up" goes, or null at the root. */
 export function upTarget(path: string): string | null {
   return path === "/" ? null : parentPath(path);
+}
+
+/**
+ * Where the cursor sits in the pane's scroll window, or -1 when it sits nowhere.
+ *
+ * The window counts `..` as its row 0 and the listing array does not contain it,
+ * so the search that answers for every other name answers -1 for this one — and
+ * a virtualiser handed -1 does not scroll to the row the keyboard is standing on
+ * (TRE-77, TRE-19).
+ *
+ * The row index is passed in rather than searched for here: the caller already
+ * has it, and a ten-thousand-row listing should not be walked twice to answer
+ * one question.
+ */
+export function cursorWindowIndex(cur: string | null, rowIndex: number, hasParent: boolean): number {
+  if (cur === PARENT_NAME) return hasParent ? 0 : -1;
+  if (cur === null || rowIndex < 0) return -1;
+  return rowIndex + (hasParent ? 1 : 0);
 }
 
 /** Where opening a directory goes. */
