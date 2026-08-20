@@ -9,7 +9,9 @@ import session from "express-session";
 import request from "supertest";
 import { AuditModule } from "@audit/audit.module";
 import { BookmarksModule } from "@bookmarks/bookmarks.module";
+import { CompareModule } from "@compare/compare.module";
 import { FsModule } from "@fs/fs.module";
+import { HashesModule } from "@hashes/hashes.module";
 import { HostsModule } from "@hosts/hosts.module";
 import { ScansModule } from "@scans/scans.module";
 import { RedisService } from "@redis/redis.service";
@@ -416,7 +418,9 @@ beforeAll(async () => {
       HostsModule,
       ScansModule,
       BookmarksModule,
+      CompareModule,
       FsModule,
+      HashesModule,
       TransfersModule,
       UsersModule,
     ],
@@ -655,6 +659,8 @@ describe("the route table", () => {
     // as the `imports` above it — a module left out of that list is swept by
     // nothing, and every assertion below still passes. TRE-32 arrived that way.
     expect(routes.map(label)).toContain("POST /api/hosts/:id/scan");
+    expect(routes.map(label)).toContain("POST /api/hash");
+    expect(routes.map(label)).toContain("POST /api/compare");
   });
 });
 

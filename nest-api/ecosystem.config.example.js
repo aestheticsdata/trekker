@@ -148,10 +148,6 @@ const prodEnv = {
   // promises too. Read at boot — a change needs a reload.
   // TREKKER_SUDO_WINDOW_MINUTES: "15",
   //
-  // Declared but not yet attached — the operations they govern do not exist.
-  // Each is removed from `TO_ATTACH` by the ticket named beside it:
-  //   TREKKER_LIMIT_HASHES_IN_FLIGHT           TRE-27
-  //
   // Attached and overridable, all optional, defaults shown:
   //   TREKKER_LIMIT_SUDO_ATTEMPTS_PER_5MIN     5        TRE-29
   //   TREKKER_LIMIT_DELETES_PER_MIN            10       TRE-25
@@ -161,12 +157,19 @@ const prodEnv = {
   //   TREKKER_LIMIT_UPLOAD_UNITS_PER_HOUR      800      TRE-65, in 64 MiB units
   //   TREKKER_LIMIT_LINK_FETCHES_PER_MIN       60       TRE-66, keyed by IP
   //   TREKKER_LIMIT_TRANSFERS_PER_MIN          20       TRE-23, copies+moves+retries
+  //   TREKKER_LIMIT_HASH_JOBS_PER_MIN          20       TRE-27
   //
   // `TREKKER_LIMIT_TRANSFERS_IN_FLIGHT` is gone rather than renamed, and the
   // difference matters if you had set it: it named an in-flight cap, which a
   // window counter cannot express. That question moved to the queue settings
   // below and is now `TREKKER_TRANSFERS_IN_FLIGHT`. What stayed on this list is
   // the rate, which is a different bound with a different number.
+  //
+  // `TREKKER_LIMIT_HASHES_IN_FLIGHT` went the same way and for the same reason,
+  // one milestone later: it was listed here as a limit waiting for TRE-27, and
+  // when the operation arrived it turned out to name a concurrency cap that no
+  // fixed-window counter can express. It is now `TREKKER_HASHES_IN_FLIGHT`
+  // under the checksum settings below, and the rate above is the other half.
 
   // ---- transfers (TRE-23, TRE-26, TRE-65, TRE-66) --------------------------
   //
@@ -187,6 +190,19 @@ const prodEnv = {
   // Unset means unlimited, which is right on a LAN and wrong on a link somebody
   // else is also using.
   //   TREKKER_TRANSFER_MAX_BYTES_PER_SEC    e.g. "10485760" for 10 MB/s
+
+  // ---- checksums (TRE-27) --------------------------------------------------
+  //
+  // How many checksum jobs run at once, across every host and account. Not a
+  // rate limit — that is `TREKKER_LIMIT_HASH_JOBS_PER_MIN` above, and it bounds
+  // how often somebody may start one. This bounds how much reading is happening
+  // at any moment. Higher than the scans' two because a job that runs on the
+  // host spends almost no CPU here; it waits on somebody else's disk.
+  //   TREKKER_HASHES_IN_FLIGHT   3
+  //
+  // The rest of what a job costs — the file count and the byte ceiling it is
+  // refused over — is not configurable and lives in
+  // nest-api/src/hashes/hash-limits.ts, which is the one file to read for it.
 };
 
 module.exports = {

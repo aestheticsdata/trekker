@@ -8,12 +8,12 @@
  * numbers, which are chosen to be invisible to a person and obstructive to a
  * script.
  *
- * **Some of these have nothing to limit yet, and that is deliberate.** The
- * operations they name arrive in TRE-27. They are declared now
- * because the limit and the operation should land together rather than the
- * limit being remembered afterwards, and because `TO_ATTACH` below turns
- * "remembered afterwards" into a listed obligation instead of a hope. It works:
- * TRE-23, TRE-25 and TRE-29 were all on that list and all came off it.
+ * **Every limit here is attached to something.** Some were not, once: a limit
+ * and the operation it governs should land together, so one declared ahead of
+ * its operation goes into `TO_ATTACH` below, which turns "remembered
+ * afterwards" into a listed obligation instead of a hope. It works, and it has
+ * now run to completion — TRE-23, TRE-25, TRE-29 and TRE-27 were all on that
+ * list and all came off it, which is why it is currently empty.
  *
  * **And one of them limits nothing, ever.** `pathRefusal` counts and reports;
  * it refuses nobody. It keeps its place here because it is still a threshold
@@ -291,6 +291,43 @@ export const LIMITS = {
    * already knows from the terminal.
    */
   sudo: rule("limit:sudo", "sudo attempts", 5, 300, "TREKKER_LIMIT_SUDO_ATTEMPTS_PER_5MIN"),
+
+  /**
+   * Checksum jobs (TRE-27), per minute.
+   *
+   * Twenty. A job reads files on somebody's machine for minutes at a time, and
+   * queueing one is a single gesture from a context menu — so this is well past
+   * deliberate use and nowhere near what a script would want.
+   *
+   * **It arrived from `TO_ATTACH` with a different shape, and the change is
+   * worth recording.** It was declared as `("limit:hash", "checksum jobs", 3, 0,
+   * "TREKKER_LIMIT_HASHES_IN_FLIGHT")` — three, over a window of zero seconds —
+   * which is a concurrency cap written in the vocabulary of a rate limit, and it
+   * could never have worked as one: `consume` sets `EXPIRE key 0`, MySQL's Redis
+   * equivalent of deleting it immediately, so the counter would reset on every
+   * call and the limit would never fire. The intent behind it was real and is
+   * kept: three jobs in flight is now `MAX_JOBS_IN_FLIGHT` in
+   * `hashes/hash-limits.ts`, where the other costs of running one live, and this
+   * counter bounds how often somebody may *start* one, which is the question
+   * every other rule in this table answers.
+   */
+  hashJobs: rule("limit:hash", "checksum jobs", 20, 60, "TREKKER_LIMIT_HASH_JOBS_PER_MIN"),
+
+  /**
+   * Directory comparisons (TRE-28), per minute.
+   *
+   * Twenty, matching the checksum jobs above, and for the same reason rather
+   * than by copying the number: a comparison spends two machines' IO listing up
+   * to two thousand entries across eight levels, and pressing `compare ⇄` is
+   * one gesture. Twenty a minute is past anybody doing it deliberately.
+   *
+   * It bounds a route that **changes nothing**, which is unusual in this table
+   * and is the point: the coverage spec only demands a limit on a destructive
+   * route, and this one is here because "harmless" and "free" are different
+   * words. A script running this against `/` on two hosts in a loop is a
+   * denial of service against both, and no byte is altered by it.
+   */
+  compare: rule("limit:cmp", "comparisons", 20, 60, "TREKKER_LIMIT_COMPARISONS_PER_MIN"),
 } as const satisfies Record<string, LimitRule>;
 
 /**
@@ -300,7 +337,11 @@ export const LIMITS = {
  * ticket named beside each one is the ticket that must remove its entry. An
  * unattached limit is a promise, and a promise with no expiry is how "every
  * destructive operation is rate limited" becomes true on paper only.
+ *
+ * **It is empty, which is the state it was always meant to reach.** TRE-23,
+ * TRE-25, TRE-29 and finally TRE-27 each took their entry off it when the
+ * operation landed. An empty list here means every limit this install declares
+ * is one it actually spends; the next unbuilt operation that wants one adds it
+ * back, with its ticket.
  */
-export const TO_ATTACH = {
-  hashJobs: { rule: rule("limit:hash", "checksum jobs", 3, 0, "TREKKER_LIMIT_HASHES_IN_FLIGHT"), ticket: "TRE-27" },
-} as const;
+export const TO_ATTACH = {} as const satisfies Record<string, { rule: LimitRule; ticket: string }>;

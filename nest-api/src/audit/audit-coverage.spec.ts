@@ -260,13 +260,18 @@ describe("audit coverage", () => {
     // `TO_ATTACH` in limits.ts names the limits whose operations do not exist
     // yet. Each must name the ticket that will attach it, or it is not a plan,
     // it is a note nobody will action.
+    //
+    // An **empty** list passes, and that is the point rather than a loophole:
+    // the list is an obligation register, and the state it is meant to reach is
+    // zero. It emptied with TRE-27, which took the last entry off it. What this
+    // still refuses is the thing worth refusing — an entry with no ticket
+    // beside it, which is how one would sit there forever.
     const source = readFileSync(join(SRC, "audit", "limits.ts"), "utf8");
     const block = source.slice(source.indexOf("export const TO_ATTACH"));
 
     const entries = [...block.matchAll(/^\s{2}(\w+):\s*\{/gm)].map((match) => match[1]);
     const tickets = [...block.matchAll(/ticket:\s*"(TRE-\d+)"/g)].map((match) => match[1]);
 
-    expect(entries.length).toBeGreaterThan(0);
     expect(tickets).toHaveLength(entries.length);
   });
 

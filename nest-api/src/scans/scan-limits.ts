@@ -98,16 +98,16 @@ export const MAX_HASH_BYTES = 2n * 1024n * 1024n * 1024n;
 export const HASH_BUDGET_BYTES = 20n * 1024n * 1024n * 1024n;
 
 /**
- * Paths per `sha256sum` call, and the argv budget that also bounds it.
+ * The two argv bounds on a `sha256sum` call are **not here**, and this note is
+ * the pointer that says so (TRE-27).
  *
- * Two bounds because either can bite first: a hundred short paths are fine and
- * sixty-four very long ones are not. Linux caps a single argument at 128 KiB
- * and the whole argv well above that, but the command also has to survive being
- * rendered as a shell string and handed to a remote sshd, so the budget is well
- * under either.
+ * They were, until checksum jobs became a second caller of the same command.
+ * `MAX_ARGS_PER_CALL` and `MAX_ARGV_BYTES` now live in `@hosts/sha256-sum`
+ * beside the chunker that applies them, because they are a fact about what a
+ * command line will carry rather than a fact about what a disk scan may cost —
+ * which is what everything else in this file is. A scan-specific copy would be
+ * a second number to keep in step with the same `ARG_MAX`.
  */
-export const MAX_ARGS_PER_CALL = 64;
-export const MAX_ARGV_BYTES = 96_000;
 
 // ---------------------------------------------------------------- the run
 

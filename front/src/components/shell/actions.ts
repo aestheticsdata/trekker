@@ -41,6 +41,7 @@ export type ActionId =
   | "copyName"
   | "favourite"
   | "compare"
+  | "hash"
   | "rm";
 
 /** What a surface is aimed at: the selected entries, or the pane's directory. */
@@ -110,6 +111,14 @@ const one: Rule = (context) =>
   context.entries.length === 0 ? NOTHING : context.entries.length > 1 ? "This takes one entry at a time" : undefined;
 const otherPane: Rule = (context) =>
   context.otherHostId === null ? "The other pane has no host to send these to" : undefined;
+/**
+ * Both panes bound, for an action that reads both rather than sending anything
+ * one way. `otherPane` above says "to send these to", which is the wrong
+ * sentence for a comparison and would be the wrong sentence to read in a
+ * tooltip explaining why `compare` is grey.
+ */
+const bothPanes: Rule = (context) =>
+  context.otherHostId === null ? "The other pane has no host to compare against" : undefined;
 
 /** Exactly one entry, of one of these kinds. */
 function onlyKind(kinds: readonly RowType[], why: string): Rule {
@@ -196,7 +205,18 @@ const SPECS: Readonly<Record<ActionId, Spec>> = {
     ),
   },
 
-  compare: { label: "compare", hint: "⇄", why: () => "Pane comparison arrives in TRE-28" },
+  // Aimed at the two panes' directories, never at the selection — which is why
+  // it carries no `some` rule and appears in the directory menu rather than the
+  // entries one. Comparing "these three files" against another pane is a
+  // different question, and not one this asks.
+  compare: { label: "compare with other pane", short: "compare", hint: "⇄", why: all(host, bothPanes) },
+
+  // Files only, and it is not a limitation of the route — a directory in the
+  // selection is expanded into the files under it. It is what the word means: a
+  // directory has no sha256, and an entry offering one would be promising a
+  // number that does not exist. Selecting the directory and asking for the
+  // checksums of what is in it is the same gesture, one row up.
+  hash: { label: "compute sha256", why: all(host, some) },
   rm: { label: "rm", hint: "⌦", danger: true, why: all(host, some) },
 };
 
@@ -231,6 +251,7 @@ const ENTRIES_SHAPE: readonly ShapeRow[] = [
   "chmod",
   "download",
   "link",
+  "hash",
   "copyPath",
   "copyName",
   null,
@@ -247,6 +268,7 @@ const DIRECTORY_SHAPE: readonly ShapeRow[] = [
   "upload",
   null,
   "refresh",
+  "compare",
   "copyPath",
   "favourite",
 ];

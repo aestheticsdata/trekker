@@ -2,10 +2,12 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { AuditModule } from "@audit/audit.module";
 import { BookmarksModule } from "@bookmarks/bookmarks.module";
+import { CompareModule } from "@compare/compare.module";
 import appConfig from "@config/app.config";
 import { validate } from "@config/env.validation";
 import { DatabaseModule } from "@database/database.module";
 import { FsModule } from "@fs/fs.module";
+import { HashesModule } from "@hashes/hashes.module";
 import { HealthModule } from "@health/health.module";
 import { loadEnv } from "@config/load-env";
 import { RedisModule } from "@redis/redis.module";
@@ -47,6 +49,14 @@ loadEnv();
     ScansModule,
     BookmarksModule,
     FsModule,
+    // After FsModule for the same reason ScansModule sits after HostsModule:
+    // nothing depends on the order, and the two are read together. A checksum
+    // job is a job about files, and its routes are `hash`, not `fs/hash`.
+    HashesModule,
+    // After HashesModule, which it reads from: a comparison settles what only a
+    // checksum can by looking up digests TRE-27 computed. It imports nothing —
+    // the read is a Prisma query — but the two are read together.
+    CompareModule,
     TransfersModule,
     HealthModule,
     UsersModule,

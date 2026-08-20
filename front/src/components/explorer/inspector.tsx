@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@auth/context/AuthContext";
+import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import {
   ageDays,
@@ -15,13 +17,16 @@ import {
 import { describeMode, permissionRows } from "@helpers/permissions";
 import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
+import { cancelHash, fetchHashState, hashStreamUrl, shortDigest } from "@lib/api/hashes";
 import { QUERY_KEYS } from "@lib/query/keys";
+import { useHashJob } from "@lib/query/use-hash-job";
 import { useSignedLink } from "@lib/query/use-signed-link";
-import { useQuery } from "@tanstack/react-query";
-import { Fragment } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Fragment, useEffect, useState } from "react";
 
 import type { SortDirection, SortKey } from "@helpers/listing";
 import type { FileRow, FileRowDetail, RowType } from "@lib/api/fs";
+import type { HashProgress } from "@lib/api/hashes";
 import type { HostView } from "@lib/api/hosts";
 import type { ReactNode } from "react";
 
@@ -350,13 +355,11 @@ function EntryPanel({
         />
       </Scroller>
 
-      <section className="border-line flex-none border-t px-2.5 py-2.25">
-        <Heading>INTEGRITY</Heading>
-        <p className="text-ink-soft font-mono text-caption">
-          sha256 <span className="text-ink-faint">not computed</span>
-        </p>
-        <p className="text-ink-faint font-mono text-caption">checksums arrive in TRE-27</p>
-      </section>
+      <Integrity
+        hostId={host.id}
+        entryPath={entryPath}
+        isFile={entry.type === "file"}
+      />
 
       <Actions
         onDownload={onDownload}
@@ -426,6 +429,231 @@ function SelectionPanel({
       />
     </Scroller>
   );
+}
+
+/* ---- the checksum ------------------------------------------------------- */
+
+/**
+ * The INTEGRITY block (TRE-27 §3).
+ *
+ * Four states and no fifth: nothing computed, a job reading it right now, a
+ * digest, and a digest that the file has moved on from. The last one is the
+ * reason this is not a boolean — a checksum taken before somebody rewrote the
+ * file is not a checksum of the file, and the server refuses to serve it, so
+ * what is left to do here is say *why* the line went blank rather than letting
+ * it read as though nothing was ever asked.
+ *
+ * **The digest is truncated on screen and whole in the clipboard.** Sixteen
+ * characters is what fits at this width and is far more than anybody compares
+ * by eye; the tooltip carries all sixty-four for the reader who wants to see
+ * it, and the copy action carries all sixty-four for the one who wants to use
+ * it. Truncating the copied value would be the worst of both.
+ *
+ * A directory keeps the block and says a checksum is per file. Hiding it would
+ * make the panel change height on every selection, and the sentence is what
+ * tells somebody that hashing the folder — which the context menu does offer —
+ * means hashing what is inside it.
+ */
+function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: string; isFile: boolean }) {
+  const queryClient = useQueryClient();
+  const { push } = useToast();
+  const { csrfToken } = useAuth();
+  const hashJob = useHashJob();
+
+  const state = useQuery({
+    queryKey: [QUERY_KEYS.HASH, hostId, entryPath],
+    queryFn: () => fetchHashState(hostId, entryPath),
+    enabled: isFile,
+    staleTime: STALE_MS,
+    /**
+     * A slow poll while a job is running, which the feed below should make
+     * redundant and does not always.
+     *
+     * The feed is the fast path and the reason the line moves at all. What it
+     * cannot cover is a job that **ends before the stream connects** — a small
+     * file, or one the cache already held, finishes in single-digit
+     * milliseconds while `EventSource` is still opening its socket. There is
+     * then no terminal frame to receive, nothing invalidates, and the panel
+     * sits on "computing…" over a digest that has been in the database for a
+     * quarter of an hour. Observed, not theorised: it is what this component
+     * did before this line existed.
+     *
+     * Two seconds rather than the scan panel's five, because a checksum job can
+     * genuinely be over in one — and the cost is a query that ends the moment
+     * `running` goes null.
+     */
+    refetchInterval: (query) => (query.state.data?.running ? 2_000 : false),
+    retry: false,
+    throwOnError: false,
+  });
+
+  /** The live frame for the job covering this file, or null between jobs. */
+  const [frame, setFrame] = useState<HashProgress | null>(null);
+
+  const running = state.data?.running ?? null;
+  // The id, not the object: the effect below must open a stream when a job
+  // starts and close it when that job ends, and depending on the object would
+  // tie a live connection to a reference the React Compiler happens to keep
+  // stable.
+  const jobId = running?.id ?? null;
+
+  useEffect(() => {
+    if (jobId === null) return;
+
+    const source = new EventSource(hashStreamUrl(), { withCredentials: true });
+
+    source.onmessage = (event: MessageEvent<string>) => {
+      const next = parseProgress(event.data);
+      // The feed is per account and carries every job this session started, so
+      // the filter is here — a job hashing the other pane's selection must not
+      // redraw this file's line.
+      if (next === null || next.id !== jobId) return;
+      setFrame(next);
+      if (next.status === "RUNNING") return;
+
+      if (next.status === "FAILED") {
+        push({ tone: "danger", message: "The checksum job failed", detail: next.error ?? undefined });
+      }
+      // The digest is in the database by now, so this is what turns a finished
+      // job into a line of hex without waiting for anything to go stale.
+      void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.HASH] });
+    };
+
+    // Deliberately nothing on error. A network drop is EventSource's own
+    // problem and it retries; a 401 closes it for good, and the next query is
+    // what routes that to the login screen.
+    return () => {
+      source.close();
+      setFrame(null);
+    };
+  }, [jobId, queryClient, push]);
+
+  const hash = state.data?.hash ?? null;
+  const busy = jobId !== null;
+
+  const copy = async () => {
+    if (!hash) return;
+    try {
+      // The whole digest, never the sixteen characters on screen.
+      await navigator.clipboard.writeText(hash.digest);
+      push({ tone: "success", message: "sha256 copied", detail: hash.digest });
+    } catch {
+      push({ tone: "warning", message: "Could not copy", detail: "This browser refused clipboard access." });
+    }
+  };
+
+  const stop = () => {
+    if (jobId === null) return;
+    void cancelHash(jobId, csrfToken).then(
+      () => queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.HASH] }),
+      () => {
+        // A job that ended a moment ago answers 404, which is the outcome the
+        // press was asking for. Nothing to report either way.
+        void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.HASH] });
+      },
+    );
+  };
+
+  return (
+    <section className="border-line flex-none border-t px-2.5 py-2.25">
+      <div className="flex items-baseline justify-between">
+        <Heading>INTEGRITY</Heading>
+        {isFile &&
+          (busy ? (
+            <button
+              type="button"
+              onClick={stop}
+              className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
+            >
+              stop
+            </button>
+          ) : hash ? (
+            <button
+              type="button"
+              onClick={() => void copy()}
+              className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
+            >
+              copy
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => hashJob.mutate({ hostId, paths: [entryPath] })}
+              className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
+            >
+              compute
+            </button>
+          ))}
+      </div>
+
+      {!isFile ? (
+        <p className="text-ink-soft font-mono text-caption">
+          sha256 <span className="text-ink-faint">per file</span>
+        </p>
+      ) : busy ? (
+        <>
+          <p className="text-ink-soft font-mono text-caption">
+            sha256 <span className="text-ink-dim">computing…</span>
+          </p>
+          <p className="text-ink-faint font-mono text-caption">{describeJob(frame, running)}</p>
+        </>
+      ) : hash ? (
+        <>
+          <Tooltip content={hash.digest}>
+            <p className="text-ink-soft font-mono text-caption break-all">
+              sha256 <span className="text-ink">{shortDigest(hash.digest)}…</span>
+            </p>
+          </Tooltip>
+          <p className="text-ink-faint font-mono text-caption">
+            {formatInstant(hash.computedAt)} · {hash.method === "REMOTE" ? "on the host" : "streamed"}
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-ink-soft font-mono text-caption">
+            sha256 <span className="text-ink-faint">not computed</span>
+          </p>
+          {state.data?.superseded && (
+            <p className="text-ink-faint font-mono text-caption">the file changed since it was last hashed</p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The second line while a job runs.
+ *
+ * Files rather than bytes, because files are what the number actually tracks:
+ * `sha256sum` reports nothing until a file is finished, so a byte figure would
+ * advance in jumps the size of whatever it is reading. Before the first frame
+ * arrives there is still something true to say — how many files the job was
+ * accepted with — and saying it beats an empty line that reads as a stall.
+ */
+function describeJob(frame: HashProgress | null, running: { files: number; queued: boolean } | null): string {
+  if (frame === null) {
+    if (running === null) return "";
+    return running.queued ? `${running.files} file(s) · waiting for a slot` : `${running.files} file(s)`;
+  }
+  const failed = frame.filesFailed > 0 ? ` · ${frame.filesFailed} unreadable` : "";
+  return `${frame.filesDone}/${frame.files} file(s)${failed}`;
+}
+
+/**
+ * A frame off the wire, or null.
+ *
+ * Parsed defensively for the reason the scan panel gives: this is the one input
+ * that does not arrive through `apiRequest`, so nothing above it has already
+ * decided the body is JSON.
+ */
+function parseProgress(data: string): HashProgress | null {
+  try {
+    const parsed = JSON.parse(data) as HashProgress;
+    return typeof parsed.id === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 /* ---- the parts every panel is built from -------------------------------- */

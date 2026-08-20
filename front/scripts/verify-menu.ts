@@ -147,6 +147,7 @@ check("the entries shape", ids(resolveActions(context(), "menu")), [
   "chmod",
   "download",
   "link",
+  "hash",
   "copyPath",
   "copyName",
   "favourite",
@@ -159,6 +160,7 @@ check("the directory shape", ids(resolveActions(context({ kind: "directory", ent
   "paste",
   "upload",
   "refresh",
+  "compare",
   "copyPath",
   "favourite",
 ]);
@@ -228,6 +230,26 @@ const TABLE: ReadonlyArray<{
 
   // Kinds.
   { what: "a signed link for a file", context: context(), id: "link", want: null },
+  // Aimed at the two panes rather than at a selection, so it needs a host on
+  // both sides and cares about nothing being selected.
+  {
+    what: "compare with both panes bound",
+    context: context({ kind: "directory", entries: [] }),
+    id: "compare",
+    want: null,
+  },
+  {
+    what: "compare with nothing on the other pane",
+    context: context({ kind: "directory", entries: [], otherHostId: null }),
+    id: "compare",
+    want: "The other pane has no host to compare against",
+  },
+  // A checksum takes many, and a directory among them is expanded into the
+  // files under it rather than refused — so there is no kind rule here.
+  { what: "sha256 of one file", context: context(), id: "hash", want: null },
+  { what: "sha256 of a directory", context: context({ entries: ["dir"] }), id: "hash", want: null },
+  { what: "sha256 of a multi-selection", context: context({ entries: ["file", "dir"] }), id: "hash", want: null },
+  { what: "sha256 with nothing selected", context: context({ entries: [] }), id: "hash", want: NOTHING },
   {
     what: "a signed link for a directory",
     context: context({ entries: ["dir"] }),
@@ -322,12 +344,20 @@ const TABLE: ReadonlyArray<{
     want: NO_HOST,
   },
 
-  // Still unbuilt, and still visible in the toolbar saying so.
+  // Live as of TRE-28. It asks about the two panes' directories, so a
+  // selection neither enables nor disables it — only a host on each side does.
   {
-    what: "compare",
+    what: "compare from the toolbar",
     context: context(),
     id: "compare",
-    want: "Pane comparison arrives in TRE-28",
+    want: null,
+    surface: "toolbar",
+  },
+  {
+    what: "compare from the toolbar with an unbound other pane",
+    context: context({ otherHostId: null }),
+    id: "compare",
+    want: "The other pane has no host to compare against",
     surface: "toolbar",
   },
 

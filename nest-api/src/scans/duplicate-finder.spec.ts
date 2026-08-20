@@ -1,15 +1,10 @@
 import { Readable } from "node:stream";
 import type { ExecStream, HostDriver } from "@hosts/drivers/host-driver";
 import type { AllowedProgram } from "@hosts/drivers/shell-quote";
-import { chunkPaths, confirmDuplicates } from "@scans/duplicate-finder";
+import { chunkPaths, MAX_ARGS_PER_CALL, MAX_ARGV_BYTES } from "@hosts/sha256-sum";
+import { confirmDuplicates } from "@scans/duplicate-finder";
 import type { DuplicateCandidate } from "@scans/scan-aggregator";
-import {
-  HASH_BUDGET_BYTES,
-  MAX_ARGS_PER_CALL,
-  MAX_ARGV_BYTES,
-  MAX_DUP_GROUPS,
-  MAX_HASH_BYTES,
-} from "@scans/scan-limits";
+import { HASH_BUDGET_BYTES, MAX_DUP_GROUPS, MAX_HASH_BYTES } from "@scans/scan-limits";
 
 /**
  * Confirming duplicates by hash (TRE-32 §3).

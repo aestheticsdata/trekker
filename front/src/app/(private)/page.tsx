@@ -56,6 +56,7 @@ export default function HomePage() {
    */
   const [createMode, setCreateMode] = useState<CreateMode | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
   /**
    * A request, not a state (TRE-26).
    *
@@ -142,6 +143,7 @@ export default function HomePage() {
     rename: () => setRenameMode("pattern"),
     download: () => setDownloadRequested(true),
     upload: () => setUploadRequested(true),
+    compare: () => setCompareOpen(true),
     rm: () => setDeleteOpen(true),
   };
   // The toolbar's shape carries no rules, so this drops nothing — it is how the
@@ -315,6 +317,8 @@ export default function HomePage() {
         onUploadRequestedChange={setUploadRequested}
         transferMode={transferMode}
         onTransferMode={setTransferMode}
+        compareOpen={compareOpen}
+        onCompareOpenChange={setCompareOpen}
         onClipboardChange={setClipboard}
         clearClipboardRequested={clearClipboardRequested}
         onClearClipboardRequestedChange={setClearClipboardRequested}

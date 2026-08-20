@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@auth/context/AuthContext";
+import { CompareModal } from "@components/explorer/compare-modal";
 import { CreateModal } from "@components/explorer/create-modal";
 import { DeleteModal } from "@components/explorer/delete-modal";
 import { Inspector } from "@components/explorer/inspector";
@@ -33,11 +34,13 @@ import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
 import { startTransfer } from "@lib/api/transfers";
 import { QUERY_KEYS } from "@lib/query/keys";
+import { useHashJob } from "@lib/query/use-hash-job";
 import { useSignedLink } from "@lib/query/use-signed-link";
 import { warmDirectory } from "@lib/query/warm-directory";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useRef, useState } from "react";
 
+import type { CompareCopy, CompareTarget } from "@components/explorer/compare-modal";
 import type { CreateMode, CreateTarget } from "@components/explorer/create-modal";
 import type { DeleteTargetSelection } from "@components/explorer/delete-modal";
 import type { PaneCallbacks } from "@components/explorer/pane";
@@ -50,6 +53,7 @@ import type { SplitMode } from "@components/shell/toolbar";
 import type { Clipboard, ClipboardMode } from "@helpers/clipboard";
 import type { SortKey } from "@helpers/listing";
 import type { Point } from "@helpers/menu";
+import type { CompareEntry, CompareResult } from "@lib/api/compare";
 import type { DiskMount } from "@lib/api/disks";
 import type { FileRow } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
@@ -124,6 +128,8 @@ export function Explorer({
   onUploadRequestedChange,
   transferMode,
   onTransferMode,
+  compareOpen,
+  onCompareOpenChange,
   onClipboardChange,
   clearClipboardRequested,
   onClearClipboardRequestedChange,
@@ -208,6 +214,13 @@ export function Explorer({
   transferMode: "copy" | "move" | null;
   onTransferMode: (mode: "copy" | "move" | null) => void;
   /**
+   * The toolbar's `compare ⇄` button (TRE-28). Owned by the page like the
+   * others, and a boolean rather than a target: what it compares is always the
+   * two panes' own directories, which this component already knows.
+   */
+  compareOpen: boolean;
+  onCompareOpenChange: (open: boolean) => void;
+  /**
    * What the clipboard is holding, in the one sentence the status bar shows
    * (TRE-71 §3) — null when it is holding nothing.
    *
@@ -253,6 +266,15 @@ export function Explorer({
    */
   const [paste, setPaste] = useState<PasteInFlight | null>(null);
   /**
+   * A row of the comparison, on its way to the transfer modal (TRE-28 §3).
+   *
+   * Its own slot rather than `transferMode`'s, because that one is built from
+   * the active pane's selection and this one is built from a row somebody
+   * clicked in a list — the source may be the *right* pane, which `copyTo` can
+   * never mean.
+   */
+  const [compareCopy, setCompareCopy] = useState<CompareCopy | null>(null);
+  /**
    * The open context menu, or null (TRE-70 §5).
    *
    * One for both panes, holding which pane opened it, where the pointer was and
@@ -263,6 +285,7 @@ export function Explorer({
    */
   const [menu, setMenu] = useState<{ pane: PaneIndex; point: Point; name: string | null } | null>(null);
   const signedLink = useSignedLink();
+  const hashJob = useHashJob();
 
   const views: [PaneView, PaneView] = [
     { ...memory.panes[0], hostId: panes[0].host, path: panes[0].path, sort: panes[0].sort, dir: panes[0].dir },
@@ -381,6 +404,7 @@ export function Explorer({
     deleteOpen ||
     transferMode !== null ||
     paste !== null ||
+    compareOpen ||
     menu !== null;
 
   useEffect(() => {
@@ -530,6 +554,65 @@ export function Explorer({
           dstHostId: otherPane.hostId,
           dstPath: otherPane.path,
         };
+
+  /**
+   * What a comparison is aimed at (TRE-28 §3).
+   *
+   * Both panes' own directories, always. Never the selection: "compare these
+   * three files with the other pane" is a different question, and one nothing
+   * in the mockup or the ticket asks. The two labels are the host names, so the
+   * modal's header says which machine is on which side rather than leaving two
+   * absolute paths to be told apart by eye.
+   */
+  const compareTarget: CompareTarget | null =
+    !compareOpen || activePane.hostId === null || otherPane.hostId === null
+      ? null
+      : {
+          a: {
+            hostId: activePane.hostId,
+            path: activePane.path,
+            label: hosts.find((host) => host.id === activePane.hostId)?.label ?? "left",
+          },
+          b: {
+            hostId: otherPane.hostId,
+            path: otherPane.path,
+            label: hosts.find((host) => host.id === otherPane.hostId)?.label ?? "right",
+          },
+        };
+
+  const compareEmpty = compareOpen && !hostsPending && compareTarget === null;
+  useEffect(() => {
+    if (!compareEmpty) return;
+    onCompareOpenChange(false);
+    push({ tone: "info", message: "Nothing to compare", detail: "Both panes need a host" });
+  }, [compareEmpty, onCompareOpenChange, push]);
+
+  /**
+   * A row of the comparison, opened in both panes.
+   *
+   * Both panes go to the directory that holds it and put the cursor on the
+   * name — the pane that does not have the entry simply shows nothing
+   * selected, which is the honest drawing of "only on the other side". The
+   * roots come from the *result* rather than from the panes: they are the
+   * resolved paths the server actually walked, and a pane that had been given a
+   * symlinked path would otherwise be sent somewhere the comparison never
+   * looked.
+   */
+  const revealCompared = (entry: CompareEntry, result: CompareResult) => {
+    const relative = entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "";
+    const name = entry.path.slice(entry.path.lastIndexOf("/") + 1);
+    const sides = [
+      { index: active, root: result.a.path, hostId: result.a.hostId },
+      { index: active === 0 ? 1 : 0, root: result.b.path, hostId: result.b.hostId },
+    ] as const;
+
+    for (const side of sides) {
+      const directory = relative === "" ? side.root : `${side.root}/${relative}`;
+      dispatch({ type: "navigate", pane: side.index, path: directory });
+      onPaneChange(side.index, { host: side.hostId, path: directory });
+      dispatch({ type: "reveal", pane: side.index, name });
+    }
+  };
 
   // Answered once the pane knows its own contents, and not while it is still
   // loading them — the same shape the rename and delete use, and for the same
@@ -865,6 +948,17 @@ export function Explorer({
         return;
       case "link":
         if (first && hostId !== null) signedLink.mutate({ hostId, path: joinPath(view.path, first.name) });
+        return;
+      case "compare":
+        onCompareOpenChange(true);
+        return;
+      case "hash":
+        // Every selected entry, not just the first: a directory among them is
+        // expanded server-side into the files under it, so "hash this folder"
+        // and "hash these four files" are one request.
+        if (hostId !== null && menuEntries.length > 0) {
+          hashJob.mutate({ hostId, paths: menuEntries.map((entry) => joinPath(view.path, entry.name)) });
+        }
         return;
       case "copyPath":
         void toClipboard(first ? joinPath(view.path, first.name) : view.path, "Path copied");
@@ -1558,6 +1652,38 @@ export function Explorer({
               }
             }
           }}
+        />
+      )}
+
+      {compareTarget && (
+        <CompareModal
+          target={compareTarget}
+          onClose={() => onCompareOpenChange(false)}
+          onReveal={revealCompared}
+          onCopy={(copy) => {
+            // The comparison closes rather than stacking a second dialog over
+            // itself: `Overlay` listens for ⎋ on the window, so two open at
+            // once would both answer one keypress. The tree is about to change
+            // underneath the list anyway, which is the other reason not to
+            // return to it.
+            onCompareOpenChange(false);
+            setCompareCopy(copy);
+          }}
+        />
+      )}
+
+      {compareCopy && (
+        <TransferModal
+          target={{
+            operation: "copy",
+            srcHostId: compareCopy.srcHostId,
+            srcPaths: [compareCopy.srcPath],
+            dstHostId: compareCopy.dstHostId,
+            dstPath: compareCopy.dstPath,
+          }}
+          hosts={hosts}
+          onClose={() => setCompareCopy(null)}
+          onStarted={() => setCompareCopy(null)}
         />
       )}
 

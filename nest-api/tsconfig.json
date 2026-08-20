@@ -17,11 +17,13 @@
     "paths": {
       "@audit/*": ["./src/audit/*"],
       "@bookmarks/*": ["./src/bookmarks/*"],
+      "@compare/*": ["./src/compare/*"],
       "@config/*": ["./src/config/*"],
       "@infrastructure/*": ["./src/infrastructure/*"],
       "@redis/*": ["./src/redis/*"],
       "@database/*": ["./src/database/*"],
       "@fs/*": ["./src/fs/*"],
+      "@hashes/*": ["./src/hashes/*"],
       "@health/*": ["./src/health/*"],
       "@hosts/*": ["./src/hosts/*"],
       "@scans/*": ["./src/scans/*"],

@@ -21,6 +21,27 @@ export const QUERY_KEYS = {
   HOST_DISKS: "hostDisks",
   /** The disk-usage panel's whole payload (TRE-33): last scan, running scan, one level. */
   SCAN: "scan",
+  /**
+   * One file's sha256 (TRE-27): what is cached, and what is being computed.
+   *
+   * Keyed by host and path, and asked for by the inspector alone. Its own key
+   * rather than part of the entry's: answering it costs the server a `stat` on
+   * the machine and a row read, and the panel refetches it whenever a job that
+   * covers the file finishes — which has nothing to do with when a listing goes
+   * stale.
+   */
+  HASH: "hash",
+  /**
+   * A comparison of the two panes (TRE-28). Keyed by both sides and the depth,
+   * so re-opening the modal on the same pair redraws from cache while a
+   * different pair is a fresh walk of two machines.
+   *
+   * Never refetched on focus: the list is something somebody is reading and
+   * acting on row by row, and a list that reshuffled under the cursor would
+   * scatter those actions across a different one — the same rule the transfer
+   * plan and the delete plan follow.
+   */
+  COMPARE: "compare",
   BOOKMARKS: "bookmarks",
   DIRECTORY: "directory",
   ENTRY: "entry",

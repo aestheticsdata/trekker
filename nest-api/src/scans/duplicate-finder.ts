@@ -1,13 +1,8 @@
+import { chunkPaths, sumChunk } from "@hosts/sha256-sum";
+
 import type { HostDriver } from "@hosts/drivers/host-driver";
 import type { DuplicateCandidate } from "@scans/scan-aggregator";
-import {
-  HASH_BUDGET_BYTES,
-  MAX_ARGS_PER_CALL,
-  MAX_ARGV_BYTES,
-  MAX_DUP_GROUPS,
-  MAX_HASH_BYTES,
-  SCAN_NICE,
-} from "@scans/scan-limits";
+import { HASH_BUDGET_BYTES, MAX_DUP_GROUPS, MAX_HASH_BYTES, SCAN_NICE } from "@scans/scan-limits";
 
 /**
  * Which same-size groups are actually the same file (TRE-32 §3).
@@ -26,9 +21,10 @@ import {
  * could afford to check, and the difference is what somebody decides to delete
  * things on.
  *
- * `sha256sum` takes many paths in one argv, which is exactly why it is on the
- * allowlist and why no shell loop, `xargs` or `find -exec` appears anywhere
- * here. The chunking below is about `ARG_MAX`, not about the absence of a shell.
+ * Running `sha256sum` and reading its output is `@hosts/sha256-sum`, shared with
+ * TRE-27's checksum jobs. What is left here is the part that is about
+ * duplicates rather than about digests: which groups are worth the read, what
+ * the budget stops, and how a group of digests becomes a count of copies.
  */
 
 export interface DuplicateReport {
@@ -48,13 +44,6 @@ export const NO_DUPLICATES: DuplicateReport = Object.freeze({
   skipped: 0,
   reclaimableBytes: 0n,
 });
-
-/**
- * GNU `sha256sum` prints `<64 hex><two spaces><path>`, and escapes the path
- * when it contains a backslash or a newline: the line is then prefixed with a
- * backslash and those two characters appear as `\\` and `\n`.
- */
-const SUM_LINE = /^(\\?)([0-9a-f]{64})\s{2}(.+)$/;
 
 export interface DuplicateFinderDeps {
   driver: HostDriver;
@@ -140,10 +129,13 @@ export async function confirmDuplicates(
 /**
  * One group's digests, or null when the host could not give them.
  *
- * Chunked by argument count *and* argv bytes, because either can bite first:
- * sixty-four short paths are nothing and sixty-four very long ones exceed what
- * a command line will carry — and over SSH the argv also has to survive being
- * rendered as a shell string.
+ * Chunked because either bound can bite first — see `chunkPaths`. A host with
+ * no `sha256sum` is treated exactly as a host that refused: the pass reports
+ * the group as unchecked and moves on. Falling back to reading every candidate
+ * across the network, which is what TRE-27 does for a checksum somebody
+ * actually asked for, is the wrong trade here — this is a side pass of a disk
+ * scan, and nobody asked for it hard enough to spend a filesystem's worth of
+ * bandwidth on it.
  */
 async function hashGroup(paths: readonly string[], deps: DuplicateFinderDeps): Promise<Map<string, string> | null> {
   const digests = new Map<string, string>();
@@ -151,82 +143,11 @@ async function hashGroup(paths: readonly string[], deps: DuplicateFinderDeps): P
   for (const chunk of chunkPaths(paths)) {
     if (deps.signal.aborted) return null;
 
-    const output = await runSum(chunk, deps);
-    if (output === null) return null;
+    const outcome = await sumChunk(deps.driver, chunk, { signal: deps.signal, nice: SCAN_NICE });
+    if (outcome.kind !== "digests") return null;
 
-    for (const line of output.split("\n")) {
-      const fields = SUM_LINE.exec(line.trimEnd());
-      if (!fields) continue;
-      digests.set(unescapePath(fields[3], fields[1] === "\\"), fields[2]);
-    }
+    for (const [path, digest] of outcome.digests) digests.set(path, digest);
   }
 
   return digests;
-}
-
-/**
- * `sha256sum` over one chunk, streamed.
- *
- * Streamed rather than buffered, and the reason is cancellation rather than
- * volume: the output is sixty-five bytes a file. A buffered `exec` would make
- * the cancel latency one whole chunk, and a chunk of sixty-four files at up to
- * two gigabytes each is minutes — which fails the same "stops within a few
- * seconds" the walk itself satisfies.
- */
-async function runSum(chunk: readonly string[], deps: DuplicateFinderDeps): Promise<string | null> {
-  // A driver that cannot stream cannot confirm anything, and every group is
-  // then reported as a candidate nobody checked rather than as no duplicates.
-  if (!deps.driver.execStream) return null;
-
-  try {
-    const running = await deps.driver.execStream("sha256sum", ["--", ...chunk], {
-      signal: deps.signal,
-      nice: SCAN_NICE,
-    });
-
-    let out = "";
-    for await (const piece of running.stdout) {
-      out += (piece as Buffer).toString("utf8");
-    }
-    const result = await running.done;
-    // A non-zero exit still prints the files it could read, exactly as `du`
-    // does. What it could not read simply has no line, and a member with no
-    // digest cannot match another — so a partly-readable group under-reports
-    // rather than claiming a match it did not verify.
-    return result.code === 0 || out.length > 0 ? out : null;
-  } catch {
-    // A host that refused the command, a channel that dropped. One group's
-    // problem, not the scan's.
-    return null;
-  }
-}
-
-/** Bounded by both the argument count and the total argv size. */
-export function chunkPaths(paths: readonly string[]): string[][] {
-  const chunks: string[][] = [];
-  let current: string[] = [];
-  let bytes = 0;
-
-  for (const path of paths) {
-    // Quoting can nearly double a path's rendered length, so the estimate is
-    // deliberately pessimistic — running out of command line is a failure the
-    // caller sees as "this host cannot hash", which is not what happened.
-    const cost = path.length * 2 + 4;
-    if (current.length > 0 && (current.length >= MAX_ARGS_PER_CALL || bytes + cost > MAX_ARGV_BYTES)) {
-      chunks.push(current);
-      current = [];
-      bytes = 0;
-    }
-    current.push(path);
-    bytes += cost;
-  }
-
-  if (current.length > 0) chunks.push(current);
-  return chunks;
-}
-
-/** Undo `sha256sum`'s own escaping, which it applies only to the flagged lines. */
-function unescapePath(path: string, escaped: boolean): string {
-  if (!escaped) return path;
-  return path.replace(/\\n/g, "\n").replace(/\\\\/g, "\\");
 }

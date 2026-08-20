@@ -133,6 +133,19 @@ enum ScanEntryKind {
   OTHER
 }
 
+/// Which machine read the bytes (TRE-27 §1).
+///
+/// Stored rather than inferred, because the two are not equivalent work and
+/// the difference is worth being able to see afterwards. `REMOTE` is
+/// `sha256sum` on the host, which reads the file where it already is.
+/// `STREAMED` means the host has no `sha256sum`, so every byte crossed the
+/// network into this process to be hashed here — the same digest at a cost
+/// that scales with the link rather than with the disk.
+enum HashMethod {
+  REMOTE
+  STREAMED
+}
+
 // ---------------------------------------------------------------- account
 
 model Users {
@@ -218,6 +231,7 @@ model Hosts {
   roots        HostRoots[]
   bookmarks    Bookmarks[]
   diskScans    DiskScans[]
+  fileHashes   FileHashes[]
   transfersOut TransferJobs[]   @relation("TransferSource")
   transfersIn  TransferJobs[]   @relation("TransferDestination")
   activity     ActivityLog[]
@@ -560,6 +574,71 @@ model DiskScanEntries {
 
   @@index([scanId, bytes(sort: Desc)])
   @@index([scanId, parentPath(length: 191), bytes(sort: Desc)])
+}
+
+// ---------------------------------------------------------------- checksums
+
+/// One file's sha256, remembered (TRE-27 §2).
+///
+/// **These rows are the durable half of a hash job, and the only half.** The
+/// job itself lives in this process and nowhere else — no `HashJobs` table, no
+/// `runningSlot`, no boot sweep — which is the opposite of what `DiskScans`
+/// does and is deliberate. A scan produces one answer at the end, so an
+/// interrupted scan has nothing to keep and the row it left behind has to be
+/// reaped. A hash job produces one answer *per file*, written here as each
+/// file finishes, so a restart halfway through a hundred-file job loses the
+/// job and keeps the ninety-one digests it had already earned. There is
+/// nothing to reconcile and therefore nothing to sweep; re-queueing the rest
+/// is one click and skips everything already cached.
+///
+/// The same shape is what makes cancelling cheap: stopping a job abandons the
+/// files it had not reached and keeps every one it had.
+model FileHashes {
+  id     String @id @default(uuid(7)) @db.Char(36)
+  hostId String @db.Char(36)
+  path   String @db.VarChar(700)
+
+  /// A 64-character lowercase hex digest. `Char`, not `VarChar`: sha256 has
+  /// exactly one length, and a column that cannot hold anything else is one
+  /// fewer thing to validate on the way out.
+  digest String @db.Char(64)
+
+  /// The size and mtime the file had **when it was read**, which together are
+  /// the cache key's other half.
+  ///
+  /// A lookup matches on (host, path) and is then only usable if both of these
+  /// still agree with a fresh `stat`. That is a cheap, conservative test rather
+  /// than a correct one — a file rewritten to the same length within the same
+  /// millisecond keeps its old digest — and it is the right trade at this
+  /// price: the alternative to a heuristic is re-reading twenty gigabytes to
+  /// find out nothing changed. What it must never do is fail the other way, and
+  /// it cannot: every ordinary write moves the mtime.
+  ///
+  /// `BigInt` for the mtime rather than `DateTime`, because it is compared for
+  /// equality against `FileStat.mtimeMs` and never rendered. Storing it as a
+  /// date would round-trip it through two timezone-aware layers to answer a
+  /// question that is exactly "is this the same number".
+  size    BigInt
+  mtimeMs BigInt
+
+  /// Which machine actually read the bytes. Reported to the client because a
+  /// checksum whose provenance is invisible is one nobody can second-guess.
+  method HashMethod
+
+  computedAt DateTime @default(now())
+
+  host Hosts @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  /// One row per file, replaced when the file changes. Not `(hostId, path,
+  /// size, mtimeMs)`: a unique key over all four keeps a row for every version
+  /// a file has ever had, and every one of them except the newest is a digest
+  /// of bytes that no longer exist anywhere. The stale ones would accumulate
+  /// forever behind a lookup that can never return them.
+  ///
+  /// 36 + 700 characters at 4 bytes each is 2 944, inside InnoDB's 3 072-byte
+  /// key — so this one needs no prefix, unlike the scan indexes above.
+  @@unique([hostId, path])
+  @@index([hostId, computedAt(sort: Desc)])
 }
 
 // ---------------------------------------------------------------- audit
