@@ -20,25 +20,29 @@ import { RenameModal } from "@components/explorer/rename-modal";
 import { TerminalPanel } from "@components/explorer/terminal-panel";
 import { TransferModal } from "@components/explorer/transfer-modal";
 import { HostManager } from "@components/hosts/host-manager";
-import { resolveActions } from "@components/shell/actions";
+import { isRule, resolveActions } from "@components/shell/actions";
+import { Palette } from "@components/shell/palette";
 import { CollapsiblePane } from "@components/ui/collapsible-pane";
 import { ContextMenu } from "@components/ui/context-menu";
 import { useToast } from "@components/ui/toast";
 import { useUploads } from "@components/ui/uploads";
 import { cutNamesIn, describeClipboard, nameList, resolvePaste, splitHeld } from "@helpers/clipboard";
 import { volumeFor } from "@helpers/disks";
+import { commandFor, hintFor, KEYS, matches } from "@helpers/keys";
 import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
-import { createBookmark } from "@lib/api/bookmarks";
+import { ACTION_GLYPH, GLYPH } from "@helpers/palette";
+import { createBookmark, fetchBookmarks } from "@lib/api/bookmarks";
 import { ApiError } from "@lib/api/client";
 import { fetchDisks } from "@lib/api/disks";
 import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
+import { fetchHostSummary } from "@lib/api/hosts";
 import { startTransfer } from "@lib/api/transfers";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useHashJob } from "@lib/query/use-hash-job";
 import { useSignedLink } from "@lib/query/use-signed-link";
 import { warmDirectory } from "@lib/query/warm-directory";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import type { CompareCopy, CompareTarget } from "@components/explorer/compare-modal";
@@ -51,8 +55,10 @@ import type { RenameMode, RenameTarget } from "@components/explorer/rename-modal
 import type { TerminalDelete, TerminalPermissions, TerminalWorld } from "@components/explorer/terminal-runner";
 import type { TransferTarget } from "@components/explorer/transfer-modal";
 import type { ActionContext, ActionId, TargetKind } from "@components/shell/actions";
+import type { PaletteEntry } from "@components/shell/palette";
 import type { SplitMode } from "@components/shell/toolbar";
 import type { Clipboard, ClipboardMode } from "@helpers/clipboard";
+import type { Chord } from "@helpers/keys";
 import type { SortKey } from "@helpers/listing";
 import type { Point } from "@helpers/menu";
 import type { CompareEntry, CompareResult } from "@lib/api/compare";
@@ -77,6 +83,27 @@ import type { HostView } from "@lib/api/hosts";
 
 /** Fresh enough that a chmod shows up, slow enough not to refetch on a glance. */
 const STALE_MS = 10_000;
+
+/**
+ * How many recent directories the palette's GO TO group offers (TRE-36 §1).
+ *
+ * A stop rather than an estimate. The back stack is unbounded and a pane driven
+ * around for an hour holds hundreds of directories, most of them passed through
+ * on the way to somewhere else — offering all of them would bury the handful
+ * that were chosen under the ninety that were not.
+ *
+ * Favourites are not capped alongside them, deliberately: that list is one
+ * somebody curated and the sidebar shows all of it, so a palette that showed
+ * some of it would be the surface that disagrees.
+ */
+const RECENT_LIMIT = 6;
+
+/** The split, as three entries rather than a toggle — the toolbar has three. */
+const SPLITS: ReadonlyArray<{ mode: SplitMode; label: string; detail: string }> = [
+  { mode: "split", label: "show both panes", detail: "the two directories side by side" },
+  { mode: "left", label: "left pane only", detail: "the right one collapses" },
+  { mode: "right", label: "right pane only", detail: "the left one collapses" },
+];
 
 /** One pane's share of the URL. */
 export interface PaneUrl {
@@ -109,7 +136,9 @@ export function Explorer({
   onGlobChange,
   onMatchesChange,
   splitMode,
+  onSplitModeChange,
   heat,
+  onHeatChange,
   inspector,
   onInspectorChange,
   animate,
@@ -136,6 +165,8 @@ export function Explorer({
   onCompareOpenChange,
   terminalOpen,
   onTerminalOpenChange,
+  paletteOpen,
+  onPaletteOpenChange,
   onClipboardChange,
   clearClipboardRequested,
   onClearClipboardRequestedChange,
@@ -154,7 +185,10 @@ export function Explorer({
   /** Reported up so the toolbar's hit count can show it. */
   onMatchesChange: (matches: number | null) => void;
   splitMode: SplitMode;
+  /** The palette reaches the split too, so it needs the setter the toolbar has. */
+  onSplitModeChange: (mode: SplitMode) => void;
   heat: boolean;
+  onHeatChange: (heat: boolean) => void;
   /** Whether the 218px panel is showing (TRE-17 §4). URL-backed, like the split. */
   inspector: boolean;
   onInspectorChange: (open: boolean) => void;
@@ -232,6 +266,12 @@ export function Explorer({
    */
   terminalOpen: boolean;
   onTerminalOpenChange: (open: boolean) => void;
+  /**
+   * Whether the ⌘K palette is showing (TRE-36). Owned by the page like the
+   * terminal, because the top bar's chip opens it and the top bar is up there.
+   */
+  paletteOpen: boolean;
+  onPaletteOpenChange: (open: boolean) => void;
   /**
    * What the clipboard is holding, in the one sentence the status bar shows
    * (TRE-71 §3) — null when it is holding nothing.
@@ -431,6 +471,7 @@ export function Explorer({
     compareOpen ||
     terminalPermissions !== null ||
     terminalDelete !== null ||
+    paletteOpen ||
     menu !== null;
 
   useEffect(() => {
@@ -893,24 +934,25 @@ export function Explorer({
   };
 
   /**
-   * What choosing an entry does (TRE-70 §4).
+   * What choosing an entry does (TRE-70 §4), wherever it was chosen.
    *
    * Every one of these is the thing the toolbar button or the shortcut already
    * does — the same setter, opening the same modal, against the same target.
-   * None of them is a second path to a dialogue, which is what keeps the menu
+   * None of them is a second path to a dialogue, which is what keeps a surface
    * from developing its own opinions about what `rm` means.
+   *
+   * Three callers now: the context menu, aimed at what was right-clicked; the
+   * ⌘K palette, aimed at the active pane's selection (TRE-36 §1); and the
+   * F-keys, which are the same operations under a chord. Taking the pane and
+   * the entries as arguments is what lets them share one dispatcher rather than
+   * three that drift.
    */
-  const chooseAction = (id: string) => {
-    const opened = menu;
-    setMenu(null);
-    if (opened === null) return;
-
-    const index = opened.pane;
+  const performAction = (id: ActionId, index: PaneIndex, entries: readonly FileRow[]) => {
     const view = views[index];
     const hostId = view.hostId;
-    const first = menuEntries[0] ?? null;
+    const first = entries[0] ?? null;
 
-    switch (id as ActionId) {
+    switch (id) {
       case "newDir":
         onCreateMode("dir");
         return;
@@ -961,7 +1003,7 @@ export function Explorer({
       case "rename":
         // One entry opens on the name and a selection on the pattern, which is
         // the rule F2 already follows.
-        onRenameMode(menuEntries.length === 1 ? "name" : "pattern");
+        onRenameMode(entries.length === 1 ? "name" : "pattern");
         return;
       case "chmod":
         onPermissionsOpenChange(true);
@@ -989,8 +1031,8 @@ export function Explorer({
         // Every selected entry, not just the first: a directory among them is
         // expanded server-side into the files under it, so "hash this folder"
         // and "hash these four files" are one request.
-        if (hostId !== null && menuEntries.length > 0) {
-          hashJob.mutate({ hostId, paths: menuEntries.map((entry) => joinPath(view.path, entry.name)) });
+        if (hostId !== null && entries.length > 0) {
+          hashJob.mutate({ hostId, paths: entries.map((entry) => joinPath(view.path, entry.name)) });
         }
         return;
       case "copyPath":
@@ -1008,6 +1050,13 @@ export function Explorer({
       default:
         return;
     }
+  };
+
+  /** The context menu's half: put it away, then act on what it was about. */
+  const chooseAction = (id: string) => {
+    const opened = menu;
+    setMenu(null);
+    if (opened !== null) performAction(id as ActionId, opened.pane, menuEntries);
   };
 
   /**
@@ -1156,6 +1205,9 @@ export function Explorer({
     onPaneChange(index, { path });
   };
 
+  /** The machine the active pane is on, or null while nothing is bound to it. */
+  const activeHost = hosts.find((host) => host.id === activePane.hostId) ?? null;
+
   /**
    * What the terminal is standing on, or null while the pane has no host.
    *
@@ -1164,12 +1216,11 @@ export function Explorer({
    * terminal a keyboard interface to the explorer rather than a second one
    * beside it (TRE-35 §2).
    */
-  const terminalHost = hosts.find((host) => host.id === activePane.hostId) ?? null;
   const terminalWorld: TerminalWorld | null =
-    terminalHost === null
+    activeHost === null
       ? null
       : {
-          host: terminalHost,
+          host: activeHost,
           cwd: activePane.path,
           hosts,
           queryClient,
@@ -1198,6 +1249,206 @@ export function Explorer({
           openPermissions: setTerminalPermissions,
           openDelete: setTerminalDelete,
         };
+
+  /**
+   * A line the palette handed over, waiting for the terminal to open (TRE-36 §2).
+   *
+   * ⌘K with something typed that matches no entry runs it in the terminal
+   * instead, which is 2a's own fallback and stays honest against a restricted
+   * command set: TRE-35's parser either runs the line or prints the refusal
+   * that lists what it does take, and either answer beats a dead keypress on an
+   * empty list. Held here rather than pushed, because the panel is the thing
+   * with a buffer and a prompt and it may not be open yet.
+   */
+  const [pendingCommand, setPendingCommand] = useState<string | null>(null);
+
+  // ---------------------------------------------------------- the ⌘K palette
+
+  /**
+   * The favourites its GO TO group offers (TRE-36 §1).
+   *
+   * The same query key the sidebar's favourites panel uses, so the two are one
+   * request between them and the palette opens with the list already in hand.
+   */
+  const { data: bookmarks } = useQuery({
+    queryKey: [QUERY_KEYS.BOOKMARKS],
+    queryFn: fetchBookmarks,
+    staleTime: 60_000,
+    throwOnError: false,
+  });
+
+  /**
+   * One reading per host, for the second line of the SERVERS group.
+   *
+   * `enabled` on the palette being open, so a closed one costs nothing: this
+   * subscribes to the very entries the sidebar is already keeping warm, and
+   * asks for them itself only if the sidebar is not there to have done it. A
+   * read straight out of the cache would have been cheaper still and wrong —
+   * it would not re-render when the answer landed, and a ping that appears one
+   * keystroke after the panel does is worse than one that was never promised.
+   */
+  const summaries = useQueries({
+    queries: hosts.map((host) => ({
+      queryKey: [QUERY_KEYS.HOST_SUMMARY, host.id],
+      queryFn: () => fetchHostSummary(host.id),
+      enabled: paletteOpen,
+      staleTime: 10_000,
+      retry: false,
+      throwOnError: false,
+    })),
+  });
+
+  /** Point a pane at a host's home — both writes, as `openOther` issues them. */
+  const bindPane = (index: PaneIndex, host: HostView) => {
+    dispatch({ type: "navigate", pane: index, path: host.homePath });
+    onPaneChange(index, { host: host.id, path: host.homePath });
+  };
+
+  /**
+   * Everything the palette offers, built when it is asked for.
+   *
+   * A function rather than a value, for the reason `clickNames` below is one:
+   * this component re-renders on every arrow key, and reversing an unbounded
+   * history stack to answer a question nobody has asked is the shape TRE-19
+   * spent its time removing.
+   *
+   * ACTIONS is `resolveActions` under a third surface and `performAction` under
+   * a third caller, which is the whole reason both take arguments: what an
+   * operation is called, what it needs and what pressing it does are answered
+   * once, and the palette gets the same answers the toolbar and the menu do.
+   *
+   * VIEWS is absent, and deliberately so. There are no saved views yet — TRE-37
+   * builds them — and a group header over nothing is not a feature waiting to
+   * happen, it is a claim about what this app has.
+   */
+  const paletteEntries = (): readonly PaletteEntry[] => {
+    /**
+     * Where this pane can go: its host's home, its favourites, and where it has
+     * been.
+     *
+     * Deduplicated against each other and against the directory it is standing
+     * in, best-known first — a favourite is somewhere that was chosen, a recent
+     * is somewhere that was passed through, and an entry offering to take you
+     * where you already are is a row that costs a reading and does nothing.
+     */
+    const goToEntries: PaletteEntry[] = [];
+    const offered = new Set<string>([activePane.path]);
+    if (activeHost !== null && !offered.has(activeHost.homePath)) {
+      offered.add(activeHost.homePath);
+      goToEntries.push({
+        id: "go:home",
+        group: "GO TO",
+        icon: GLYPH.goTo,
+        label: activeHost.homePath,
+        detail: `home directory on ${activeHost.label}`,
+        run: () => go(active, activeHost.homePath),
+      });
+    }
+    for (const bookmark of bookmarks ?? []) {
+      if (bookmark.hostId !== activePane.hostId || offered.has(bookmark.path)) continue;
+      offered.add(bookmark.path);
+      goToEntries.push({
+        id: `go:favourite:${bookmark.id}`,
+        group: "GO TO",
+        icon: GLYPH.goTo,
+        label: bookmark.path,
+        detail:
+          bookmark.hint === null ? `favourite · ${bookmark.label}` : `favourite · ${bookmark.label} · ${bookmark.hint}`,
+        run: () => go(active, bookmark.path),
+      });
+    }
+    let recents = 0;
+    for (const path of [...activePane.hist].reverse()) {
+      if (offered.has(path)) continue;
+      offered.add(path);
+      recents += 1;
+      goToEntries.push({
+        id: `go:recent:${path}`,
+        group: "GO TO",
+        icon: GLYPH.goTo,
+        label: path,
+        detail: "recently in this pane",
+        run: () => go(active, path),
+      });
+      if (recents === RECENT_LIMIT) break;
+    }
+
+    return [
+      ...goToEntries,
+
+      ...resolveActions(toolbarContext, "palette").flatMap((row): PaletteEntry[] =>
+        isRule(row)
+          ? []
+          : [
+              {
+                id: `action:${row.id}`,
+                group: "ACTIONS",
+                icon: ACTION_GLYPH[row.id],
+                label: row.label,
+                detail: row.note ?? "",
+                hint: row.hint,
+                unavailableReason: row.unavailableReason,
+                danger: row.danger,
+                run: () => performAction(row.id, active, toolbarEntries),
+              },
+            ],
+      ),
+
+      {
+        id: "view:inspector",
+        group: "VIEW",
+        icon: GLYPH.inspector,
+        label: inspector ? "hide the inspector" : "show the inspector",
+        detail: "the panel beside the panes",
+        hint: hintFor("inspector"),
+        run: () => onInspectorChange(!inspector),
+      },
+      ...SPLITS.map(
+        (split): PaletteEntry => ({
+          id: `view:split:${split.mode}`,
+          group: "VIEW",
+          icon: GLYPH.split,
+          label: split.label,
+          detail: split.detail,
+          unavailableReason: splitMode === split.mode ? "The panes are already like this" : undefined,
+          run: () => onSplitModeChange(split.mode),
+        }),
+      ),
+      {
+        id: "view:heat",
+        group: "VIEW",
+        icon: GLYPH.heat,
+        label: heat ? "hide the age heat map" : "show the age heat map",
+        detail: "colour every row by how long ago it changed",
+        run: () => onHeatChange(!heat),
+      },
+
+      {
+        id: "shell:terminal",
+        group: "SHELL",
+        icon: GLYPH.shell,
+        label: terminalOpen ? "close the terminal" : "open the terminal here",
+        detail: activePane.path,
+        hint: hintFor("terminal"),
+        run: () => onTerminalOpenChange(!terminalOpen),
+      },
+
+      ...hosts.map((host, index): PaletteEntry => {
+        const summary = summaries[index]?.data;
+        const where = host.transport === "LOCAL" ? "local" : `${host.username ?? "?"}@${host.address ?? "?"}`;
+        const ping = summary?.pingMs == null ? "—" : `${summary.pingMs} ms`;
+        return {
+          id: `server:${host.id}`,
+          group: "SERVERS",
+          icon: GLYPH.server,
+          label: `connect this pane to ${host.label}`,
+          detail: `${where} · ${ping}`,
+          unavailableReason: host.id === activePane.hostId ? "This pane is already on it" : undefined,
+          run: () => bindPane(active, host),
+        };
+      }),
+    ];
+  };
 
   const open = (index: PaneIndex, row: FileRow) => {
     if (row.type === "dir") {
@@ -1239,17 +1490,24 @@ export function Explorer({
       const rowNames = rendered[index].rows.map((row) => row.name);
       const names = up ? [PARENT_NAME, ...rowNames] : rowNames;
 
-      switch (event.key) {
-        case "Tab":
-          onActiveChange(index === 0 ? 1 : 0);
-          return true;
-        case "ArrowDown":
-          dispatch({ type: "move", pane: index, delta: 1, names });
-          return true;
-        case "ArrowUp":
-          dispatch({ type: "move", pane: index, delta: -1, names });
-          return true;
-        case "Enter": {
+      /*
+       * The keys that reach an operation, dispatched from the one table that
+       * spells them (TRE-36 §2).
+       *
+       * They used to be `case "F5"` here and `hint: "F5"` in the action
+       * registry, with nothing holding the two together — which is how the
+       * registry came to advertise `↑` for an upload no arrow key has ever
+       * started. `commandFor` reads the same table the palette draws from, so a
+       * chord moved in `helpers/keys.ts` moves everywhere at once or nowhere.
+       *
+       * Only the unmodified ones can land here: `useKeyboard` stands down on
+       * ⌘, ⌥ and ⌃ entirely, so `⌘X` and `⌥↩` are matched by the listeners
+       * below rather than by this switch. The pane's own navigation — ⇥, the
+       * arrows, ⌫, ⎋ — is not in the table at all: those move a cursor, and
+       * nothing advertises them because nothing has to.
+       */
+      switch (commandFor(event)) {
+        case "open": {
           // `..` is answered ahead of the lookup, because `rows` does not carry
           // it: ⏎ on the cursor's row means what a double-click on that row
           // means, and on this one that is up.
@@ -1261,13 +1519,7 @@ export function Explorer({
           if (row) open(index, row);
           return true;
         }
-        case "Backspace": {
-          // Still one keypress, and still the cheap route: making `..` a row
-          // took the single click away from it and nothing else (TRE-77).
-          if (up) go(index, up);
-          return true;
-        }
-        case "F2":
+        case "rename":
           // Aimed at the pane the key was pressed in, which is the active one —
           // stated anyway, because the target below reads `activePane` and the
           // two must not be able to disagree. An empty pane is handled where
@@ -1279,7 +1531,7 @@ export function Explorer({
           onActiveChange(index);
           onRenameMode(renameEntries.length === 1 ? "name" : "pattern");
           return true;
-        case "F3":
+        case "download":
           // F3 is "view" in the two-pane managers this app is shaped after, and
           // there is nothing to view yet. Download is the nearest true thing —
           // getting the file somewhere you can open it — and the toolbar button
@@ -1287,7 +1539,7 @@ export function Explorer({
           onActiveChange(index);
           onDownloadRequestedChange(true);
           return true;
-        case "F7":
+        case "newDir":
           // `mkdir` in the two-pane managers this app takes its other F-keys
           // from, and not the ⇧⌘N the design spec drew: Chrome and Firefox both
           // take that chord for a private window before the page sees it, so a
@@ -1295,18 +1547,18 @@ export function Explorer({
           onActiveChange(index);
           onCreateMode("dir");
           return true;
-        case "F5":
-        case "F6":
+        case "copyTo":
+        case "moveTo":
           // The pane the key was pressed in becomes the source, and the other
           // one is the destination — which is why the active pane is named
           // before the modal opens, exactly as F2 does.
           onActiveChange(index);
-          onTransferMode(event.key === "F5" ? "copy" : "move");
+          onTransferMode(matches(event, KEYS.copyTo) ? "copy" : "move");
           return true;
-        case "Delete":
-          // `⌦`, not `⌫` — that one goes up a directory, three lines above.
-          // Forward delete is `fn`+`⌫` on a Mac keyboard, which is exactly the
-          // amount of deliberate a destructive default should cost (TRE-67).
+        case "rm":
+          // `⌦`, not `⌫` — that one goes up a directory, below. Forward delete
+          // is `fn`+`⌫` on a Mac keyboard, which is exactly the amount of
+          // deliberate a destructive default should cost (TRE-67).
           //
           // Nothing else is needed here: `deleteEntries` resolves the target on
           // the same rule the rename does, and the `deleteEmpty` effect answers
@@ -1315,6 +1567,26 @@ export function Explorer({
           onActiveChange(index);
           onDeleteOpenChange(true);
           return true;
+        default:
+          break;
+      }
+
+      switch (event.key) {
+        case "Tab":
+          onActiveChange(index === 0 ? 1 : 0);
+          return true;
+        case "ArrowDown":
+          dispatch({ type: "move", pane: index, delta: 1, names });
+          return true;
+        case "ArrowUp":
+          dispatch({ type: "move", pane: index, delta: -1, names });
+          return true;
+        case "Backspace": {
+          // Still one keypress, and still the cheap route: making `..` a row
+          // took the single click away from it and nothing else (TRE-77).
+          if (up) go(index, up);
+          return true;
+        }
         case "ContextMenu":
         case "F10": {
           // ⇧F10 and the Menu key, because without them the whole feature needs
@@ -1379,7 +1651,7 @@ export function Explorer({
     if (overlayOpen) return;
 
     const handler = (event: KeyboardEvent) => {
-      if (event.key !== "Enter" || !event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+      if (!matches(event, KEYS.terminal)) return;
       event.preventDefault();
       onTerminalOpenChange(!terminalOpen);
     };
@@ -1394,9 +1666,25 @@ export function Explorer({
   // nothing else in the browser is going to want.
   useShortcut({
     enabled: manageHostsFor === null,
-    key: "i",
+    chord: KEYS.inspector,
     inFields: true,
     onPress: () => onInspectorChange(!inspector),
+  });
+
+  /**
+   * ⌘K opens the palette (TRE-36 §2).
+   *
+   * Inside the fields as well, like ⌘I: the browser's own ⌘K puts the caret in
+   * the address bar, which is not something a file manager wants to hand back,
+   * and `preventDefault` keeps it. Not while another overlay is up — the
+   * palette acts on the pane behind it, and a palette over a delete
+   * confirmation would be aimed at a pane nobody is looking at.
+   */
+  useShortcut({
+    enabled: !overlayOpen,
+    chord: KEYS.palette,
+    inFields: true,
+    onPress: () => onPaletteOpenChange(true),
   });
 
   // ⌘A selects what the pane is showing, from the array (TRE-19 §2). Nothing
@@ -1405,7 +1693,7 @@ export function Explorer({
   // this text", which is why this one stands down there and ⌘I does not.
   useShortcut({
     enabled: manageHostsFor === null,
-    key: "a",
+    chord: KEYS.selectAll,
     inFields: false,
     onPress: () => dispatch({ type: "selectAll", pane: active, names: rendered[active].rows.map((row) => row.name) }),
   });
@@ -1415,7 +1703,7 @@ export function Explorer({
   // manager, but inside a text field the chord is not ours to take.
   useShortcut({
     enabled: manageHostsFor === null,
-    key: "d",
+    chord: KEYS.duplicate,
     inFields: false,
     onPress: () => onDuplicateRequestedChange(true),
   });
@@ -1426,9 +1714,9 @@ export function Explorer({
   //
   // No menu need be open. The one TRE-70 draws is a second way to reach these,
   // not the way.
-  useShortcut({ enabled: !overlayOpen, key: "x", inFields: false, onPress: () => take("cut") });
-  useShortcut({ enabled: !overlayOpen, key: "c", inFields: false, onPress: () => take("copy") });
-  useShortcut({ enabled: !overlayOpen, key: "v", inFields: false, onPress: () => void putDown() });
+  useShortcut({ enabled: !overlayOpen, chord: KEYS.cut, inFields: false, onPress: () => take("cut") });
+  useShortcut({ enabled: !overlayOpen, chord: KEYS.copy, inFields: false, onPress: () => take("copy") });
+  useShortcut({ enabled: !overlayOpen, chord: KEYS.paste, inFields: false, onPress: () => void putDown() });
 
   const callbacksFor = (index: PaneIndex): PaneCallbacks => {
     /**
@@ -1668,6 +1956,8 @@ export function Explorer({
         open={terminalOpen}
         world={terminalWorld}
         hostsPending={hostsPending}
+        pending={pendingCommand}
+        onPendingRun={() => setPendingCommand(null)}
         onClose={() => onTerminalOpenChange(false)}
       />
 
@@ -1846,6 +2136,21 @@ export function Explorer({
         />
       )}
 
+      {paletteOpen && (
+        <Palette
+          entries={paletteEntries()}
+          cwd={activePane.path}
+          hostId={activePane.hostId}
+          hostLabel={activeHost?.label ?? null}
+          onGo={(path) => go(active, path)}
+          onShell={(line) => {
+            onTerminalOpenChange(true);
+            setPendingCommand(line);
+          }}
+          onClosed={() => onPaletteOpenChange(false)}
+        />
+      )}
+
       {manageHostsFor !== null && (
         <HostManager
           hosts={hosts}
@@ -1951,9 +2256,11 @@ function useKeyboard({ enabled, onKey }: { enabled: boolean; onKey: (event: Keyb
 }
 
 /**
- * One ⌘-chord. `metaKey || ctrlKey` rather than a platform check: this app is
- * read on a Mac and on Linux, and a shortcut that works on only one of them is
- * a shortcut nobody trusts.
+ * One chord from the keymap (TRE-36 §2).
+ *
+ * It takes the chord rather than a bare letter so the matching rule lives in
+ * one place: `matches` checks every modifier, including the ones the chord does
+ * not want, which is what keeps `⌘X` from firing on `⌥⌘X`.
  *
  * `inFields` is the whole difference from `useKeyboard`, which stands down
  * wholesale while someone is typing. A chord the browser has no use for inside
@@ -1962,20 +2269,19 @@ function useKeyboard({ enabled, onKey }: { enabled: boolean; onKey: (event: Keyb
  */
 function useShortcut({
   enabled,
-  key,
+  chord,
   inFields,
   onPress,
 }: {
   enabled: boolean;
-  key: string;
+  chord: Chord;
   inFields: boolean;
   onPress: () => void;
 }) {
   useEffect(() => {
     if (!enabled) return;
     const handler = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
-      if (event.key.toLowerCase() !== key) return;
+      if (!matches(event, chord)) return;
       if (!inFields) {
         const target = event.target as HTMLElement | null;
         const tag = target?.tagName;
@@ -1987,5 +2293,5 @@ function useShortcut({
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [enabled, key, inFields, onPress]);
+  }, [enabled, chord, inFields, onPress]);
 }

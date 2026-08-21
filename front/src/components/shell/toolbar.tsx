@@ -169,7 +169,12 @@ function ActionButton({ action }: { action: Action }) {
         ].join(" ")}
       >
         {action.label}
-        {action.hint && <span>{action.hint}</span>}
+        {/* The chord if a key reaches this, and 2a's glyph if none does — never
+            both, and never the glyph dressed as a chord. `compare ⇄` and
+            `upload ↑` used to be written into the same field as `copy F5`,
+            which is how the action registry came to advertise an arrow key that
+            has never started an upload (TRE-36 §2). */}
+        {(action.hint ?? action.mark) && <span>{action.hint ?? action.mark}</span>}
       </button>
     </Tooltip>
   );

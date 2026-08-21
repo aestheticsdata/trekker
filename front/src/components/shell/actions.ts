@@ -1,10 +1,12 @@
+import { hintFor } from "@helpers/keys";
+
 import type { RowType } from "@lib/api/fs";
 
 /**
  * Every operation this app performs, declared once (TRE-70 §4).
  *
- * Three surfaces render from this file — the toolbar's action row, the listing's
- * context menu, and TRE-36's palette when it lands — and none of them decides
+ * Three surfaces render from this file — the toolbar's action row, the
+ * listing's context menu and TRE-36's ⌘K palette — and none of them decides
  * anything. What exists, what each entry is called, which shape carries it and
  * what it needs in order to run are all here; a surface picks a shape and draws
  * what comes back.
@@ -16,8 +18,9 @@ import type { RowType } from "@lib/api/fs";
  * menu and dead in the palette for the same selection, found by whoever tries
  * the other route, months later.
  *
- * Kept free of React and of value imports so `scripts/verify-menu.ts` can put
- * the whole table through node.
+ * Free of React, and its one value import is `helpers/keys.ts`, which imports
+ * nothing itself — so `scripts/verify-menu.ts` can still put the whole table
+ * through node, with the alias hook that script now carries.
  */
 
 export type ActionId =
@@ -48,7 +51,7 @@ export type ActionId =
 /** What a surface is aimed at: the selected entries, or the pane's directory. */
 export type TargetKind = "entries" | "directory";
 
-export type Surface = "toolbar" | "menu";
+export type Surface = "toolbar" | "menu" | "palette";
 
 /**
  * Everything a rule may turn on.
@@ -73,8 +76,23 @@ export interface ActionContext {
 export interface Action {
   id: ActionId;
   label: string;
-  /** "F5", "⌦" — how this app teaches itself. */
+  /**
+   * The key that reaches this, from `helpers/keys.ts` and from nowhere else
+   * (TRE-36 §2) — "F5", "⌦", "⌘X". Absent when no chord does.
+   *
+   * It used to be written here, as a literal beside the label, and two of them
+   * were not keys at all: `compare` carried `⇄` and `upload` carried `↑`, which
+   * is a glyph and an arrow key respectively. Those are `mark` now, and the
+   * distinction is the point — one of these is a thing to press.
+   */
   hint?: string;
+  /**
+   * The mockup's decorative glyph, where 2a draws one beside the label: `⇄` on
+   * `compare`, `↑` on `upload`. Not a key, and never advertised as one.
+   */
+  mark?: string;
+  /** The palette's second line: what the operation does, in a few words. */
+  note?: string;
   /** Absent means enabled. Present means disabled, and this is the sentence. */
   unavailableReason?: string;
   danger?: boolean;
@@ -132,7 +150,10 @@ interface Spec {
   label: string;
   /** The toolbar's shorter word, where the width of that row forced one. */
   short?: string;
-  hint?: string;
+  /** 2a's glyph beside the label. See `Action.mark` — this is not a shortcut. */
+  mark?: string;
+  /** One line on what it does, for the palette. Never why it is unavailable. */
+  note?: string;
   danger?: boolean;
   why?: Rule;
 }
@@ -150,10 +171,10 @@ const SPECS: Readonly<Record<ActionId, Spec>> = {
   // F7, not the ⇧⌘N the design spec first drew (settled by TRE-69): Chrome and
   // Firefox both take ⇧⌘N for a private window before the page sees the key, so
   // a menu advertising it would teach a shortcut that never fires.
-  newDir: { label: "new directory", short: "new", hint: "F7", why: host },
-  newFile: { label: "new file", why: host },
+  newDir: { label: "new directory", short: "new", note: "a directory, here", why: host },
+  newFile: { label: "new file", note: "an empty file, here", why: host },
 
-  open: { label: "open", hint: "↵", why: all(host, one) },
+  open: { label: "open", why: all(host, one) },
   // No `otherPane` rule, unlike F5 and F6: this does not send anything to the
   // other pane, it points that pane at a directory on *this* host — so a pane
   // with nothing bound to it is a pane about to have something bound to it.
@@ -162,28 +183,38 @@ const SPECS: Readonly<Record<ActionId, Spec>> = {
     why: all(host, one, onlyKind(["dir", "link"], "Only a directory can be opened in the other pane")),
   },
 
-  cut: { label: "cut", hint: "⌘X", why: all(host, some) },
-  copy: { label: "copy", hint: "⌘C", why: all(host, some) },
+  cut: { label: "cut", note: "hold the selection, to move it", why: all(host, some) },
+  copy: { label: "copy", note: "hold the selection, to duplicate it", why: all(host, some) },
   paste: {
     label: "paste",
-    hint: "⌘V",
+    note: "put down what the clipboard is holding",
     why: all(host, (context) => (context.holding ? undefined : "Nothing on the clipboard")),
   },
-  duplicate: { label: "duplicate", hint: "⌘D", why: all(host, some) },
-  copyTo: { label: "copy to other pane", short: "copy", hint: "F5", why: all(host, some, otherPane) },
-  moveTo: { label: "move to other pane", short: "move", hint: "F6", why: all(host, some, otherPane) },
+  duplicate: { label: "duplicate", note: "a copy beside the original, under a free name", why: all(host, some) },
+  copyTo: {
+    label: "copy to other pane",
+    short: "copy",
+    note: "with each conflict decided per entry",
+    why: all(host, some, otherPane),
+  },
+  moveTo: {
+    label: "move to other pane",
+    short: "move",
+    note: "with each conflict decided per entry",
+    why: all(host, some, otherPane),
+  },
 
-  refresh: { label: "refresh", why: host },
+  refresh: { label: "refresh", note: "re-read this directory from the host", why: host },
 
   // `rename`, not `regex rename`: the long label pushed `rm` off the right edge
   // of the toolbar at a 12px `--ui-base` (TRE-72), and the modal's own
   // name/pattern switch says the regex is there better than a label can.
-  rename: { label: "rename", hint: "F2", why: all(host, some) },
-  chmod: { label: "permissions", why: all(host, some) },
+  rename: { label: "rename", note: "one name, or a pattern over the selection", why: all(host, some) },
+  chmod: { label: "permissions", note: "mode, owner and group", why: all(host, some) },
   // One at a time, because the route takes one path: a file streams as itself
   // and a directory streams as a zip, and there is no third shape that is
   // several of either (TRE-26).
-  download: { label: "download", hint: "F3", why: all(host, one) },
+  download: { label: "download", note: "a file as itself, a directory as a zip", why: all(host, one) },
   // The strip's other way in (TRE-34 §3). The directory heuristic offers logs
   // where logs usually are; this is how somebody follows the one that is not
   // there, and it is the only route that works in an ordinary directory.
@@ -192,22 +223,26 @@ const SPECS: Readonly<Record<ActionId, Spec>> = {
   // four" is a different feature the ticket puts out of scope.
   tail: {
     label: "tail this file",
+    note: "follow it live in the strip under the panes",
     why: all(host, one, onlyKind(["file"], "A tail follows a file")),
   },
-  upload: { label: "upload here", short: "upload", hint: "↑", why: host },
+  upload: { label: "upload here", short: "upload", mark: "↑", note: "pick files to put in this directory", why: host },
   link: {
     label: "mint signed link",
+    note: "a signed URL, good for a while",
     why: all(host, one, onlyKind(["file"], "A signed link points at a file")),
   },
 
   copyPath: {
     label: "copy path",
+    note: "the absolute path, to the clipboard",
     why: all(host, (context) => (context.kind === "directory" ? undefined : one(context))),
   },
-  copyName: { label: "copy name", why: one },
+  copyName: { label: "copy name", note: "just the name, to the clipboard", why: one },
 
   favourite: {
     label: "add to favourites",
+    note: "keep this directory in the sidebar",
     why: all(
       host,
       (context) => (context.kind === "directory" ? undefined : one(context)),
@@ -220,15 +255,21 @@ const SPECS: Readonly<Record<ActionId, Spec>> = {
   // it carries no `some` rule and appears in the directory menu rather than the
   // entries one. Comparing "these three files" against another pane is a
   // different question, and not one this asks.
-  compare: { label: "compare with other pane", short: "compare", hint: "⇄", why: all(host, bothPanes) },
+  compare: {
+    label: "compare with other pane",
+    short: "compare",
+    mark: "⇄",
+    note: "name, size and hash, both directories",
+    why: all(host, bothPanes),
+  },
 
   // Files only, and it is not a limitation of the route — a directory in the
   // selection is expanded into the files under it. It is what the word means: a
   // directory has no sha256, and an entry offering one would be promising a
   // number that does not exist. Selecting the directory and asking for the
   // checksums of what is in it is the same gesture, one row up.
-  hash: { label: "compute sha256", why: all(host, some) },
-  rm: { label: "rm", hint: "⌦", danger: true, why: all(host, some) },
+  hash: { label: "compute sha256", note: "runs in the background", why: all(host, some) },
+  rm: { label: "rm", note: "permanent — this app has no trash", danger: true, why: all(host, some) },
 };
 
 // --------------------------------------------------------------- the shapes
@@ -300,6 +341,46 @@ const TOOLBAR_SHAPE: readonly ShapeRow[] = [
 ];
 
 /**
+ * The palette's shape (TRE-36 §1).
+ *
+ * Nearly everything, and the omissions are the argument. `open` and `open in
+ * other pane` are missing because both mean "the row the cursor is on", and the
+ * palette cannot aim at that row any better than ↩ already does — an entry for
+ * them would be a second name for a key that is one press away, on a surface
+ * that costs two.
+ *
+ * Everything else is here whether or not it can run, which is the ticket's
+ * rule and a good one: a palette that hides what is unavailable is a palette
+ * nobody can learn the app from. `rm` is last, where a destructive thing
+ * belongs in a list somebody is arrowing down.
+ *
+ * No rules in it. The group header is the separator on this surface.
+ */
+const PALETTE_SHAPE: readonly ShapeRow[] = [
+  "compare",
+  "chmod",
+  "rename",
+  "copyTo",
+  "moveTo",
+  "duplicate",
+  "hash",
+  "download",
+  "upload",
+  "tail",
+  "link",
+  "newDir",
+  "newFile",
+  "refresh",
+  "cut",
+  "copy",
+  "paste",
+  "copyPath",
+  "copyName",
+  "favourite",
+  "rm",
+];
+
+/**
  * What a surface should draw, for this target.
  *
  * The target decides which entries **exist** — an entry belonging to the other
@@ -313,7 +394,14 @@ const TOOLBAR_SHAPE: readonly ShapeRow[] = [
  * knows what pressing it does.
  */
 export function resolveActions(context: ActionContext, surface: Surface = "menu"): readonly ActionRow[] {
-  const shape = surface === "toolbar" ? TOOLBAR_SHAPE : context.kind === "directory" ? DIRECTORY_SHAPE : ENTRIES_SHAPE;
+  const shape =
+    surface === "toolbar"
+      ? TOOLBAR_SHAPE
+      : surface === "palette"
+        ? PALETTE_SHAPE
+        : context.kind === "directory"
+          ? DIRECTORY_SHAPE
+          : ENTRIES_SHAPE;
 
   const rows: ActionRow[] = [];
   for (const id of shape) {
@@ -328,7 +416,11 @@ export function resolveActions(context: ActionContext, surface: Surface = "menu"
     rows.push({
       id,
       label: surface === "toolbar" ? (spec.short ?? spec.label) : spec.label,
-      hint: spec.hint,
+      // Read, never written. The chord lives in `helpers/keys.ts` and this is
+      // the only place any surface asks for it (TRE-36 §2).
+      hint: hintFor(id),
+      mark: spec.mark,
+      note: spec.note,
       danger: spec.danger,
       unavailableReason: spec.why?.(context),
     });

@@ -20,30 +20,13 @@
  * into it. Until then it follows the convention `verify-virtual.ts` set.
  */
 
-import { registerHooks } from "node:module";
-import { dirname, resolve as resolvePath } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { registerAliases } from "./aliases.ts";
 
-/**
- * The app's path aliases, taught to Node.
- *
- * The other verify scripts reach straight into `src/helpers/`, whose modules
- * import nothing but types and so need none of this. The reducer is not a
- * helper — it is the pane's, it lives beside the component it serves, and it
- * imports `@helpers/listing` for real — so running it outside Next means
- * answering the one specifier `tsconfig` answers for everything else.
- *
- * Deliberately dumb: `@x/y` is `src/x/y.ts` and nothing here resolves to a
- * `.tsx`, because a verify script that needed to load a component would be a
- * verify script asking the wrong question.
- */
-const SRC = resolvePath(dirname(fileURLToPath(import.meta.url)), "../src");
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (!specifier.startsWith("@")) return nextResolve(specifier, context);
-    return { url: pathToFileURL(`${resolvePath(SRC, specifier.slice(1))}.ts`).href, shortCircuit: true };
-  },
-});
+// The reducer is not a helper — it lives beside the pane it serves and imports
+// `@helpers/listing` for real — so running it outside Next means answering the
+// one specifier `tsconfig` answers for everything else. The dynamic import
+// below is what makes that work; see `aliases.ts`.
+registerAliases();
 
 const { cursorWindowIndex, explorerReducer, initialState, PARENT_NAME } = await import(
   "../src/components/explorer/pane-state.ts"

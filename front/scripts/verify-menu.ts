@@ -22,8 +22,15 @@
  * into it.
  */
 
-import { isRule, resolveActions } from "../src/components/shell/actions.ts";
 import { covers, placeMenu } from "../src/helpers/menu.ts";
+import { registerAliases } from "./aliases.ts";
+
+// The registry reads its chords from `@helpers/keys` since TRE-36, so the one
+// specifier `tsconfig` answers for everything else has to be answered here too.
+// Dynamically imported for the reason `aliases.ts` records: a static import
+// would be resolved before the hook is installed.
+registerAliases();
+const { isRule, resolveActions } = await import("../src/components/shell/actions.ts");
 
 import type { ActionContext, ActionRow } from "../src/components/shell/actions.ts";
 

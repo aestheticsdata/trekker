@@ -40,6 +40,7 @@ export function AppShell({
   inspector,
   onInspectorChange,
   actions,
+  onOpenPalette,
   sidebar,
   strip,
   onShowStrip,
@@ -69,6 +70,9 @@ export function AppShell({
   onInspectorChange?: (open: boolean) => void;
   /** The action row, with whatever M2 has actually built wired up (TRE-21). */
   actions?: readonly Action[];
+  /** The top bar's ⌘K chip (TRE-36). The panel itself is the explorer's, since
+   * everything it offers — the selection, the panes, the hosts — belongs there. */
+  onOpenPalette?: () => void;
   /** The 176px left rail (TRE-18). Rendered beside the panes, inside the bars. */
   sidebar?: ReactNode;
   /**
@@ -103,6 +107,7 @@ export function AppShell({
               stats={stats}
               views={views}
               sudo={sudo}
+              onOpenPalette={onOpenPalette}
             />
             <Toolbar
               viewMode={viewMode}

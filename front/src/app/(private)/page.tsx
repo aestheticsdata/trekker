@@ -69,6 +69,15 @@ export default function HomePage() {
    */
   const [terminalOpen, setTerminalOpen] = useState(false);
   /**
+   * Whether the ⌘K palette is showing (TRE-36).
+   *
+   * Local, like the terminal and for the same reason: a link that restores
+   * somebody's split and their two directories is what the URL is for, and a
+   * link that also arrives with a command palette open is a link that types
+   * into somebody else's session.
+   */
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  /**
    * A request, not a state (TRE-26).
    *
    * The other three flags open a modal that stays open. This one asks the
@@ -282,6 +291,7 @@ export default function HomePage() {
       inspector={shared.insp}
       onInspectorChange={(insp) => changeLayout({ insp })}
       actions={actions}
+      onOpenPalette={() => setPaletteOpen(true)}
       sidebar={
         <Sidebar
           hosts={hosts ?? []}
@@ -324,7 +334,11 @@ export default function HomePage() {
         onGlobChange={(glob) => void setShared({ glob })}
         onMatchesChange={setGlobMatches}
         splitMode={shared.split}
+        // The palette reaches the split and the heat map as well as the
+        // toolbar does (TRE-36 §1), so both setters come down here now.
+        onSplitModeChange={(split) => changeLayout({ split })}
         heat={shared.heat}
+        onHeatChange={(heat) => void setShared({ heat })}
         inspector={shared.insp}
         onInspectorChange={(insp) => changeLayout({ insp })}
         animate={moved}
@@ -351,6 +365,8 @@ export default function HomePage() {
         onCompareOpenChange={setCompareOpen}
         terminalOpen={terminalOpen}
         onTerminalOpenChange={setTerminalOpen}
+        paletteOpen={paletteOpen}
+        onPaletteOpenChange={setPaletteOpen}
         onClipboardChange={setClipboard}
         clearClipboardRequested={clearClipboardRequested}
         onClearClipboardRequestedChange={setClearClipboardRequested}

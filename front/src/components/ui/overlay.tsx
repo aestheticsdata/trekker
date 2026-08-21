@@ -23,6 +23,7 @@ import type { ReactNode } from "react";
 export function Overlay({
   label,
   onClosed,
+  align = "center",
   panelClassName = "",
   children,
 }: {
@@ -30,6 +31,16 @@ export function Overlay({
   label: string;
   /** Runs once the exit animation has finished — unmount from here. */
   onClosed: () => void;
+  /**
+   * Where the panel sits in the window.
+   *
+   * Centred for a dialogue, which is a thing to read and answer. `top` for the
+   * ⌘K palette, which is a thing to type into: 2a drops it 86px from the top
+   * edge, and it has to be somewhere fixed, because a list that grows and
+   * shrinks with every keystroke would otherwise slide up and down the screen
+   * under a cursor somebody is aiming at.
+   */
+  align?: "center" | "top";
   /** The panel's own box: width, border, background. */
   panelClassName?: string;
   children: (close: () => void) => ReactNode;
@@ -48,9 +59,9 @@ export function Overlay({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop is a pointer shortcut for ⎋, which the effect above already provides
     <div
-      className={`bg-chrome/80 fixed inset-0 z-40 flex items-center justify-center p-6 ${
-        leaving ? "animate-overlay-out" : "animate-overlay-in"
-      }`}
+      className={`bg-chrome/80 fixed inset-0 z-40 flex justify-center ${
+        align === "top" ? "items-start px-6 pt-21.5 pb-6" : "items-center p-6"
+      } ${leaving ? "animate-overlay-out" : "animate-overlay-in"}`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) close();
       }}

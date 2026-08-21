@@ -47,6 +47,23 @@ import {
   SELECTED_FILL,
 } from "../src/helpers/press.ts";
 import {
+  FALLBACK_INK,
+  ICON_INK,
+  ICON_ON_INK,
+  KEY_INK,
+  PALETTE_INPUT_INK,
+  PALETTE_LABEL_INK,
+  PALETTE_QUIET_INK,
+  PALETTE_SURFACE,
+  ROW_DANGER_INK,
+  ROW_DETAIL_INK,
+  ROW_DETAIL_ON_INK,
+  ROW_FILL,
+  ROW_LABEL_INK,
+  ROW_LABEL_ON_INK,
+  ROW_OFF_INK,
+} from "../src/helpers/palette.ts";
+import {
   COMMAND_SURFACE,
   ELEVATE_FILL,
   ELEVATE_INK,
@@ -263,6 +280,37 @@ console.log(
 const muted = ratio(hexOf("text-on-pane-muted"), hexOf(TAIL_SURFACE));
 console.log(`  --   on-pane-muted, which the pane passes  ${muted.toFixed(2).padStart(5)}:1  ${verdict(muted)}`);
 
+/*
+ * The ⌘K palette (TRE-36 §4), which has two grounds rather than one.
+ *
+ * Every row is drawn on the panel, and the row under the cursor is drawn on
+ * `--color-line` — so the ink that says what an entry does has to clear on both
+ * or it is illegible for exactly one row at a time, which is the row being read.
+ *
+ * Nothing between `ink-faint` and `ink-dim` clears anything on that fill: the
+ * whole span from 2.61 to 4.82 is a wall. So the second line switches ink with
+ * the row, as 2a already switches the icon and the label, rather than settling
+ * on one value that is either too bright at rest or too dim when chosen.
+ */
+console.log("\n--- the ⌘K palette (TRE-36) ---");
+check("what has been typed", PALETTE_INPUT_INK, PALETTE_SURFACE);
+check("the `\u203a` and the group headers", PALETTE_LABEL_INK, PALETTE_SURFACE);
+check("the count, the footer, the empty state", PALETTE_QUIET_INK, PALETTE_SURFACE);
+check("what a row is called", ROW_LABEL_INK, PALETTE_SURFACE);
+check("what it does", ROW_DETAIL_INK, PALETTE_SURFACE);
+check("its glyph", ICON_INK, PALETTE_SURFACE);
+check("a row that cannot run now", ROW_OFF_INK, PALETTE_SURFACE);
+check("`rm`, which stays red in a list", ROW_DANGER_INK, PALETTE_SURFACE);
+check("the key beside it", KEY_INK, PALETTE_SURFACE);
+check("and the way out when nothing matched", FALLBACK_INK, PALETTE_SURFACE);
+// The same rows again, on the fill the cursor puts under them.
+check("the chosen row's name", ROW_LABEL_ON_INK, ROW_FILL);
+check("what it does, lifted for that fill", ROW_DETAIL_ON_INK, ROW_FILL);
+check("its glyph, lit", ICON_ON_INK, ROW_FILL);
+check("a chosen row that cannot run", ROW_OFF_INK, ROW_FILL);
+check("`rm` chosen", ROW_DANGER_INK, ROW_FILL);
+check("the key beside a chosen row", KEY_INK, ROW_FILL);
+
 console.log("\n--- the tooltip bubble (TRE-76) ---");
 check("subject", TOOLTIP_SUBJECT_INK, TOOLTIP_SURFACE);
 check("value", TOOLTIP_INK, TOOLTIP_SURFACE);
@@ -309,6 +357,27 @@ for (const [name, hex] of Object.entries(MOCKUP_STATUS_HEX)) {
   console.log(
     `  ${name.padEnd(7)} ${hex}  ${measured.toFixed(2).padStart(5)} ${verdict(measured).padEnd(15)}` +
       `→ ours ${ours.toFixed(2).padStart(5)} ${verdict(ours)}`,
+  );
+}
+
+/*
+ * And the palette's own two (TRE-36 §4), on the two grounds it draws on.
+ *
+ * Same treatment: the mockup's number beside ours, so the correction stays
+ * reviewable rather than becoming a colour somebody once changed.
+ */
+console.log("\n--- for the record: 2a's own palette inks, which is why ours differ ---");
+for (const [what, mockup, ground, ours] of [
+  ["group headers, ›", "#3e8fae", PALETTE_SURFACE, PALETTE_LABEL_INK],
+  ["count, footer, empty state", "#4d7f99", PALETTE_SURFACE, PALETTE_QUIET_INK],
+  ["a row's second line", "#4d7f99", PALETTE_SURFACE, ROW_DETAIL_INK],
+  ["the same, on the chosen row", "#4d7f99", ROW_FILL, ROW_DETAIL_ON_INK],
+] as const) {
+  const theirs = ratio(mockup, hexOf(ground));
+  const mine = ratio(hexOf(ours), hexOf(ground));
+  console.log(
+    `  ${what.padEnd(28)} ${mockup}  ${theirs.toFixed(2).padStart(5)} ${verdict(theirs).padEnd(15)}` +
+      `→ ours ${mine.toFixed(2).padStart(5)} ${verdict(mine)}`,
   );
 }
 

@@ -74,6 +74,8 @@ export function TerminalPanel({
   open,
   world,
   hostsPending,
+  pending,
+  onPendingRun,
   onClose,
 }: {
   /**
@@ -90,6 +92,19 @@ export function TerminalPanel({
   world: TerminalWorld | null;
   /** True while the host list is still in flight, which is a wait rather than a refusal. */
   hostsPending: boolean;
+  /**
+   * A line the ⌘K palette handed over, or null (TRE-36 §2).
+   *
+   * It runs exactly as if it had been typed here — echoed at the prompt, kept
+   * in the history, and put through the same parser. That is what makes the
+   * palette's "nothing matches, ↩ runs it in the terminal instead" an honest
+   * offer rather than a second, quieter command path: an unparseable line gets
+   * the refusal that lists what this terminal does take, in the place that can
+   * show it.
+   */
+  pending: string | null;
+  /** Called the moment the line is taken, so it is never taken twice. */
+  onPendingRun: () => void;
   onClose: () => void;
 }) {
   const [lines, setLines] = useState<readonly TerminalLine[]>([]);
@@ -166,12 +181,15 @@ export function TerminalPanel({
     });
   };
 
-  const submit = async () => {
-    const typed = input;
-    setInput("");
-    setWalked(null);
-    setDraft("");
-
+  /**
+   * Run one line, wherever it came from.
+   *
+   * It does not touch the input row, deliberately: since TRE-36 a line can also
+   * arrive from the ⌘K palette, and clearing the field would throw away a draft
+   * somebody had half typed here before reaching for the palette. The ↩ handler
+   * clears its own field before calling this, which is where that belongs.
+   */
+  const submit = async (typed: string) => {
     if (typed.trim().length === 0) return;
     remember(typed);
     write([{ kind: "echo", text: `${echoed} ${typed}` }]);
@@ -223,6 +241,29 @@ export function TerminalPanel({
       setBusy(false);
     }
   };
+
+  /**
+   * The palette's line, once the panel is up (TRE-36 §2).
+   *
+   * The ref is not defensive coding: StrictMode mounts an effect, tears it down
+   * and mounts it again with the same props, so without a record of what has
+   * already been taken the line is echoed and run twice. Cleared when `pending`
+   * goes back to null, which is what lets the same command be sent twice in a
+   * row — `df` after `df` is an ordinary thing to ask for.
+   */
+  const taken = useRef<string | null>(null);
+  useEffect(() => {
+    if (pending === null) {
+      taken.current = null;
+      return;
+    }
+    if (!open || taken.current === pending) return;
+    taken.current = pending;
+    onPendingRun();
+    void submit(pending);
+    // `submit` is rebuilt every render and closes over nothing this needs to
+    // watch; `pending` arriving is the whole event.
+  }, [open, pending, onPendingRun]);
 
   const walk = (delta: -1 | 1) => {
     if (history.length === 0) return;
@@ -325,7 +366,11 @@ export function TerminalPanel({
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
-              void submit();
+              const typed = input;
+              setInput("");
+              setWalked(null);
+              setDraft("");
+              void submit(typed);
               return;
             }
             if (event.key === "ArrowUp") {

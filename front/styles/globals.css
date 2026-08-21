@@ -77,6 +77,23 @@
    * runs as would invert the hierarchy the mockup is drawing. */
   --color-on-terminal-dim: #538aa6;
 
+  /* Two inks for the sunk `--color-strip` ground, and the ⌘K palette is what
+   * needed them (TRE-36 §4). The panel is 2a's, drawn on that ground, and two
+   * of the inks 2a draws on it are under AA: the group headers and the `›` at
+   * `#3e8fae` measure 4.34:1, and every quiet line — the match count, the
+   * footer, a row's second line — at `#4d7f99` measures 3.64:1.
+   *
+   * Same answer as TRE-33, TRE-34 and TRE-35 gave on their own surfaces: keep
+   * the hue, keep the ground, lift the ink until it clears, and say so. 4.76:1
+   * and 4.87:1, both measured by `pnpm verify:contrast`.
+   *
+   * Named for the ground rather than the panel, because the ground has another
+   * tenant: the docked disk-usage strip is drawn on `--color-strip` too, and it
+   * still carries the mockup's own two values inline, where no check can see
+   * them (TRE-80). When that is fixed it is a swap to these, not a new pair. */
+  --color-on-strip-label: #4896b3;
+  --color-on-strip-dim: #5c96af;
+
   /* ---- ink -------------------------------------------------------------
    * On dark, brightest first. `ink` is body text, `ink-muted` labels,
    * `ink-faint` the small caps that only need to be findable.
@@ -380,6 +397,13 @@
    * same one with fewer lines in it. */
   --spacing-terminal: 12.375rem; /* 198px */
   --spacing-termbar: 1.375rem; /* 22px — its header */
+  /* The ⌘K palette (TRE-36 §4), which 2a states outright: a 620px panel with a
+   * 330px list in it, and the header, footer and rows taking what they need
+   * from the spacing scale around it. Two tokens rather than six for the reason
+   * the top bar has one: a panel's own size is a design decision, the controls
+   * inside it are arithmetic. */
+  --spacing-palette: 38.75rem; /* 620px */
+  --spacing-palette-body: 20.625rem; /* 330px */
   /* The inspector's width (TRE-17). A token since TRE-62, because two boxes
    * now need the same number: the panel, and the wrapper that opens it. */
   --spacing-inspector: 13.625rem; /* 218px */

@@ -2,6 +2,7 @@
 
 import { Sparkline } from "@components/shell/sparkline";
 import { Tooltip } from "@components/ui/tooltip";
+import { hintFor } from "@helpers/keys";
 import { PRESS } from "@helpers/press";
 
 import type { ReactNode } from "react";
@@ -188,12 +189,16 @@ export function TopBar({
         </dl>
       )}
 
+      {/* The chip reads its own name off the keymap (TRE-36 §2). It is the most
+          visible shortcut in the app and it was the only one written as a
+          literal — a chord moved in `helpers/keys.ts` while this said ⌘K would
+          leave the app advertising the wrong key in its top right corner. */}
       <button
         type="button"
         onClick={onOpenPalette}
         className={`${PRESS} flex h-5 items-center rounded-sm px-2 font-mono text-xs font-medium`}
       >
-        ⌘K
+        {hintFor("palette")}
       </button>
     </header>
   );
