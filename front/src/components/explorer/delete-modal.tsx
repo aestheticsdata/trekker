@@ -5,6 +5,7 @@ import { CommandLine } from "@components/ui/command-line";
 import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
 import { formatSize } from "@helpers/listing";
+import { DANGER_FILL, DANGER_INK } from "@helpers/press";
 import { ApiError } from "@lib/api/client";
 import { deletePaths, planDelete } from "@lib/api/delete";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -243,7 +244,7 @@ function DeletePanel({
           disabled={!armed || remove.isPending}
           // Dark red, and red even while inert: this button should never look
           // like the one beside it.
-          className="bg-danger text-on-accent disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed"
+          className={`${DANGER_FILL} ${DANGER_INK} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
           {remove.isPending ? "deleting…" : "delete"}
         </button>

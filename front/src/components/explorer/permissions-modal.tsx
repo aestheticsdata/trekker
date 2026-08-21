@@ -7,6 +7,7 @@ import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import { joinPath } from "@helpers/listing";
 import { parseMode } from "@helpers/permissions";
+import { ON_FILL, PRESS } from "@helpers/press";
 import { ApiError } from "@lib/api/client";
 import { changeMode, changeOwner, fetchEntryCount } from "@lib/api/permissions";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -248,7 +249,7 @@ function PermissionsPanel({
                   // asked this button for.
                   onClick={() => setBits((current) => (current & 0o7000) | (Number.parseInt(preset, 8) & 0o777))}
                   className={`border px-1.75 py-1 font-mono text-2xs/none ${
-                    active ? "bg-accent text-on-accent border-accent" : "text-ink-muted border-line-strong"
+                    active ? `${ON_FILL} border-accent-fill` : "text-ink-muted border-line-strong"
                   }`}
                 >
                   {preset}
@@ -284,7 +285,7 @@ function PermissionsPanel({
                       aria-label={`${COLUMNS[column]} for ${who}`}
                       onClick={() => setBits((current) => current ^ bit)}
                       className={`border py-1.75 text-center font-medium ${
-                        on ? "bg-accent text-on-accent border-accent" : "bg-chrome text-ink-faint border-line-strong"
+                        on ? `${ON_FILL} border-accent-fill` : "bg-chrome text-ink-faint border-line-strong"
                       }`}
                     >
                       {on ? "rwx"[column] : "·"}
@@ -312,7 +313,7 @@ function PermissionsPanel({
                     on
                       ? special.warn
                         ? "bg-warning text-on-accent border-warning"
-                        : "bg-accent text-on-accent border-accent"
+                        : `${ON_FILL} border-accent-fill`
                       : "text-ink-faint border-line-strong"
                   }`}
                 >
@@ -346,7 +347,7 @@ function PermissionsPanel({
           <span
             aria-hidden
             className={`flex size-3.25 items-center justify-center border font-mono text-caps/none ${
-              recursive ? "bg-accent border-accent text-on-accent" : "bg-chrome border-line-strong"
+              recursive ? `${ON_FILL} border-accent-fill` : "bg-chrome border-line-strong"
             }`}
           >
             {recursive ? "✓" : ""}
@@ -436,7 +437,7 @@ function PermissionsPanel({
           type="button"
           onClick={() => apply.mutate()}
           disabled={apply.isPending}
-          className="bg-accent text-on-accent px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:opacity-60"
+          className={`${PRESS} px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:opacity-60`}
         >
           {apply.isPending ? "applying…" : `apply ${octal}`}
         </button>

@@ -44,13 +44,19 @@ export const TAIL_NOTE_INK = "text-on-pane-label";
  * The strip's two header buttons — `retry`, and the one offering to follow the
  * end again.
  *
- * **Not `bg-accent` with `text-on-accent`,** which is what this app reaches for
- * when something is the thing to press, and which measures 3.62:1. That pair
- * is under AA wherever it is already used and would be under AA here at 8.5px,
+ * **Not `bg-accent` with `text-on-accent`,** which is what this app reached for
+ * when something was the thing to press, and which measures 3.62:1. That pair
+ * was under AA wherever it was used and would have been under AA here at 8.5px,
  * which is the smallest type in the application. `--color-accent` is an awkward
  * mid-blue with nothing clearing 4.5:1 against it in either direction — the
- * lightest ink in the palette reaches 4.08 — so the fix is a different fill
+ * lightest ink in the palette reaches 4.08 — so the fix was a different fill
  * rather than a different ink.
+ *
+ * TRE-78 has since made that fix everywhere else: `PRESS` in `helpers/press.ts`
+ * is `--color-accent-fill` at 7.09:1, and it is what a filled control in the
+ * chrome wears now. This strip keeps its own pair regardless, because it is not
+ * in the chrome — it sits on a pane that has inverted to light, where a fill
+ * bright enough to carry dark ink would be the brightest thing on the strip.
  *
  * A chip in the app's own dark surface, on a pane that has inverted to light,
  * is this design's plainest way of saying "control" anyway. And the accent is

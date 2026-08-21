@@ -12,6 +12,7 @@
  */
 
 import { Tooltip } from "@components/ui/tooltip";
+import { PRESS, SELECTED } from "@helpers/press";
 
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 
@@ -101,7 +102,7 @@ export function Segmented<T extends string>({
               onClick={() => !off && onChange(option.value)}
               className={`border-line-strong flex flex-1 items-center justify-center border-l px-2 font-mono text-xs first:border-l-0 ${
                 active
-                  ? "bg-accent-soft text-on-accent font-medium"
+                  ? `${SELECTED} font-medium`
                   : off
                     ? "text-ink-faint cursor-not-allowed"
                     : "text-ink-muted hover:text-ink"
@@ -125,7 +126,7 @@ export function Button({
   children: ReactNode;
 }) {
   const TONE = {
-    primary: "bg-accent text-on-accent hover:bg-accent-soft disabled:opacity-50",
+    primary: `${PRESS} disabled:opacity-50`,
     quiet: "border-line-strong text-ink-muted hover:text-ink hover:border-accent-soft border disabled:opacity-50",
     danger: "border-danger text-danger-soft hover:border-danger-mid hover:bg-danger/20 border disabled:opacity-50",
   } as const;

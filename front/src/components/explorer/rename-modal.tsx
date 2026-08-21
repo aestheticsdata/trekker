@@ -5,6 +5,7 @@ import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import { joinPath } from "@helpers/listing";
+import { ON_FILL, PRESS, SELECTED } from "@helpers/press";
 import { ApiError } from "@lib/api/client";
 import { applyRename, previewRename, renameEntry } from "@lib/api/rename";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -254,7 +255,7 @@ function RenamePanel({
                   aria-disabled={disabled}
                   onClick={() => !disabled && setMode(option)}
                   className={`border-line-strong flex items-center border-l px-2.25 font-mono text-2xs first:border-l-0 aria-disabled:opacity-40 ${
-                    active ? "bg-accent-soft text-on-accent font-medium" : "text-ink-muted"
+                    active ? `${SELECTED} font-medium` : "text-ink-muted"
                   }`}
                 >
                   {option}
@@ -363,7 +364,7 @@ function RenamePanel({
           type="button"
           onClick={() => apply.mutate()}
           disabled={!renameable || apply.isPending}
-          className="bg-accent text-on-accent disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed"
+          className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
           {apply.isPending ? "renaming…" : ctaOf(single !== null, plan)}
         </button>
@@ -429,7 +430,7 @@ function Flag({ label, on, onToggle }: { label: string; on: boolean; onToggle: (
       aria-label={label === "g" ? "Replace every occurrence" : "Ignore case"}
       onClick={onToggle}
       className={`flex-1 border py-1.75 text-center font-mono text-xs/none ${
-        on ? "bg-accent text-on-accent border-accent" : "bg-chrome text-ink-muted border-line-strong"
+        on ? `${ON_FILL} border-accent-fill` : "bg-chrome text-ink-muted border-line-strong"
       }`}
     >
       {label}

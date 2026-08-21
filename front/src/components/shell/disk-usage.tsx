@@ -5,6 +5,7 @@ import { useToast } from "@components/ui/toast";
 import { Tooltip, TooltipBlock } from "@components/ui/tooltip";
 import { volumeFor, WARN_CHIP_FILL, WARN_CHIP_INK } from "@helpers/disks";
 import { formatTotal, parentPath } from "@helpers/listing";
+import { PRESS } from "@helpers/press";
 import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK, treemapBands } from "@helpers/treemap";
 import { ApiError } from "@lib/api/client";
 import { fetchDisks } from "@lib/api/disks";
@@ -574,7 +575,7 @@ function Blank({
           type="button"
           onClick={onScan}
           disabled={pending}
-          className="bg-accent text-on-accent flex-none px-2.5 py-1 font-mono text-2xs leading-none font-medium disabled:opacity-60"
+          className={`${PRESS} flex-none px-2.5 py-1 font-mono text-2xs leading-none font-medium disabled:opacity-60`}
         >
           {pending ? "starting…" : failure ? "try again" : "scan now"}
         </button>

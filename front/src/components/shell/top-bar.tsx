@@ -2,6 +2,7 @@
 
 import { Sparkline } from "@components/shell/sparkline";
 import { Tooltip } from "@components/ui/tooltip";
+import { PRESS } from "@helpers/press";
 
 import type { ReactNode } from "react";
 
@@ -190,7 +191,7 @@ export function TopBar({
       <button
         type="button"
         onClick={onOpenPalette}
-        className="bg-accent text-on-accent hover:bg-accent-soft flex h-5 items-center rounded-sm px-2 font-mono text-xs font-medium"
+        className={`${PRESS} flex h-5 items-center rounded-sm px-2 font-mono text-xs font-medium`}
       >
         ⌘K
       </button>

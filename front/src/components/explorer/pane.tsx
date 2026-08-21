@@ -6,6 +6,7 @@ import { TailStrip } from "@components/explorer/tail-strip";
 import { Tooltip } from "@components/ui/tooltip";
 import { ageIndex, HEAT, HEAT_OFF_BAR, HEAT_OFF_INK } from "@helpers/heat";
 import { ageDays, breadcrumbs, formatAge, formatSize, formatTotal, typeTag } from "@helpers/listing";
+import { PRESS } from "@helpers/press";
 import { isLogDirectory } from "@helpers/tail";
 import { ApiError } from "@lib/api/client";
 import { useState } from "react";
@@ -889,7 +890,7 @@ function Placeholder({
           <button
             type="button"
             onClick={action.onSelect}
-            className="bg-accent text-on-accent px-2.5 py-1.25 font-mono text-xs font-medium"
+            className={`${PRESS} px-2.5 py-1.25 font-mono text-xs font-medium`}
           >
             {action.label}
           </button>

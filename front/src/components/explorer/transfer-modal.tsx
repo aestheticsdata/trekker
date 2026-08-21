@@ -4,6 +4,7 @@ import { useAuth } from "@auth/context/AuthContext";
 import { Overlay } from "@components/ui/overlay";
 import { Tooltip } from "@components/ui/tooltip";
 import { formatSize } from "@helpers/listing";
+import { PRESS, SELECTED } from "@helpers/press";
 import { ApiError } from "@lib/api/client";
 import { planTransfer, startTransfer } from "@lib/api/transfers";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -232,9 +233,7 @@ function TransferPanel({
                   setOverrides({});
                 }}
                 className={`border-line-strong flex items-center border-l px-2.25 font-mono text-xs first:border-l-0 ${
-                  strategy === option.value
-                    ? "bg-accent-soft text-on-accent font-medium"
-                    : "text-ink-muted hover:text-ink"
+                  strategy === option.value ? `${SELECTED} font-medium` : "text-ink-muted hover:text-ink"
                 }`}
               >
                 {option.label}
@@ -307,7 +306,7 @@ function TransferPanel({
           type="button"
           onClick={() => start.mutate()}
           disabled={!armed || start.isPending}
-          className="bg-accent-soft text-on-accent disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed"
+          className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
           {start.isPending ? "starting…" : `${verb} ${data ? count(data.items.length, "entry", "entries") : ""}`}
         </button>

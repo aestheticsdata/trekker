@@ -4,6 +4,7 @@ import { useAuth } from "@auth/context/AuthContext";
 import { Overlay } from "@components/ui/overlay";
 import { Tooltip } from "@components/ui/tooltip";
 import { formatTotal } from "@helpers/listing";
+import { PRESS, SELECTED } from "@helpers/press";
 import { ApiError } from "@lib/api/client";
 import { explain, runCompare } from "@lib/api/compare";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -299,7 +300,7 @@ function ComparePanel({
               type="button"
               onClick={resolveByHash}
               disabled={resolving}
-              className="bg-accent-soft text-on-accent border-accent-soft hover:bg-accent border px-3 py-1.5 font-mono text-cmd font-medium"
+              className={`${PRESS} border-accent-fill border px-3 py-1.5 font-mono text-cmd font-medium`}
             >
               {/* The wait, not the request. The two POSTs are answered in
                   milliseconds and the reading takes as long as it takes, so a
@@ -398,7 +399,7 @@ function Filters({
             onClick={() => onFilter(value)}
             className={`border px-1.75 py-0.75 font-mono text-2xs/none ${
               filter === value
-                ? "bg-accent-soft text-on-accent border-accent-soft"
+                ? `${SELECTED} border-accent-soft`
                 : "border-line-strong text-ink-dim hover:text-ink-soft"
             }`}
           >

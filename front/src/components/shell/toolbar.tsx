@@ -1,6 +1,7 @@
 "use client";
 
 import { Tooltip } from "@components/ui/tooltip";
+import { SELECTED } from "@helpers/press";
 
 import type { Action } from "@components/shell/actions";
 
@@ -201,7 +202,7 @@ function Segmented({
             aria-pressed={active}
             onClick={() => onChange(option.value)}
             className={`border-line-strong flex items-center border-l px-2.25 font-mono text-xs first:border-l-0 ${
-              active ? "bg-accent-soft text-on-accent font-medium" : "text-ink-muted hover:text-ink"
+              active ? `${SELECTED} font-medium` : "text-ink-muted hover:text-ink"
             }`}
           >
             {option.label}

@@ -4,6 +4,7 @@ import { useAuth } from "@auth/context/AuthContext";
 import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
+import { PRESS, SELECTED } from "@helpers/press";
 import { ApiError } from "@lib/api/client";
 import { createDirectory, createFile } from "@lib/api/create";
 import { useMutation } from "@tanstack/react-query";
@@ -145,7 +146,7 @@ function CreatePanel({
                 aria-pressed={active}
                 onClick={() => setMode(option)}
                 className={`border-line-strong flex items-center border-l px-2.25 font-mono text-2xs first:border-l-0 ${
-                  active ? "bg-accent-soft text-on-accent font-medium" : "text-ink-muted"
+                  active ? `${SELECTED} font-medium` : "text-ink-muted"
                 }`}
               >
                 {option}
@@ -226,7 +227,7 @@ function CreatePanel({
           type="button"
           onClick={() => create.mutate()}
           disabled={!ready}
-          className="bg-accent text-on-accent disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed"
+          className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
           {create.isPending ? "creating…" : mode === "dir" ? "mkdir" : "create"}
         </button>

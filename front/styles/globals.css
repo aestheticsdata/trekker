@@ -117,8 +117,29 @@
   --color-accent-soft: #3e8fae;
   /* The low step of the load-bar ramp (dim → soft → ink-dim as load rises). */
   --color-accent-dim: #2b6c8e;
-  /* Text on an accent fill — the ⌘K chip and the active segmented cell. */
+  /* Text on a filled control. Legible on `accent-fill`, `accent-fill-hover`,
+   * `accent-soft` and `warning` — and **not** on `accent` itself, which is what
+   * the name used to imply and what TRE-78 had to go and fix in fourteen
+   * places. `accent` is an edge, a bar and a divider; it is not a fill that
+   * carries text. */
   --color-on-accent: #04202f;
+
+  /* The fill a control takes when it is the thing to press (TRE-78).
+   *
+   * `--color-accent` cannot be it. At `#1f7cab` it is an awkward mid-blue that
+   * nothing in this palette clears 4.5:1 against in either direction — dark ink
+   * reaches 3.62, and the lightest ink there is only reaches 4.08. The ink was
+   * never the way out; the fill had to move.
+   *
+   * These two are not new colours. They are `--color-age-4` and `--color-age-5`
+   * under a name that says what they are for, which is the same thing `brand`
+   * and `age-6` already do with one value. Reusing the ramp rather than
+   * inventing a brighter blue keeps this inside the mockup's palette — and the
+   * measurements are comfortable rather than marginal: 7.09:1 at rest and
+   * 9.34:1 hovered, against `accent-soft`'s 4.59 which is nine hundredths over
+   * the line and no basis for a whole app's primary button. */
+  --color-accent-fill: #6fb2c9;
+  --color-accent-fill-hover: #97c9dc;
   --color-warning: #c98a3e;
   /* The same idea as `danger-wash` below, for the sudo chrome (TRE-29): the
    * surface a warning-coloured *label* sits on, rather than a warning-coloured

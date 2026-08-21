@@ -36,6 +36,17 @@ import { fileURLToPath } from "node:url";
 import { WARN_CHIP_FILL, WARN_CHIP_INK } from "../src/helpers/disks.ts";
 import { AGE_BUCKETS, HEAT, HEAT_OFF_INK, PANE_SURFACES } from "../src/helpers/heat.ts";
 import {
+  DANGER_FILL,
+  DANGER_INK,
+  ON_FILL,
+  PRESS,
+  PRESS_FILL,
+  PRESS_HOVER_FILL,
+  PRESS_INK,
+  SELECTED,
+  SELECTED_FILL,
+} from "../src/helpers/press.ts";
+import {
   COMMAND_SURFACE,
   ELEVATE_FILL,
   ELEVATE_INK,
@@ -175,16 +186,70 @@ check("the word TERMINAL", TERMINAL_TITLE_INK, TERMINAL_BAR);
 check("the header beside it, and its two buttons", TERMINAL_LABEL_INK, TERMINAL_BAR);
 
 /*
- * And the pair those two buttons would have worn.
+ * The pair those two buttons would have worn, which was somebody's next ticket
+ * and is now TRE-78's answer.
  *
- * `bg-accent` with `text-on-accent` is what this app reaches for when something
- * is the thing to press, and it is 3.62:1 — under AA, at every size, wherever
- * it already appears. That is a finding about the palette rather than about
- * this strip, so it is printed here rather than quietly worked around: the
- * strip does not use it, and the places that do are somebody's next ticket.
+ * `bg-accent` with `text-on-accent` is what this app reached for whenever
+ * something was the thing to press — the ⌘K chip, every modal's confirm, every
+ * permission toggle — and it measured 3.62:1, under AA at every size in all
+ * fourteen places. The fill moved rather than the ink, because nothing in this
+ * palette clears 4.5:1 against `--color-accent` from either side.
+ *
+ * Both halves of the replacement are checked below, and so is the ink that was
+ * on the delete button: dark navy on dark red, 1.88:1, the worst pair in the
+ * app and on the one action it cannot undo.
+ */
+console.log("\n--- the thing to press (TRE-78) ---");
+check("a filled control at rest", PRESS_INK, PRESS_FILL);
+check("and under the pointer", PRESS_INK, PRESS_HOVER_FILL);
+check("the destructive confirm", DANGER_INK, DANGER_FILL);
+// The thinnest margin that ships here, and the reason it now has a name: as six
+// inline literals it was a pair no check could see.
+check("the current cell of a segmented control", PRESS_INK, SELECTED_FILL);
+
+/*
+ * And the composed string, which no amount of measuring would catch.
+ *
+ * `PRESS` has to be a literal — Tailwind's scanner reads source text, so a
+ * class name built at runtime is one that never gets generated — which means
+ * the app ships a string the checks above never look at. A typo in it would
+ * leave a button with no fill at all and every ratio here still passing. So the
+ * literal is asserted against the constants it is made of.
+ */
+for (const [name, composed, parts] of [
+  ["PRESS", PRESS, [PRESS_FILL, PRESS_INK, `hover:${PRESS_HOVER_FILL}`]],
+  // `ON_FILL` is the same fill and ink with no hover, so its ratios are the two
+  // already checked above; what is worth asserting is that it is still made of
+  // them, and has not drifted onto a colour nothing here measures.
+  ["ON_FILL", ON_FILL, [PRESS_FILL, PRESS_INK]],
+  ["SELECTED", SELECTED, [SELECTED_FILL, PRESS_INK]],
+] as const) {
+  const missing = parts.filter((part) => !composed.split(" ").includes(part));
+  checked += 1;
+  if (missing.length === 0) {
+    console.log(`  ok   ${name} is made of the constants measured above`);
+    continue;
+  }
+  failures += 1;
+  console.log(`  FAIL ${name} is missing ${missing.join(", ")}`);
+}
+
+/*
+ * What it replaced, kept as a measurement rather than a memory.
+ *
+ * `--color-accent` is still the right colour for an edge, a bar and the active
+ * pane's border. It is only a fill carrying text that it cannot be, and the
+ * number is the reason — printed so that the next person to reach for it finds
+ * this line instead of shipping 3.62:1 again.
  */
 const onAccent = ratio(hexOf("text-on-accent"), hexOf("bg-accent"));
-console.log(`  --   on-accent, refused for the buttons  ${onAccent.toFixed(2).padStart(5)}:1  ${verdict(onAccent)}`);
+console.log(
+  `  --   what it replaced: on-accent over accent  ${onAccent.toFixed(2).padStart(5)}:1  ${verdict(onAccent)}`,
+);
+const onDanger = ratio(hexOf("text-on-accent"), hexOf(DANGER_FILL));
+console.log(
+  `  --   and on the delete button                 ${onDanger.toFixed(2).padStart(5)}:1  ${verdict(onDanger)}`,
+);
 
 /*
  * And the ink the strip would have inherited without being measured.

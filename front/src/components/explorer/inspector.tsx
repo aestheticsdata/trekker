@@ -15,6 +15,7 @@ import {
   typeTag,
 } from "@helpers/listing";
 import { describeMode, permissionRows } from "@helpers/permissions";
+import { ON_FILL, PRESS } from "@helpers/press";
 import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
 import { cancelHash, fetchHashState, hashStreamUrl, shortDigest } from "@lib/api/hashes";
@@ -834,9 +835,7 @@ function Permissions({
                     key={index}
                     content={cell.note}
                   >
-                    <span className={`py-0.5 text-center ${cell.granted ? "bg-accent text-on-accent" : "bg-raised"}`}>
-                      {cell.glyph}
-                    </span>
+                    <span className={`py-0.5 text-center ${cell.granted ? ON_FILL : "bg-raised"}`}>{cell.glyph}</span>
                   </Tooltip>
                 ))}
               </Fragment>
@@ -902,7 +901,7 @@ function Actions({
                   ? `bg-line text-ink-dim cursor-not-allowed border py-1.5 text-center font-mono text-cmd ${
                       action.primary ? "border-accent-soft" : "border-line-strong"
                     }`
-                  : "bg-accent-soft text-on-accent border-accent-soft hover:bg-accent border py-1.5 text-center font-mono text-cmd font-medium"
+                  : `${PRESS} border-accent-fill border py-1.5 text-center font-mono text-cmd font-medium`
               }
             >
               {busy ? "signing…" : action.label}
