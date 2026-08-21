@@ -103,7 +103,7 @@ export interface HostProbeResult {
 }
 
 /**
- * What a host reports about itself (TRE-12). Five probes over one channel,
+ * What a host reports about itself (TRE-12). Six probes over one channel,
  * cached 5s server-side — cheap enough for the sidebar to ask per host, which
  * is the only place a real ping comes from: `GET /hosts` carries none.
  *
@@ -117,6 +117,8 @@ export interface HostSummary {
   pingMs: number | null;
   homeDir: string | null;
   remoteUser: string | null;
+  /** What the machine calls itself — never the slug, which is Trekker's name for it. */
+  hostname: string | null;
 }
 
 /**

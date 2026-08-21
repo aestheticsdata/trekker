@@ -19,6 +19,20 @@ export interface HostSummary {
   pingMs: number | null;
   homeDir: string | null;
   remoteUser: string | null;
+  /**
+   * What the machine calls itself, which is not what Trekker calls it.
+   *
+   * A host has a slug and a label here, and neither is its hostname: they are
+   * this installation's names for a machine, chosen by whoever added it. The
+   * terminal's `hostname` command (TRE-35) has to answer the other question,
+   * and answering it with a slug would be a plausible-looking lie.
+   *
+   * Read from `/proc/sys/kernel/hostname` with `tail`, exactly as the four
+   * probes above are read, so this costs the exec allowlist nothing — `hostname`
+   * the *program* is not on it and does not need to be. A machine without
+   * `/proc` reports null, as it already does for uptime, load and memory.
+   */
+  hostname: string | null;
 }
 
 interface CacheEntry {
@@ -61,12 +75,13 @@ export class HostSummaryService {
   }
 
   private async collect(driver: HostDriver): Promise<HostSummary> {
-    const [uptimeSeconds, load, memory, home, remoteUser] = await Promise.all([
+    const [uptimeSeconds, load, memory, home, remoteUser, hostname] = await Promise.all([
       this.readProcNumber(driver, "/proc/uptime"),
       this.readLoad(driver),
       this.readMemory(driver),
       this.timedRealpath(driver),
       this.readUser(driver),
+      this.readHostname(driver),
     ]);
 
     return {
@@ -76,6 +91,7 @@ export class HostSummaryService {
       pingMs: home.pingMs,
       homeDir: home.path,
       remoteUser,
+      hostname,
     };
   }
 
@@ -122,6 +138,13 @@ export class HostSummaryService {
     } catch {
       return null;
     }
+  }
+
+  private async readHostname(driver: HostDriver): Promise<string | null> {
+    const text = await this.tailOrNull(driver, "/proc/sys/kernel/hostname", 1);
+    if (text === null) return null;
+    const name = text.trim();
+    return name.length > 0 ? name : null;
   }
 
   private async timedRealpath(driver: HostDriver): Promise<{ path: string | null; pingMs: number | null }> {
