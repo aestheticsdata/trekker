@@ -80,4 +80,10 @@ export const QUERY_KEYS = {
   ACTIVITY: "activity",
   /** The layout the account left, asked for only on a cold open (TRE-51). */
   LAYOUT: "layout",
+  /**
+   * The account's saved views (TRE-37). Its own key rather than part of the
+   * layout's: that one is asked once per cold open and never refetched, and
+   * this one is invalidated by every save, rename and delete.
+   */
+  VIEWS: "views",
 } as const;

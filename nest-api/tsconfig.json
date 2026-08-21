@@ -29,7 +29,8 @@
       "@scans/*": ["./src/scans/*"],
       "@secrets/*": ["./src/secrets/*"],
       "@transfers/*": ["./src/transfers/*"],
-      "@users/*": ["./src/users/*"]
+      "@users/*": ["./src/users/*"],
+      "@views/*": ["./src/views/*"]
     },
     "incremental": true,
     "skipLibCheck": true,

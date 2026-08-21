@@ -25,7 +25,18 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { commandFor, hintFor, KEYS, matches, writeChord } from "../src/helpers/keys.ts";
+import {
+  commandFor,
+  hintFor,
+  isViewSlot,
+  KEYS,
+  matches,
+  VIEW_SLOTS,
+  viewChord,
+  viewSlotFor,
+  writeChord,
+  writeViewSlot,
+} from "../src/helpers/keys.ts";
 import { registerAliases } from "./aliases.ts";
 
 // The registry imports `@helpers/keys`, which is the whole point of it; see
@@ -58,6 +69,20 @@ function ok(what: string, condition: boolean) {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, "..", "src");
+
+/**
+ * A file with its comments taken out.
+ *
+ * Every grep below is about what the code *does*. A comment explaining why the
+ * explorer no longer carries `case "F5":`, or why the sidebar reads `⌥1–9` off
+ * the table rather than writing it, would otherwise fail the check it exists to
+ * describe — which teaches the next reader to delete the explanation.
+ */
+function code(path: readonly string[]): string {
+  return readFileSync(join(SRC, ...path), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
 
 const TABLE = KEYS as Readonly<Partial<Record<CommandId, Chord>>>;
 const ENTRIES = Object.entries(TABLE) as ReadonlyArray<[CommandId, Chord]>;
@@ -137,6 +162,49 @@ for (const key of ["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Ba
   check(`${key} stays the pane's`, commandFor({ key }), null);
 }
 
+// ------------------------------------------------------- the nine view slots
+
+console.log("--- ⌥1–⌥9, which reach whatever the account put there ---");
+
+for (const slot of VIEW_SLOTS) {
+  const chord = viewChord(slot);
+  check(`⌥${slot} reads as itself`, writeViewSlot(slot), `⌥${slot}`);
+  // What a browser actually delivers on a Mac: the layout has turned the `key`
+  // into something else entirely, and only `code` still says which key it was.
+  check(
+    `⌥${slot} is found by its physical key, whatever the layout made of it`,
+    viewSlotFor({ key: "¡", code: chord.code, altKey: true }),
+    slot,
+  );
+  // And on a keyboard where ⌥ leaves the digit alone, with no `code` at all —
+  // which is also every hand-made event, including the ones above.
+  check(`⌥${slot} is found without a code`, viewSlotFor({ key: String(slot), altKey: true }), slot);
+  ok(`⌥${slot} is not ${slot}`, viewSlotFor({ key: String(slot), code: chord.code }) === null);
+  ok(`⌥${slot} is not ⌘${slot}`, viewSlotFor({ key: String(slot), code: chord.code, altKey: true, metaKey: true }) === null);
+  ok(`⌥${slot} is not ⌥⇧${slot}`, viewSlotFor({ key: String(slot), code: chord.code, altKey: true, shiftKey: true }) === null);
+  // A slot is not a command, and must never resolve as one: `commandFor` walks
+  // a table of fixed operations, and these reach whatever the account saved.
+  check(`⌥${slot} is no command`, commandFor({ key: String(slot), code: chord.code, altKey: true }), null);
+}
+
+check("⌥0 is not a slot", viewSlotFor({ key: "0", code: "Digit0", altKey: true }), null);
+check("nor is ⌥↩, which is the terminal", viewSlotFor({ key: "Enter", altKey: true }), null);
+check("and the terminal is still the terminal", commandFor({ key: "Enter", altKey: true }), "terminal");
+check("there are nine of them", VIEW_SLOTS.length, 9);
+
+ok("a slot off the wire is checked", isViewSlot(1) && isViewSlot(9));
+ok("and 0, 10 and a string are not slots", !isViewSlot(0) && !isViewSlot(10) && !isViewSlot("3"));
+
+// No view chord may collide with a command chord, or ⌥3 would both restore a
+// view and run an operation — in whichever order the two listeners happen to be
+// attached, which is not a thing anybody should have to reason about.
+for (const slot of VIEW_SLOTS) {
+  const written = writeViewSlot(slot);
+  const clash = spelled.get(written);
+  checks += 1;
+  if (clash !== undefined) fail(`${written} is claimed by both the view slots and ${clash}`);
+}
+
 // ------------------------------------------- the registry does not spell them
 
 console.log("--- the action registry reads the table rather than copying it ---");
@@ -161,7 +229,7 @@ for (const row of resolveActions(CONTEXT, "toolbar")) {
   ok(`${row.id}: a mark is not a chord`, row.mark === undefined || row.hint === undefined);
 }
 
-const registry = readFileSync(join(SRC, "components", "shell", "actions.ts"), "utf8");
+const registry = code(["components", "shell", "actions.ts"]);
 // One `hintFor(` in the file: the line inside `resolveActions`. A second would
 // be a surface asking for its own copy, and a `hint:` literal anywhere in the
 // specs would be the old arrangement growing back.
@@ -172,7 +240,7 @@ check("no hint is written into a spec", registry.match(/^\s*hint:\s*"/gm)?.lengt
 
 console.log("--- and the keyboard layer dispatches from it ---");
 
-const explorer = readFileSync(join(SRC, "components", "explorer", "explorer.tsx"), "utf8");
+const explorer = code(["components", "explorer", "explorer.tsx"]);
 
 ok("the pane's switch runs on `commandFor`", explorer.includes("switch (commandFor(event))"));
 for (const key of ["F2", "F3", "F5", "F6", "F7", "Delete"]) {
@@ -187,9 +255,23 @@ check(
   explorer.match(/(?<!function )useShortcut\(\{/g)?.length ?? 0,
 );
 ok("⌥↩ is matched against the table", explorer.includes("matches(event, KEYS.terminal)"));
+// And the nine slots the same way (TRE-37). `event.code` is the only honest
+// question for ⌥ plus a digit, and asking it anywhere but in the keymap is how
+// one handler ends up right and the next one layout-dependent.
+ok("⌥1–9 are resolved by the keymap", explorer.includes("viewSlotFor(event)"));
+ok("and the explorer names no Digit code itself", !explorer.includes("Digit"));
+
+const keys = code(["helpers", "keys.ts"]);
+ok("only the keymap spells a Digit code", keys.includes("`Digit${slot}`"));
+
+// The sidebar's section header advertises the range; the top bar's chips
+// advertise the individual chords. Neither may write one as a literal.
+const sidebar = code(["components", "sidebar", "sidebar.tsx"]);
+ok("the sidebar names the range from the table", sidebar.includes("writeViewSlot(VIEW_SLOTS[0])"));
+ok("and does not write ⌥1–9 in a string", !sidebar.includes("⌥1"));
 
 // The chip in the corner, which is the most-read shortcut in the application.
-const topBar = readFileSync(join(SRC, "components", "shell", "top-bar.tsx"), "utf8");
+const topBar = code(["components", "shell", "top-bar.tsx"]);
 ok("the top bar's chip names itself from the table", topBar.includes('hintFor("palette")'));
 ok("and no longer says ⌘K in a string", !topBar.includes(">⌘K<"));
 

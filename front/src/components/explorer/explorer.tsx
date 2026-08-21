@@ -28,9 +28,10 @@ import { useToast } from "@components/ui/toast";
 import { useUploads } from "@components/ui/uploads";
 import { cutNamesIn, describeClipboard, nameList, resolvePaste, splitHeld } from "@helpers/clipboard";
 import { volumeFor } from "@helpers/disks";
-import { commandFor, hintFor, KEYS, matches } from "@helpers/keys";
+import { commandFor, hintFor, KEYS, matches, viewSlotFor, writeViewSlot } from "@helpers/keys";
 import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
 import { ACTION_GLYPH, GLYPH } from "@helpers/palette";
+import { describePanes } from "@helpers/views";
 import { createBookmark, fetchBookmarks } from "@lib/api/bookmarks";
 import { ApiError } from "@lib/api/client";
 import { fetchDisks } from "@lib/api/disks";
@@ -65,6 +66,7 @@ import type { CompareEntry, CompareResult } from "@lib/api/compare";
 import type { DiskMount } from "@lib/api/disks";
 import type { FileRow } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
+import type { SavedView } from "@schemas/layout";
 
 /**
  * The two panes and everything shared between them (TRE-16, rewired by TRE-18).
@@ -167,6 +169,11 @@ export function Explorer({
   onTerminalOpenChange,
   paletteOpen,
   onPaletteOpenChange,
+  paletteQuery = "",
+  savedViews = [],
+  viewOverlayOpen = false,
+  onRestoreView,
+  onSaveView,
   onClipboardChange,
   clearClipboardRequested,
   onClearClipboardRequestedChange,
@@ -272,6 +279,21 @@ export function Explorer({
    */
   paletteOpen: boolean;
   onPaletteOpenChange: (open: boolean) => void;
+  /** What the palette opens with, when something opened it on a subject (TRE-37). */
+  paletteQuery?: string;
+  /**
+   * The account's saved views (TRE-37).
+   *
+   * Here so the palette can list them, which is the ticket's own answer to a
+   * strip in the top bar that only has room for four. The views themselves are
+   * the page's — restoring one applies a whole layout, and half of that layout
+   * is not this component's to write.
+   */
+  savedViews?: readonly SavedView[];
+  /** The save form or the rebind dialogue, so the pane's keys stand down under them. */
+  viewOverlayOpen?: boolean;
+  onRestoreView?: (id: string) => void;
+  onSaveView?: () => void;
   /**
    * What the clipboard is holding, in the one sentence the status bar shows
    * (TRE-71 §3) — null when it is holding nothing.
@@ -472,6 +494,7 @@ export function Explorer({
     terminalPermissions !== null ||
     terminalDelete !== null ||
     paletteOpen ||
+    viewOverlayOpen ||
     menu !== null;
 
   useEffect(() => {
@@ -1317,9 +1340,11 @@ export function Explorer({
    * operation is called, what it needs and what pressing it does are answered
    * once, and the palette gets the same answers the toolbar and the menu do.
    *
-   * VIEWS is absent, and deliberately so. There are no saved views yet — TRE-37
-   * builds them — and a group header over nothing is not a feature waiting to
-   * happen, it is a claim about what this app has.
+   * VIEWS was absent until TRE-37, deliberately: a group header over nothing is
+   * not a feature waiting to happen, it is a claim about what this app has. It
+   * is a group rather than a surface, which is what the palette taking its
+   * entries as a list bought — the strip in the top bar draws four, and this is
+   * where the fifth one is, with its chord beside it.
    */
   const paletteEntries = (): readonly PaletteEntry[] => {
     /**
@@ -1431,6 +1456,32 @@ export function Explorer({
         detail: activePane.path,
         hint: hintFor("terminal"),
         run: () => onTerminalOpenChange(!terminalOpen),
+      },
+
+      ...savedViews.map(
+        (view): PaletteEntry => ({
+          id: `views:restore:${view.id}`,
+          group: "VIEWS",
+          icon: GLYPH.view,
+          label: `restore the view ${view.name}`,
+          detail: describePanes(view.layout, (hostId) => hosts.find((host) => host.id === hostId)?.label ?? null),
+          hint: view.slot === null ? undefined : writeViewSlot(view.slot),
+          // Offered even when it is the one already restored: what is on screen
+          // may have moved away from it since, and re-running it is how you get
+          // back. `unavailableReason` here would be a claim that nothing has
+          // changed, which is the dirty dot's job and not this row's.
+          unavailableReason: onRestoreView === undefined ? "Saved views are not available here" : undefined,
+          run: () => onRestoreView?.(view.id),
+        }),
+      ),
+      {
+        id: "views:save",
+        group: "VIEWS",
+        icon: GLYPH.saveView,
+        label: "save this layout as a view",
+        detail: "both panes, their sorts, the split and the glob",
+        unavailableReason: onSaveView === undefined ? "Saved views are not available here" : undefined,
+        run: () => onSaveView?.(),
       },
 
       ...hosts.map((host, index): PaletteEntry => {
@@ -1659,6 +1710,45 @@ export function Explorer({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [overlayOpen, terminalOpen, onTerminalOpenChange]);
+
+  /**
+   * `⌥1`–`⌥9` restore a saved view (TRE-37 §1).
+   *
+   * One listener for all nine rather than nine `useShortcut`s, and the same
+   * shape `⌥↩` above takes: the pane's own keys stand down on `altKey`, so a
+   * chord that carries ⌥ needs a listener of its own either way, and nine of
+   * them would be nine subscriptions for one question.
+   *
+   * `viewSlotFor` reads the *physical* key. On a Mac, ⌥1 is not `"1"` — the
+   * layout decides, and it is `¡` on a US keyboard — so a handler matching on
+   * `event.key` would work on nobody's machine but the one it was written on.
+   *
+   * Not `inFields`: `⌥3` inside the glob field or the terminal's prompt is
+   * somebody typing, and yanking both panes out from under them mid-word is the
+   * behaviour a shortcut earns by being too eager.
+   */
+  useEffect(() => {
+    if (overlayOpen || onRestoreView === undefined) return;
+
+    const handler = (event: KeyboardEvent) => {
+      const slot = viewSlotFor(event);
+      if (slot === null) return;
+
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+
+      // The key is claimed whether or not a view is in the slot. `⌥4` on an
+      // account with three views should do nothing visible, not fall through to
+      // whatever the browser makes of ⌥4 in a text field somewhere.
+      event.preventDefault();
+      const view = savedViews.find((candidate) => candidate.slot === slot);
+      if (view) onRestoreView(view.id);
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [overlayOpen, savedViews, onRestoreView]);
 
   // ⌘I is its own listener rather than a case in the switch above: that one
   // stands down while a modifier is held and while the glob field has focus,
@@ -2147,6 +2237,7 @@ export function Explorer({
             onTerminalOpenChange(true);
             setPendingCommand(line);
           }}
+          initialQuery={paletteQuery}
           onClosed={() => onPaletteOpenChange(false)}
         />
       )}

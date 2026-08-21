@@ -1,7 +1,6 @@
 "use client";
 
 import { Sparkline } from "@components/shell/sparkline";
-import { Tooltip } from "@components/ui/tooltip";
 import { hintFor } from "@helpers/keys";
 import { PRESS } from "@helpers/press";
 
@@ -34,26 +33,25 @@ export interface MachineStats {
   load: readonly number[];
 }
 
-export interface SavedView {
-  id: string;
-  name: string;
-  /** "⌥1" and friends. */
-  shortcut?: string;
-}
-
-/** How many view chips fit before the rest collapse into "+n". */
-const VISIBLE_VIEWS = 4;
-
 export function TopBar({
   host,
   stats,
-  views = [],
+  views,
   sudo,
   onOpenPalette,
 }: {
   host: HostChip | null;
   stats: MachineStats | null;
-  views?: readonly SavedView[];
+  /**
+   * The saved-views strip (TRE-37 §4), as a node rather than as data.
+   *
+   * The same call `sudo` below makes, and for a stronger reason: the strip
+   * compares what is saved against what is on screen on every render, and it
+   * owns a context menu and a modal. Passing rows here would mean this bar
+   * taking the whole layout as a prop and re-rendering on every keystroke in
+   * the glob field, which is precisely what it is not for.
+   */
+  views?: ReactNode;
   /**
    * The sudo badge for the host named in the chip (TRE-29).
    *
@@ -66,9 +64,6 @@ export function TopBar({
   sudo?: ReactNode;
   onOpenPalette?: () => void;
 }) {
-  const shown = views.slice(0, VISIBLE_VIEWS);
-  const overflow = views.length - shown.length;
-
   return (
     <header className="bg-chrome border-line flex h-topbar shrink-0 items-center gap-2.5 border-b px-2.5">
       <span className="flex items-center gap-2.25 pr-1.5 select-none">
@@ -125,33 +120,16 @@ export function TopBar({
           nested in a bordered chip reads as one thing with a seam. */}
       {host && sudo}
 
-      {views.length > 0 && (
-        <nav
-          aria-label="Saved views"
-          className="flex min-w-0 items-center gap-1"
-        >
-          {shown.map((view) => (
-            <button
-              key={view.id}
-              type="button"
-              className="text-ink-muted hover:text-ink hover:bg-raised max-w-28 truncate rounded-xs px-1.5 py-0.5 text-2xs tracking-label"
-            >
-              {view.name}
-              {view.shortcut && <span className="text-ink-faint ml-1 font-mono">{view.shortcut}</span>}
-            </button>
-          ))}
-          {overflow > 0 && (
-            <Tooltip
-              content={views
-                .slice(VISIBLE_VIEWS)
-                .map((view) => view.name)
-                .join("\n")}
-            >
-              <span className="text-ink-faint font-mono text-2xs">+{overflow}</span>
-            </Tooltip>
-          )}
-        </nav>
+      {/* A rule between the host and the views, as 2a draws it: the chip says
+          which machine, the strip says which arrangement, and they are two
+          different questions. */}
+      {views && (
+        <span
+          aria-hidden
+          className="bg-line h-4 w-px flex-none"
+        />
       )}
+      {views}
 
       <div className="flex-1" />
 

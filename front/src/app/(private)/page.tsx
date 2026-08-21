@@ -6,8 +6,15 @@ import { isRule, resolveActions } from "@components/shell/actions";
 import { AppShell } from "@components/shell/app-shell";
 import { DiskUsage } from "@components/shell/disk-usage";
 import { Sidebar } from "@components/sidebar/sidebar";
+import { ViewForm } from "@components/views/view-form";
+import { ViewList } from "@components/views/view-list";
+import { ViewMenu } from "@components/views/view-menu";
+import { ViewRebind } from "@components/views/view-rebind";
+import { ViewStrip } from "@components/views/view-strip";
 import { formatInstant, formatSize } from "@helpers/listing";
+import { brokenPanes, isDirty, layoutOf } from "@helpers/views";
 import { fetchHostMetrics, fetchHostSummary, fetchHosts } from "@lib/api/hosts";
+import { fetchViews } from "@lib/api/views";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { explorerParams, LEFT_KEYS, paneParams, RIGHT_KEYS } from "@lib/url/explorer-params";
 import { useSessionLayout } from "@lib/url/use-session-layout";
@@ -21,8 +28,10 @@ import type { PaneIndex } from "@components/explorer/pane-state";
 import type { RenameMode } from "@components/explorer/rename-modal";
 import type { ActionContext, ActionId } from "@components/shell/actions";
 import type { SelectionSummary } from "@components/shell/status-bar";
+import type { Point } from "@helpers/menu";
 import type { FileRow } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
+import type { SavedView, StoredLayout, ViewLayout } from "@schemas/layout";
 
 /**
  * The explorer, in the chrome (TRE-16, TRE-18).
@@ -77,6 +86,37 @@ export default function HomePage() {
    * into somebody else's session.
    */
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /**
+   * What the palette opens with. Only ever set by the views strip's `+n`
+   * overflow, which opens it on the word `view` rather than growing a menu.
+   */
+  const [paletteQuery, setPaletteQuery] = useState("");
+  /**
+   * The saved view currently on screen, or null when the layout belongs to
+   * nobody in particular (TRE-37 §3).
+   *
+   * Local, and deliberately not in the URL. A link is already a layout — that
+   * is what TRE-18 built — and carrying a view id in it would mean a recipient
+   * seeing a name for something that is not theirs, or worse, a chip lit for a
+   * view of their own that happens to share an id. What travels is the
+   * arrangement; the name for it is this session's.
+   *
+   * Cleared by nothing except restoring another one. Moving a pane makes the
+   * view *dirty*, not absent: the dot exists precisely to say "this is `deploy`,
+   * changed", and dropping the name at the first arrow key would delete the
+   * only thing that sentence needs.
+   */
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  /** Which view's menu is open and where, or null for none. */
+  const [viewMenu, setViewMenu] = useState<{ id: string; point: Point } | null>(null);
+  /**
+   * The save form: null when closed, `{ id: null }` when saving what is on
+   * screen, `{ id }` when editing one that exists. A shape rather than two
+   * booleans, for the reason `renameMode` is one.
+   */
+  const [viewForm, setViewForm] = useState<{ id: string | null } | null>(null);
+  /** The view whose host has gone, waiting for somewhere to put that pane. */
+  const [viewRebindId, setViewRebindId] = useState<string | null>(null);
   /**
    * A request, not a state (TRE-26).
    *
@@ -198,6 +238,9 @@ export default function HomePage() {
     void (pane === 0 ? setLeft(next) : setRight(next));
   };
 
+  /** The whole layout, in one value: what a view is cut from and compared to. */
+  const liveLayout: StoredLayout = { ...shared, a: left, b: right };
+
   /**
    * A bare URL reopens where this account left off (TRE-51). A URL carrying
    * any parameter is a link and is left alone — the hook decides that on its
@@ -207,7 +250,7 @@ export default function HomePage() {
    * back button must not walk back to an explorer the user never saw.
    */
   useSessionLayout({
-    current: { ...shared, a: left, b: right },
+    current: liveLayout,
     applyLayout: (layout) => {
       const { a, b, ...rest } = layout;
       void setShared(rest, { history: "replace" });
@@ -216,6 +259,80 @@ export default function HomePage() {
     },
     knownHostIds: hosts?.map((host) => host.id),
   });
+
+  // ---- saved views (TRE-37) ------------------------------------------------
+
+  const { data: viewData } = useQuery({
+    queryKey: [QUERY_KEYS.VIEWS],
+    queryFn: fetchViews,
+    staleTime: 60_000,
+    throwOnError: false,
+  });
+  const savedViews = viewData?.views ?? [];
+
+  const labelOf = (hostId: string | null) => hosts?.find((host) => host.id === hostId)?.label ?? null;
+
+  /** What a view would be cut from right now, and what the dot compares against. */
+  const currentViewLayout: ViewLayout = layoutOf(liveLayout);
+  const activeView = savedViews.find((view) => view.id === activeViewId) ?? null;
+  const viewDirty = activeView !== null && isDirty(activeView.layout, currentViewLayout);
+
+  /**
+   * Restoring is a navigation, which is the whole reason TRE-18 put the layout
+   * in the URL: the back button undoes it for free, and the address that
+   * results is the view, shareable as a link.
+   *
+   * Both panes lose their tail. A tail follows a file on the pane's own host
+   * (TRE-34), a view moves the pane — possibly to another machine — and a mark
+   * carried across is a stream pointed at a file that is very likely not there.
+   */
+  const applyViewLayout = (layout: ViewLayout) => {
+    setMoved(true);
+    void setShared({ split: layout.split, insp: layout.insp, heat: layout.heat, glob: layout.glob });
+    void setLeft({ ...layout.a, tail: null });
+    void setRight({ ...layout.b, tail: null });
+  };
+
+  /**
+   * Restore one, or say why it cannot be restored as saved.
+   *
+   * The check is against the hosts this account actually has. A view naming a
+   * deleted host is not degraded quietly the way a cold open is — pressing `⌥3`
+   * is a request for a specific arrangement, and answering it with a different
+   * one without saying so is the app being wrong confidently.
+   */
+  const restoreView = (id: string) => {
+    const view = savedViews.find((candidate) => candidate.id === id);
+    if (!view) return;
+    // Nothing to check against yet. `⌥3` in the half-second before the hosts
+    // arrive would otherwise find every bound pane broken and open the rebind
+    // dialogue with an empty list of machines to choose from.
+    if (hosts === undefined) return;
+
+    if (
+      brokenPanes(
+        view.layout,
+        view.hostLabels,
+        hosts.map((host) => host.id),
+      ).length > 0
+    ) {
+      setViewRebindId(view.id);
+      return;
+    }
+
+    applyViewLayout(view.layout);
+    setActiveViewId(view.id);
+  };
+
+  const openViewMenu = (id: string, point: Point) => setViewMenu({ id, point });
+  const openPalette = (query = "") => {
+    setPaletteQuery(query);
+    setPaletteOpen(true);
+  };
+
+  const menuView = savedViews.find((view) => view.id === viewMenu?.id) ?? null;
+  const formView = savedViews.find((view) => view.id === viewForm?.id) ?? null;
+  const rebindView = savedViews.find((view) => view.id === viewRebindId) ?? null;
 
   // The chrome describes the active pane's host, which is now a real answer
   // rather than "the first one" — the sidebar can point each pane anywhere.
@@ -271,7 +388,20 @@ export default function HomePage() {
         io: metrics?.io ? formatThroughput(metrics.io.bytesPerSec) : null,
         load: metrics?.history ?? [],
       }}
-      views={[]}
+      views={
+        <ViewStrip
+          views={savedViews}
+          activeId={activeViewId}
+          dirty={viewDirty}
+          labelOf={labelOf}
+          onRestore={restoreView}
+          onMenu={openViewMenu}
+          onSave={() => setViewForm({ id: null })}
+          // The overflow is the palette, on the word that finds every view —
+          // rather than a second list nobody would find twice (TRE-37 §4).
+          onOverflow={() => openPalette("view")}
+        />
+      }
       // Only ever for the host the chip names — the window is per host, and a
       // badge that followed anything else would be reporting on a machine the
       // reader is not looking at (TRE-29).
@@ -291,12 +421,24 @@ export default function HomePage() {
       inspector={shared.insp}
       onInspectorChange={(insp) => changeLayout({ insp })}
       actions={actions}
-      onOpenPalette={() => setPaletteOpen(true)}
+      onOpenPalette={() => openPalette()}
       sidebar={
         <Sidebar
           hosts={hosts ?? []}
           paneHostIds={[panes[0].host, panes[1].host]}
           activePane={active}
+          views={
+            <ViewList
+              views={savedViews}
+              unreadable={viewData?.unreadable ?? 0}
+              activeId={activeViewId}
+              dirty={viewDirty}
+              labelOf={labelOf}
+              onRestore={restoreView}
+              onMenu={openViewMenu}
+              onSave={() => setViewForm({ id: null })}
+            />
+          }
           onBindHost={(pane, host) => bind(pane, host)}
           onNavigate={(host, path) => bind(active, host, path)}
         />
@@ -367,11 +509,66 @@ export default function HomePage() {
         onTerminalOpenChange={setTerminalOpen}
         paletteOpen={paletteOpen}
         onPaletteOpenChange={setPaletteOpen}
+        paletteQuery={paletteQuery}
+        savedViews={savedViews}
+        viewOverlayOpen={viewForm !== null || viewRebindId !== null || viewMenu !== null}
+        onRestoreView={restoreView}
+        onSaveView={() => setViewForm({ id: null })}
         onClipboardChange={setClipboard}
         clearClipboardRequested={clearClipboardRequested}
         onClearClipboardRequestedChange={setClearClipboardRequested}
         onActionContextChange={setActionContext}
       />
+
+      {/* Inside the shell rather than beside it: all three need the toasts, and
+          `ToastProvider` is `AppShell`'s. They sit here with the explorer for
+          the same reason its own modals do. */}
+      {menuView && viewMenu && (
+        <ViewMenu
+          view={menuView}
+          views={savedViews}
+          point={viewMenu.point}
+          current={currentViewLayout}
+          onRestore={() => restoreView(menuView.id)}
+          onRename={() => setViewForm({ id: menuView.id })}
+          onAdopt={() => setActiveViewId(menuView.id)}
+          onClose={() => setViewMenu(null)}
+        />
+      )}
+
+      {viewForm && (
+        <ViewForm
+          view={formView}
+          views={savedViews}
+          current={currentViewLayout}
+          hosts={hosts ?? []}
+          onClose={() => setViewForm(null)}
+          // A view just *saved* is the view you are standing in, so the strip
+          // lights it and the dot has something to be about. A view merely
+          // renamed is not: renaming `log triage` while standing in `deploy`
+          // must not move the chip, and the dot would then be comparing against
+          // a layout nobody restored.
+          onSaved={(saved: SavedView) => {
+            if (viewForm.id === null) setActiveViewId(saved.id);
+          }}
+        />
+      )}
+
+      {rebindView && (
+        <ViewRebind
+          view={rebindView}
+          broken={brokenPanes(rebindView.layout, rebindView.hostLabels, hosts?.map((host) => host.id) ?? [])}
+          hosts={hosts ?? []}
+          onClose={() => setViewRebindId(null)}
+          onRestore={(layout) => {
+            applyViewLayout(layout);
+            // Still the active view, and now deliberately dirty: what is on
+            // screen is not what is stored, which is exactly what the dot says
+            // and what "Update from current" is for.
+            setActiveViewId(rebindView.id);
+          }}
+        />
+      )}
     </AppShell>
   );
 

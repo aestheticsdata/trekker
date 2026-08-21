@@ -72,8 +72,32 @@ export interface ActionContext {
   holding: boolean;
 }
 
+/**
+ * The least a row has to be for `ContextMenu` to draw it.
+ *
+ * `Action` is the only thing in *this* file that satisfies it, and that is the
+ * point of separating them: TRE-37's views menu — restore, update, rename,
+ * duplicate, delete — is a menu over a saved view rather than over a selection,
+ * so it has no place in this registry and no `ActionId` to be keyed by. It
+ * still wants the same panel, the same keyboard, the same disabled treatment.
+ * A menu that draws one kind of row and a second menu written for the other is
+ * two menus that drift.
+ */
+export interface MenuEntry {
+  id: string;
+  label: string;
+  /** The key that reaches this, where one does. */
+  hint?: string;
+  /** Absent means enabled. Present means disabled, and this is the sentence. */
+  unavailableReason?: string;
+  danger?: boolean;
+}
+
+/** A row of any menu: an entry, or the rule between two blocks of them. */
+export type MenuRow = MenuEntry | { rule: true };
+
 /** One rendered entry. The shape the toolbar's button has always taken. */
-export interface Action {
+export interface Action extends MenuEntry {
   id: ActionId;
   label: string;
   /**
@@ -102,7 +126,8 @@ export interface Action {
 /** A row of a surface: an action, or the rule between two blocks of them. */
 export type ActionRow = Action | { rule: true };
 
-export function isRule(row: ActionRow): row is { rule: true } {
+/** Narrows either kind of row, so one menu component serves both. */
+export function isRule(row: MenuRow): row is { rule: true } {
   return "rule" in row;
 }
 

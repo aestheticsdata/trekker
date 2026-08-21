@@ -198,7 +198,12 @@ describe("deleting a user", () => {
     const userId = await makeUser();
     const host = await prisma.hosts.create({ data: sshHost(userId, "everything") });
     await prisma.views.create({
-      data: { userId, name: "Side by side", panes: [{ hostId: host.id, path: "/srv" }] },
+      data: {
+        userId,
+        name: "Side by side",
+        layout: { a: { host: host.id, path: "/srv", sort: "name", dir: 1 } },
+        hostLabels: {},
+      },
     });
     await prisma.transferJobs.create({
       data: { userId, srcPath: "/a", dstPath: "/b", operation: "MOVE" },
@@ -211,6 +216,58 @@ describe("deleting a user", () => {
     expect(await prisma.views.count({ where: { userId } })).toBe(0);
     expect(await prisma.transferJobs.count({ where: { userId } })).toBe(0);
     expect(await prisma.activityLog.count({ where: { userId } })).toBe(0);
+  });
+});
+
+describe("one shortcut per account", () => {
+  /** A view with nothing but a name and a layout, so a test can say what it means. */
+  function view(userId: string, name: string, slot: number | null) {
+    return {
+      userId,
+      name,
+      slot,
+      layout: { a: { host: null, path: "/", sort: "name", dir: 1 } },
+      hostLabels: {},
+    };
+  }
+
+  it("refuses a second view claiming the same ⌥n", async () => {
+    // The promise the shortcut picker leans on (TRE-37 §1). Two views on `⌥3`
+    // is a key that does one of two things depending on which row a query
+    // happened to return first, and the service works around this constraint
+    // deliberately — it clears the other view's slot in the same transaction.
+    // If the database stopped refusing, that transaction would silently become
+    // a no-op and the duplicate would ship.
+    const userId = await makeUser();
+    await prisma.views.create({ data: view(userId, "deploy", 3) });
+
+    await expect(prisma.views.create({ data: view(userId, "log triage", 3) })).rejects.toThrow();
+  });
+
+  it("lets any number of views have no shortcut at all", async () => {
+    // MySQL counts every NULL as distinct, which is the whole reason the column
+    // is nullable rather than zero-for-none. Most views never get a chord.
+    const userId = await makeUser();
+    await prisma.views.create({ data: view(userId, "one", null) });
+    await prisma.views.create({ data: view(userId, "two", null) });
+
+    expect(await prisma.views.count({ where: { userId } })).toBe(2);
+  });
+
+  it("is per account, so two people can both hold ⌥1", async () => {
+    const first = await makeUser();
+    const second = await makeUser();
+    await prisma.views.create({ data: view(first, "mine", 1) });
+    await prisma.views.create({ data: view(second, "theirs", 1) });
+
+    expect(await prisma.views.count({ where: { slot: 1, userId: { in: [first, second] } } })).toBe(2);
+  });
+
+  it("refuses two views of the same name, which is what the strip would show twice", async () => {
+    const userId = await makeUser();
+    await prisma.views.create({ data: view(userId, "deploy", null) });
+
+    await expect(prisma.views.create({ data: view(userId, "deploy", null) })).rejects.toThrow();
   });
 });
 

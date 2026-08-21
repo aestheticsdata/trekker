@@ -18,6 +18,7 @@
     "verify:palette": "node scripts/verify-palette.ts",
     "verify:permissions": "node scripts/verify-permissions.ts",
     "verify:terminal": "node scripts/verify-terminal.ts",
+    "verify:views": "node scripts/verify-views.ts",
     "verify:virtual": "node scripts/verify-virtual.ts"
   },
   "dependencies": {

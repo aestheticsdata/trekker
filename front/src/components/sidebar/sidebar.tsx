@@ -6,6 +6,7 @@ import { Volumes } from "@components/sidebar/volumes";
 import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import { TransferQueue } from "@components/ui/transfers";
+import { VIEW_SLOTS, writeViewSlot } from "@helpers/keys";
 import { deleteBookmark, fetchBookmarks } from "@lib/api/bookmarks";
 import { fetchHostSummary } from "@lib/api/hosts";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -18,11 +19,13 @@ import type { ReactNode } from "react";
 /**
  * The 176px left sidebar (TRE-18 §2, §3), built from the App mockup's markup.
  *
- * Five sections ship here. VOLUMES was deliberately absent rather than empty —
- * `GET /hosts/:id/summary` carries uptime, load, memory and ping and no disk
+ * Five sections shipped here. VOLUMES was deliberately absent rather than empty
+ * — `GET /hosts/:id/summary` carries uptime, load, memory and ping and no disk
  * data at all, and the rule is to hide a panel rather than fake it — and
- * arrived with TRE-33 once `GET /hosts/:id/disks` existed to fill it. VIEWS is
- * TRE-34.
+ * arrived with TRE-33 once `GET /hosts/:id/disks` existed to fill it. VIEWS
+ * arrived the same way with TRE-37, once there was a `Views` endpoint to fill
+ * it, and it goes at the top as the mockup orders it: a view chooses both
+ * machines, so it sits above the section that chooses one.
  *
  * ACTIVITY was absent for a harder reason — nothing in the API wrote an
  * ActivityLog row, and the vocabulary of `kind` was TRE-30's to define — and
@@ -33,6 +36,7 @@ export function Sidebar({
   hosts,
   paneHostIds,
   activePane,
+  views,
   onBindHost,
   onNavigate,
 }: {
@@ -40,6 +44,14 @@ export function Sidebar({
   /** What each pane is showing, so a row can draw its A and B badges. */
   paneHostIds: readonly [string | null, string | null];
   activePane: 0 | 1;
+  /**
+   * The saved-views rows (TRE-37 §4), as a node.
+   *
+   * A slot for the reason the top bar's strip is one: the list compares every
+   * view against the layout on screen, and handing this rail the whole layout
+   * would re-render five sections and every host's ping on each keystroke.
+   */
+  views?: ReactNode;
   onBindHost: (pane: 0 | 1, host: HostView) => void;
   onNavigate: (host: HostView, path: string) => void;
 }) {
@@ -53,6 +65,22 @@ export function Sidebar({
   return (
     <aside className="bg-chrome border-line flex w-44 flex-none flex-col border-r">
       <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-1.75">
+        {views && (
+          <>
+            {/* The range is spelled by the keymap rather than written here, the
+                same rule the ⌘K chip follows: a chord moved in `helpers/keys.ts`
+                while this said ⌥1–9 would advertise a key that fires nothing. */}
+            <Section
+              title="VIEWS"
+              counter={`${writeViewSlot(VIEW_SLOTS[0])}–${VIEW_SLOTS[VIEW_SLOTS.length - 1]}`}
+            >
+              {views}
+            </Section>
+
+            <Rule />
+          </>
+        )}
+
         <Section
           title="SERVERS"
           counter={`${hosts.length} ${hosts.length === 1 ? "host" : "hosts"}`}
@@ -111,12 +139,23 @@ export function Sidebar({
   );
 }
 
+/**
+ * One section, and the two inks it draws.
+ *
+ * The counter used to be `ink-faint`, which is 2a's `#4d7f99` and measures
+ * **3.82:1** on this rail's `chrome` ground — under AA, and invisible to
+ * `verify:contrast`, which reads class names out of `src/helpers` and cannot
+ * see one written inline here. `ink-dim` is the next step up the same ladder
+ * and clears at 7.06:1. Lifted in the two primitives TRE-37's VIEWS section
+ * renders through; the rest of this file's quiet inks have the same problem and
+ * are TRE-81's, along with the hundred-odd elsewhere in the app.
+ */
 function Section({ title, counter, children }: { title: string; counter?: string; children: ReactNode }) {
   return (
     <section>
       <h2 className="text-accent-soft flex items-baseline px-2.5 pt-1.5 pb-1 font-sans text-caps font-semibold tracking-[0.16em]">
         {title}
-        {counter && <span className="text-ink-faint ml-auto font-mono font-normal tracking-normal">{counter}</span>}
+        {counter && <span className="text-ink-dim ml-auto font-mono font-normal tracking-normal">{counter}</span>}
       </h2>
       {children}
     </section>
@@ -133,7 +172,7 @@ function Rule() {
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <p className="text-ink-faint px-2.5 py-1 font-mono text-2xs">{children}</p>;
+  return <p className="text-ink-dim px-2.5 py-1 font-mono text-2xs">{children}</p>;
 }
 
 /**

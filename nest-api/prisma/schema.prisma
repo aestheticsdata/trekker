@@ -312,25 +312,43 @@ model Bookmarks {
 // ---------------------------------------------------------------- layout
 
 /// A saved layout. The mockup keeps these in localStorage, which loses them
-/// per browser; they belong to the account. TRE-37 owns the UI.
+/// per browser; they belong to the account (TRE-37).
+///
+/// The columns this shipped with described a layout this app never had — a
+/// `split` percentage and a separate `solo` pane, written before TRE-18 settled
+/// what the URL actually carries, which is one three-valued `split` and no
+/// percentage at all. Six columns were replaced by one `layout` blob in TRE-37,
+/// and the reason is not brevity: the front already has exactly one description
+/// of a layout and exactly one canonical serialisation of it, and the dirty dot
+/// is a string comparison against that serialisation. Columns in a second
+/// vocabulary would be a translation, and a translation is where the dot starts
+/// lying about whether anything changed.
 model Views {
-  id   String  @id @default(uuid(7)) @db.Char(36)
-  name String  @db.VarChar(64)
-  /// Optional keyboard shortcut, unique per user when set.
-  shortcut String? @db.VarChar(32)
-  userId   String  @db.Char(36)
+  id     String @id @default(uuid(7)) @db.Char(36)
+  userId String @db.Char(36)
+  name   String @db.VarChar(64)
 
-  /// One entry per pane: host, path, sort and selection. JSON because the
-  /// shape belongs to the front-end and will move; nothing queries into it.
-  panes Json
+  /// Which of `⌥1`–`⌥9` restores this, or null for none. Unique per user.
+  ///
+  /// The digit, not the string "⌥3". How a chord is spelled belongs to the
+  /// front's keymap — one table, read from everywhere (TRE-36) — and moving a
+  /// glyph there must not be a migration here.
+  slot Int?
 
-  /// Left pane width as a percentage.
-  split     Int     @default(50)
-  /// Which pane is full width, or null for the split view.
-  solo      String? @db.VarChar(16)
-  inspector Boolean @default(true)
-  heat      Boolean @default(false)
-  glob      String? @db.VarChar(255)
+  /// Both panes, the split, the inspector, the heat map and the glob, in the
+  /// front's own `ViewLayout` shape. Json for the reason `Users.lastLayout` is:
+  /// the shape belongs to the front and will move with it, and nothing queries
+  /// into it.
+  layout Json
+
+  /// Host id to the label that host had when this view was saved.
+  ///
+  /// A memo, and deliberately not part of `layout`: it is never compared, so
+  /// renaming a host cannot make a view look unsaved. It exists for one
+  /// sentence — a view whose host has since been deleted has to be able to say
+  /// *which* machine is gone, and the id alone cannot, because the row it named
+  /// is the row that no longer exists.
+  hostLabels Json
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -338,7 +356,7 @@ model Views {
   user Users @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, name])
-  @@unique([userId, shortcut])
+  @@unique([userId, slot])
 }
 
 // ---------------------------------------------------------------- transfers

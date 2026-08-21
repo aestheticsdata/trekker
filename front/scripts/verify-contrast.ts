@@ -100,6 +100,26 @@ import {
   TERMINAL_TITLE_INK,
 } from "../src/helpers/terminal.ts";
 import { TOOLTIP_INK, TOOLTIP_LABEL_INK, TOOLTIP_SUBJECT_INK, TOOLTIP_SURFACE } from "../src/helpers/tooltip.ts";
+import {
+  CHIP_HOVER_FILL,
+  CHIP_INK,
+  CHIP_KEY_INK,
+  CHIP_ON_FILL,
+  CHIP_ON_INK,
+  CHIP_ON_KEY_INK,
+  DIRTY_DOT,
+  FORM_LABEL_INK,
+  FORM_QUIET_INK,
+  FORM_SURFACE,
+  FORM_VALUE_INK,
+  MOCKUP_CHIP_FILL_HEX,
+  MOCKUP_CHIP_INK_HEX,
+  MOCKUP_QUIET_HEX,
+  ROW_INK,
+  ROW_KEY_INK,
+  ROW_ON_FILL,
+  ROW_ON_INK,
+} from "../src/helpers/views.ts";
 import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK } from "../src/helpers/treemap.ts";
 
 /** WCAG 2.1 AA for text below 18.66px bold / 24px regular, which is all of it. */
@@ -317,6 +337,48 @@ check("value", TOOLTIP_INK, TOOLTIP_SURFACE);
 check("label and note", TOOLTIP_LABEL_INK, TOOLTIP_SURFACE);
 
 /*
+ * Saved views (TRE-37 §4). Two surfaces, and the chrome is the ground for both:
+ * the strip lives in the top bar and the list lives in the sidebar, which are
+ * the same colour. A chip and a row each have a second state, and the second
+ * state is a different ground.
+ */
+console.log("\n--- the saved-views strip and list (TRE-37) ---");
+const CHROME = "bg-chrome";
+check("a view's name in the strip", CHIP_INK, CHROME);
+check("its chord", CHIP_KEY_INK, CHROME);
+check("the same, under the pointer", CHIP_INK, CHIP_HOVER_FILL);
+check("and its chord there", CHIP_KEY_INK, CHIP_HOVER_FILL);
+check("the restored view's name", CHIP_ON_INK, CHIP_ON_FILL);
+check("and its chord", CHIP_ON_KEY_INK, CHIP_ON_FILL);
+check("a view's name in the sidebar", ROW_INK, CHROME);
+check("its chord", ROW_KEY_INK, CHROME);
+check("the restored one's name", ROW_ON_INK, ROW_ON_FILL);
+check("and its chord", ROW_KEY_INK, ROW_ON_FILL);
+
+console.log("\n--- and the form that saves one ---");
+check("the small caps above a field", FORM_LABEL_INK, FORM_SURFACE);
+check("what each pane is on", FORM_VALUE_INK, FORM_SURFACE);
+check("and how it is sorted", FORM_QUIET_INK, FORM_SURFACE);
+
+/*
+ * The unsaved marker, which is not text.
+ *
+ * WCAG 1.4.11 asks 3:1 of a graphical object against what is beside it, not the
+ * 4.5:1 this file checks everything else at — so it is printed rather than run
+ * through `check`, which would fail it on `line` at 3.90 and be wrong to.
+ *
+ * All three grounds are measured because the dot lands on all three: the bare
+ * chrome of the top bar, the `raised` of a sidebar row, and the `line` fill of
+ * the chip for the view currently restored.
+ */
+console.log("\n--- the amber dot, held to 1.4.11's 3:1 rather than 4.5:1 ---");
+for (const ground of [CHROME, ROW_ON_FILL, CHIP_ON_FILL]) {
+  const measured = ratio(hexOf(DIRTY_DOT), hexOf(ground));
+  const enough = measured >= 3 ? "ok" : "FAILS 1.4.11";
+  console.log(`  --   dot on ${ground.replace("bg-", "").padEnd(20)} ${measured.toFixed(2).padStart(5)}:1  ${enough}`);
+}
+
+/*
  * And the one this app would otherwise have reached for. `ink-faint` is the
  * colour of a quiet second line everywhere else in the chrome, which is exactly
  * why it has to be refused here in writing rather than in somebody's memory.
@@ -380,6 +442,37 @@ for (const [what, mockup, ground, ours] of [
       `→ ours ${mine.toFixed(2).padStart(5)} ${verdict(mine)}`,
   );
 }
+
+/*
+ * 2a's own views strip, which is why ours is drawn differently (TRE-37 §4).
+ *
+ * Two separate corrections, and the second one is the interesting one. The
+ * mockup fills the chip for the restored view with `#1f7cab` and writes its
+ * name in `#04202f` — the pair TRE-78 took out of fourteen other places for
+ * measuring 3.62:1 — and it also draws the amber unsaved dot *inside* that
+ * chip, where amber measures 1.25:1. The mockup's own two decisions cannot both
+ * be drawn, so the chip takes the treatment this app already has for "the
+ * current row": TRE-36's `line` fill with an accent edge.
+ */
+console.log("\n--- for the record: 2a's own views strip, which is why ours differs ---");
+for (const [what, mockup, ground, ours] of [
+  ["a chord beside a name", MOCKUP_QUIET_HEX, CHROME, CHIP_KEY_INK],
+  ["a chord in the sidebar", MOCKUP_QUIET_HEX, ROW_ON_FILL, ROW_KEY_INK],
+  ["the small caps in the form", MOCKUP_QUIET_HEX, FORM_SURFACE, FORM_LABEL_INK],
+  ["the restored chip's name", MOCKUP_CHIP_INK_HEX, MOCKUP_CHIP_FILL_HEX, CHIP_ON_INK],
+] as const) {
+  const theirs = ratio(mockup, ground.startsWith("#") ? ground : hexOf(ground));
+  const mine = ratio(hexOf(ours), hexOf(ours === CHIP_ON_INK ? CHIP_ON_FILL : ground));
+  console.log(
+    `  ${what.padEnd(28)} ${mockup}  ${theirs.toFixed(2).padStart(5)} ${verdict(theirs).padEnd(15)}` +
+      `→ ours ${mine.toFixed(2).padStart(5)} ${verdict(mine)}`,
+  );
+}
+const mockupDot = ratio("#c98a3e", MOCKUP_CHIP_FILL_HEX);
+console.log(
+  `  ${"the dot inside that chip".padEnd(28)} #c98a3e  ${mockupDot.toFixed(2).padStart(5)} ${verdict(mockupDot).padEnd(15)}` +
+    `→ ours ${ratio(hexOf(DIRTY_DOT), hexOf(CHIP_ON_FILL)).toFixed(2).padStart(5)} (1.4.11 wants 3:1)`,
+);
 
 console.log(`\n${checked - failures}/${checked} pairs pass AA at ${AA}:1.`);
 process.exit(failures === 0 ? 0 : 1);

@@ -10,7 +10,7 @@ import { UploadProvider } from "@components/ui/uploads";
 import type { Action } from "@components/shell/actions";
 import type { SelectionSummary } from "@components/shell/status-bar";
 import type { SplitMode, ViewMode } from "@components/shell/toolbar";
-import type { HostChip, MachineStats, SavedView } from "@components/shell/top-bar";
+import type { HostChip, MachineStats } from "@components/shell/top-bar";
 import type { ReactNode } from "react";
 
 /**
@@ -23,7 +23,7 @@ import type { ReactNode } from "react";
 export function AppShell({
   host = null,
   stats = null,
-  views = [],
+  views,
   sudo,
   selection = null,
   clipboard = null,
@@ -48,7 +48,8 @@ export function AppShell({
 }: {
   host?: HostChip | null;
   stats?: MachineStats | null;
-  views?: readonly SavedView[];
+  /** The saved-views strip (TRE-37), passed straight through to the top bar. */
+  views?: ReactNode;
   /** The top bar's sudo badge for the active host (TRE-29), passed straight through. */
   sudo?: ReactNode;
   selection?: SelectionSummary | null;

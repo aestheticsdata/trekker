@@ -48,6 +48,18 @@ export type CommandId = ActionId | "inspector" | "selectAll" | "terminal" | "pal
 export interface Chord {
   /** A `KeyboardEvent.key`: "F5", "Enter", "Delete", or a single letter. */
   key: string;
+  /**
+   * A `KeyboardEvent.code` — the physical key — where `key` cannot be trusted.
+   *
+   * Only the ⌥-digit chords need this, and they need it badly: on a Mac, ⌥1 is
+   * not `"1"`. The layout decides what it is (`¡` on US, `„` on German), so a
+   * chord matched on `key` alone would work on nobody's keyboard but the one it
+   * was written on. `Digit1` is the same key everywhere.
+   *
+   * Absent on every other chord, because `key` is the right question for them:
+   * `⌘X` should be the key that says X, wherever the layout has put it.
+   */
+  code?: string;
   meta?: boolean;
   alt?: boolean;
   shift?: boolean;
@@ -56,6 +68,8 @@ export interface Chord {
 /** As much of a `KeyboardEvent` as matching needs, so a test can make one. */
 export interface KeyLike {
   key: string;
+  /** Absent in a hand-made event, which is why `matches` falls back to `key`. */
+  code?: string;
   metaKey?: boolean;
   ctrlKey?: boolean;
   altKey?: boolean;
@@ -150,7 +164,14 @@ export function hintFor(id: CommandId): string | undefined {
  * different key to anyone who has bound it to something.
  */
 export function matches(event: KeyLike, chord: Chord): boolean {
-  if (event.key.toLowerCase() !== chord.key.toLowerCase()) return false;
+  // The physical key wins where the chord names one and the event reports one,
+  // and only then: a synthetic event carries no `code`, and refusing those
+  // would mean the chord could be checked by nothing but a browser.
+  if (chord.code !== undefined && event.code !== undefined) {
+    if (event.code !== chord.code) return false;
+  } else if (event.key.toLowerCase() !== chord.key.toLowerCase()) {
+    return false;
+  }
   if (event.metaKey || event.ctrlKey) {
     if (chord.meta !== true) return false;
   } else if (chord.meta === true) {
@@ -172,4 +193,52 @@ export function commandFor(event: KeyLike): CommandId | null {
     if (matches(event, chord)) return id;
   }
   return null;
+}
+
+// ------------------------------------------------------------- saved views
+
+/**
+ * The nine chords a saved view can claim (TRE-37 §1).
+ *
+ * Not in `KEYS`, and the distinction matters. That table maps a *command* — a
+ * fixed thing this app does — to a chord. These nine reach whatever the account
+ * has decided they should reach, and on a fresh install they reach nothing at
+ * all. Putting them in the same table would mean inventing nine `CommandId`s
+ * for operations that do not exist, and `commandFor` would then answer `view3`
+ * for a key that runs nothing.
+ *
+ * They are still built out of the same `Chord`, matched by the same `matches`
+ * and spelled by the same `writeChord`, which is the part that has to hold:
+ * `⌥3` is written in one place whether it is drawn in the top bar, listed in
+ * the palette, or pressed.
+ *
+ * ⌥ rather than ⌘, and that is not the mockup being decorative. ⌘1–⌘9 is how
+ * every browser switches tabs and the page never sees it — the same reason
+ * TRE-69 gave up `⇧⌘N` and TRE-36 gave up `⌘⇧D`.
+ */
+export const VIEW_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+
+export type ViewSlot = (typeof VIEW_SLOTS)[number];
+
+/** The chord that restores whatever is in this slot. */
+export function viewChord(slot: ViewSlot): Chord {
+  return { key: String(slot), code: `Digit${slot}`, alt: true };
+}
+
+/** `⌥3`, for the strip, the sidebar, the palette and the picker alike. */
+export function writeViewSlot(slot: ViewSlot): string {
+  return writeChord(viewChord(slot));
+}
+
+/** Which slot this event is, or null when it is not one of the nine. */
+export function viewSlotFor(event: KeyLike): ViewSlot | null {
+  for (const slot of VIEW_SLOTS) {
+    if (matches(event, viewChord(slot))) return slot;
+  }
+  return null;
+}
+
+/** Whether a number off the wire is one of the nine, and not a 0 or a 47. */
+export function isViewSlot(value: unknown): value is ViewSlot {
+  return typeof value === "number" && (VIEW_SLOTS as readonly number[]).includes(value);
 }

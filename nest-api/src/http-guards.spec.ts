@@ -19,6 +19,7 @@ import { SecretStoreModule } from "@secrets/secret-store.module";
 import { TransfersModule } from "@transfers/transfers.module";
 import { SESSION_COOKIE_NAME, SESSION_TTL_SECONDS } from "@users/session.constants";
 import { UsersModule } from "@users/users.module";
+import { ViewsModule } from "@views/views.module";
 import { PrismaService } from "./prisma/prisma.service";
 
 /**
@@ -250,6 +251,23 @@ class FakePrisma {
     },
   };
 
+  /**
+   * Nothing (TRE-37).
+   *
+   * Saved views are here for the sweeps and only for the sweeps: every one of
+   * them is refused by a guard, so no handler ever reaches Prisma. Implementing
+   * a shape would be implementing a query no test in this file makes, and it
+   * would answer the day a guard stopped working — which is the day this file
+   * exists to make loud.
+   */
+  readonly views = {
+    findMany: (args: unknown) => unsupported("views.findMany", args),
+    findFirst: (args: unknown) => unsupported("views.findFirst", args),
+    create: (args: unknown) => unsupported("views.create", args),
+    update: (args: unknown) => unsupported("views.update", args),
+    delete: (args: unknown) => unsupported("views.delete", args),
+  };
+
   readonly activityLog = {
     create: ({ data, select }: { data: Record<string, unknown>; select?: { id?: true } }) => {
       const row: ActivityRow = {
@@ -423,6 +441,7 @@ beforeAll(async () => {
       HashesModule,
       TransfersModule,
       UsersModule,
+      ViewsModule,
     ],
   }).compile();
 

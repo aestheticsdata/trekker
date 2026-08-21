@@ -117,17 +117,24 @@ async function main(): Promise<void> {
     // No HostCredentials row: there is nothing to connect to, and a fake
     // ciphertext would only fail to decrypt later in a confusing way.
 
+    // The layout blob is the front's `ViewLayout` (TRE-37) — both panes, the
+    // split, the inspector, the heat map and the glob. Written out here rather
+    // than imported: the seed cannot reach across into `front/`, and a shape
+    // this file guessed at would be a shape the app refuses to parse.
     await prisma.views.create({
       data: {
         userId: user.id,
         name: "Side by side",
-        shortcut: "1",
-        panes: [
-          { hostId: local.id, path: "/srv" },
-          { hostId: remote.id, path: "/home/example-user" },
-        ],
-        split: 50,
-        inspector: true,
+        slot: 1,
+        layout: {
+          a: { host: local.id, path: "/srv", sort: "name", dir: 1 },
+          b: { host: remote.id, path: "/home/example-user", sort: "name", dir: 1 },
+          split: "split",
+          insp: true,
+          heat: true,
+          glob: "",
+        },
+        hostLabels: { [local.id]: "This machine", [remote.id]: "example.invalid" },
       },
     });
 

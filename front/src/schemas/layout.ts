@@ -1,5 +1,8 @@
+import { isViewSlot } from "@helpers/keys";
 import { SORT_KEYS, SPLIT_MODES, VIEW_MODES } from "@lib/url/explorer-params";
 import { z } from "zod";
+
+import type { ViewSlot } from "@helpers/keys";
 
 /**
  * The stored layout (TRE-51), on its way back out of the database.
@@ -72,3 +75,69 @@ export function serialiseLayout(layout: StoredLayout): string {
   const { active, split, view, heat, insp, du, duRoot, glob } = layout;
   return JSON.stringify({ a: pane(layout.a), b: pane(layout.b), active, split, view, heat, insp, du, duRoot, glob });
 }
+
+/**
+ * What a *saved view* remembers (TRE-37 §1) — a strict subset of the above.
+ *
+ * The subset is the design, and it is what makes the dirty dot honest. A view
+ * is two directories and how they are arranged. It is deliberately not where
+ * the keyboard was (`active`), which file a pane was tailing (`tail`), whether
+ * the disk-usage strip was open (`du`, `duRoot`), or which of the two listing
+ * densities was showing (`view`). Every one of those changes while somebody is
+ * simply reading, and the dot compares exactly these fields — a dot that
+ * appeared because the cursor moved to the other pane is the noise the ticket
+ * asks for none of.
+ *
+ * `split` carries what the mockup called `solo`: `left` and `right` *are* one
+ * pane full width. One three-valued field rather than a mode and a boolean,
+ * because two fields saying the same thing is two fields that can disagree.
+ */
+// Strict, like the object below it and unlike `PaneLayoutSchema` above: this
+// one has no key that was ever added later, and the whole reason the top level
+// is strict is that an unknown key means the writer and the reader disagree.
+// The API strips what it does not declare (`whitelist: true`), so a pane
+// arriving with a `tail` on it did not come from this app's own endpoint.
+const ViewPaneSchema = z.strictObject({
+  host: z
+    .string()
+    .regex(/^[0-9a-f-]{36}$/i)
+    .nullable(),
+  path: z.string().min(1).max(700).startsWith("/"),
+  sort: z.enum(SORT_KEYS),
+  dir: z.union([z.literal(1), z.literal(-1)]),
+});
+
+export const ViewLayoutSchema = z.strictObject({
+  a: ViewPaneSchema,
+  b: ViewPaneSchema,
+  split: z.enum(SPLIT_MODES),
+  insp: z.boolean(),
+  heat: z.boolean(),
+  glob: z.string().max(200),
+});
+
+export type ViewLayout = z.infer<typeof ViewLayoutSchema>;
+export type ViewPane = z.infer<typeof ViewPaneSchema>;
+
+/**
+ * One saved view, as the API sends it.
+ *
+ * `slot` is a digit, never `"⌥3"`: how a chord is spelled belongs to
+ * `helpers/keys.ts` and to nothing else (TRE-36 §2), so moving a glyph there
+ * cannot require a migration or a re-read of every stored row.
+ *
+ * `hostLabels` is a memo — host id to the label that host had when the view was
+ * saved — and it exists for one sentence. A view whose host has been deleted
+ * has to be able to name the machine that is gone, and the id alone cannot,
+ * because the row it names is the row that no longer exists. It is never
+ * compared: renaming a host must not make a view look unsaved.
+ */
+export const SavedViewSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  slot: z.custom<ViewSlot>(isViewSlot).nullable(),
+  layout: ViewLayoutSchema,
+  hostLabels: z.record(z.string(), z.string()).default({}),
+});
+
+export type SavedView = z.infer<typeof SavedViewSchema>;

@@ -5,7 +5,7 @@ import { placeMenu } from "@helpers/menu";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { ActionRow } from "@components/shell/actions";
+import type { MenuEntry, MenuRow } from "@components/shell/actions";
 import type { Point } from "@helpers/menu";
 
 /**
@@ -15,6 +15,12 @@ import type { Point } from "@helpers/menu";
  * rows and a way to close. It decides nothing about what the rows mean — which
  * exist and which are live is `resolveActions`, and what pressing one does is
  * the explorer's.
+ *
+ * It takes `MenuRow` rather than `ActionRow`, which is a shape wide enough for
+ * a menu that is not about a selection at all: TRE-37's views menu is five
+ * rows about a saved layout and belongs to no action registry, and it wants
+ * this panel, this keyboard and this disabled treatment rather than a second
+ * menu written beside it.
  *
  * Ported from mockup 2a's own menu rather than approximated from tokens: 206px
  * wide, a 23px row, `11px/1` mono labels with a `9.5px` hint pushed right, a
@@ -49,7 +55,7 @@ export interface ContextMenuProps {
   point: Point;
   /** What was right-clicked — the header, and the menu's accessible name. */
   label: string;
-  rows: readonly ActionRow[];
+  rows: readonly MenuRow[];
   /** An entry was chosen. The id is the caller's to dispatch. */
   onChoose: (id: string) => void;
   onClose: () => void;
@@ -287,7 +293,7 @@ function Item({
   onChoose,
 }: {
   id: string;
-  row: Exclude<ActionRow, { rule: true }>;
+  row: MenuEntry;
   active: boolean;
   onHover: () => void;
   onChoose: () => void;

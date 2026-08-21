@@ -16,6 +16,7 @@ import { ScansModule } from "@scans/scans.module";
 import { SecretStoreModule } from "@secrets/secret-store.module";
 import { TransfersModule } from "@transfers/transfers.module";
 import { UsersModule } from "@users/users.module";
+import { ViewsModule } from "@views/views.module";
 import { PrismaModule } from "./prisma/prisma.module";
 
 // Runs before the decorator below is evaluated, which is when ConfigModule
@@ -60,6 +61,10 @@ loadEnv();
     TransfersModule,
     HealthModule,
     UsersModule,
+    // After UsersModule, whose `PUT /users/layout` writes the same shape to a
+    // different column: one is where the account was, this is where it chose to
+    // be able to get back to (TRE-37).
+    ViewsModule,
   ],
 })
 export class AppModule {}
