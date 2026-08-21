@@ -2,9 +2,11 @@
 
 import { cursorWindowIndex, PARENT_NAME, pathOf } from "@components/explorer/pane-state";
 import { useRowWindow } from "@components/explorer/row-window";
+import { TailStrip } from "@components/explorer/tail-strip";
 import { Tooltip } from "@components/ui/tooltip";
 import { ageIndex, HEAT, HEAT_OFF_BAR, HEAT_OFF_INK } from "@helpers/heat";
 import { ageDays, breadcrumbs, formatAge, formatSize, formatTotal, typeTag } from "@helpers/listing";
+import { isLogDirectory } from "@helpers/tail";
 import { ApiError } from "@lib/api/client";
 import { useState } from "react";
 
@@ -53,6 +55,13 @@ export interface PaneCallbacks {
   onRowClick: (name: string, modifiers: { extend: boolean; toggle: boolean }) => void;
   onHostMenu: () => void;
   onClearGlob: () => void;
+  /**
+   * Which file this pane's live tail follows, or null to stop (TRE-34 §3).
+   *
+   * A callback rather than local state, like every other interaction here: the
+   * answer belongs in the URL, and only the explorer can put it there.
+   */
+  onTail: (path: string | null) => void;
   /** Files dropped onto this pane, bound for the directory it is showing (TRE-65). */
   onFilesDropped: (files: readonly File[]) => void;
   /**
@@ -78,6 +87,7 @@ export function Pane({
   hiddenByGlob,
   volume,
   cut = null,
+  tail,
   heat,
   now,
   callbacks,
@@ -112,6 +122,15 @@ export function Pane({
    * cut that is never pasted must not look like a delete that already happened.
    */
   cut?: ReadonlySet<string> | null;
+  /**
+   * The file the live tail is following, or null for none (TRE-34 §3).
+   *
+   * Null does not mean "no strip": in a directory that looks like logs the
+   * strip still renders, as a picker that streams nothing until something is
+   * chosen. Which is the whole design — it offers itself, it does not open a
+   * connection to somebody's server because you navigated.
+   */
+  tail: string | null;
   heat: boolean;
   /** Passed in so every row in a render ages against the same instant. */
   now: number;
@@ -349,6 +368,29 @@ export function Pane({
           </div>
         )}
       </div>
+
+      {/* Between the rows and the footer, which is where the mockup docks it: a
+          strip takes its space from the listing, the way the disk-usage bar
+          takes its from the panes. Only when there is something to say —
+          either a file is being followed, or this directory looks like the
+          kind that holds logs (TRE-34 §3).
+
+          The two halves of that condition are gated differently on purpose. A
+          tail that is *running* survives a navigation, a slow listing and a
+          directory that refuses to open: unmounting it would close the stream
+          and reopen it on arrival, so walking through four directories would
+          restart the reader's log four times. The **picker** is the half that
+          needs a loaded listing, because the files it offers are that
+          listing's rows. */}
+      {host !== null && (tail !== null || (isLogDirectory(path) && !loading && !error)) && (
+        <TailStrip
+          hostId={host.id}
+          directory={path}
+          file={tail}
+          rows={rows}
+          onTail={callbacks.onTail}
+        />
+      )}
 
       <footer className="bg-pane-bar border-pane-line text-on-pane-dim flex h-panefoot flex-none items-center gap-2.5 border-t px-2.25 font-mono text-2xs">
         {meta && !loading && !error && host && (

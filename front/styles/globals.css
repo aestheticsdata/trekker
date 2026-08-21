@@ -46,6 +46,17 @@
   --color-pane-sel-idle: #b9d3e6;
   --color-pane-chip: #c2d7e2;
   --color-pane-dash: #5c81a3;
+  /* A depth *below* the pane, which the pane family did not have until the live
+   * tail needed one (TRE-34). The mockup docks the tail strip on a ground one
+   * step down from the listing it takes its space from — the same move
+   * `--color-strip` makes for the disk-usage bar, in the light half of the app
+   * rather than the dark one.
+   *
+   * Worth knowing before anyone reuses a pane ink on it: the sunk ground breaks
+   * `--color-on-pane-muted`, which clears AA on the pane at 4.74:1 and fails
+   * here at 4.35:1. `pnpm verify:contrast` measures every ink this surface
+   * carries, and that is why it does. */
+  --color-pane-sunk: #93b4d1;
 
   /* ---- ink -------------------------------------------------------------
    * On dark, brightest first. `ink` is body text, `ink-muted` labels,
@@ -106,6 +117,28 @@
    * under `danger-soft` at full contrast, red enough to read as a stop. */
   --color-danger-wash: #2a1218;
   --color-success: #7fd6a8;
+
+  /* ---- access-log status classes ----------------------------------------
+   * The three inks a tailed access log colours a status code with (TRE-34):
+   * the request was served, the client asked for something wrong, the server
+   * failed. The whole point of colouring a status is that a 502 is findable
+   * without reading digits, which makes an illegible one worse than none.
+   *
+   * The mockup's own three are `#2f7a4a`, `#1c4a68` and `#a33`, and on the
+   * sunk ground they measure 2.42:1, 4.35:1 and 3.00:1 — all three under AA.
+   * TRE-33 settled what happens then, and its commit message is the rule: a
+   * colour that carries meaning has to be legible. So the hues are the
+   * mockup's and the ground is the mockup's; each ink is darkened until it
+   * clears 4.5:1 with margin, and `pnpm verify:contrast` prints both the
+   * mockup's numbers and ours so the correction stays reviewable.
+   *
+   * `client` is deliberately the quiet one — a blue a shade off the body text
+   * rather than an alarm. That is the mockup's judgement and it is a good one:
+   * a 404 is a fact about the request, and a log where every second line
+   * shouts has no way left to say that something is actually wrong. */
+  --color-log-ok: #1a4428;
+  --color-log-client: #1a4260;
+  --color-log-server: #75201f;
 
   /* ---- age ramp ---------------------------------------------------------
    * Seven steps, fresh to ancient, for the share bars and age chips. Dark and
@@ -209,6 +242,16 @@
   --tracking-label: 0.08em;
   --tracking-caps: 0.14em;
 
+  /* A log body is read down a column rather than across a line, so the mockup
+   * opens the leading further than anything else in the app: `9.5px/1.65`
+   * against `--text-caption`'s own 1.6 (TRE-34).
+   *
+   * A named step rather than `leading-[1.65]`, and rather than rounding onto
+   * `leading-relaxed` at 1.625 — over the eight lines the strip shows, that
+   * rounding is two pixels of drift in a box whose height is a token. Same
+   * argument the half-steps above make: the mockup's number, kept as itself. */
+  --leading-log: 1.65;
+
   /* ---- motion -----------------------------------------------------------
    * Skeleton rows pulse rather than sweep: a listing is a column of bars, and
    * a travelling highlight across eleven of them reads as a progress bar for
@@ -275,6 +318,13 @@
   --spacing-tabstrip: 1.5rem; /* 24px */
   --spacing-pathrow: 1.625rem; /* 26px */
   --spacing-panefoot: 1.25rem; /* 20px */
+  /* The live tail's scrolling body (TRE-34), and the one length in this file
+   * the mockup does not state: it draws the strip around whatever lines it was
+   * given. Eight lines of `--text-caption` at `--leading-log` is what that
+   * comes to, which is enough scrollback to see a burst of 500s without the
+   * listing above it losing a screenful. In `rem` like the rest, so a scaled-up
+   * UI gets a taller strip rather than eight smaller lines. */
+  --spacing-tailbody: 7.8125rem; /* 125px — 8 × 9.5px × 1.65 */
   /* The inspector's width (TRE-17). A token since TRE-62, because two boxes
    * now need the same number: the panel, and the wrapper that opens it. */
   --spacing-inspector: 13.625rem; /* 218px */

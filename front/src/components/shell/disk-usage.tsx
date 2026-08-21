@@ -23,10 +23,17 @@ import type { ReactNode } from "react";
  * The docked disk-usage strip (TRE-33 §2), built from the App mockup's markup.
  *
  * A bar rather than a panel: fixed height, full width, below the panes and
- * above the status bar, and the panes give up the space. The mockup splits it
- * with an operation log at 280px on the right; that column belongs to the live
- * tail and is not built yet, so the usage half takes the whole width and gives
- * it back when the log arrives.
+ * above the status bar, and the panes give up the space.
+ *
+ * The mockup splits it with an `OPERATION LOG` at 280px on the right, and this
+ * app does not: that column is the activity feed, and TRE-30 put it in the
+ * sidebar where it is visible whatever the strip is doing (`ActivityStrip`).
+ * So the usage half takes the whole width, deliberately and permanently.
+ *
+ * It is worth naming what that column is **not**, because it read as an open
+ * slot for a while and it is not one. The live tail (TRE-34) is drawn inside
+ * the pane, docked between the rows and the pane's footer — a tail belongs to
+ * the directory somebody is standing in, and there are two of those.
  *
  * **Which root it shows.** `root` is the pinned one when there is one and the
  * active pane's path otherwise, and that distinction is what makes clicking a

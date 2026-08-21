@@ -82,6 +82,8 @@ export interface PaneUrl {
   path: string;
   sort: SortKey;
   dir: 1 | -1;
+  /** The file this pane's live tail is following (TRE-34), or null for none. */
+  tail: string | null;
 }
 
 /** A paste that has become a transfer (TRE-71 §4). */
@@ -943,6 +945,13 @@ export function Explorer({
       case "download":
         onDownloadRequestedChange(true);
         return;
+      case "tail":
+        // The context menu is the second of the strip's three mechanisms and
+        // the only one that works outside a log-looking directory (TRE-34 §3):
+        // a log lives wherever somebody's deploy put it, and the heuristic is
+        // an offer rather than a rule about where logs may be.
+        if (first && hostId !== null) onPaneChange(index, { tail: joinPath(view.path, first.name) });
+        return;
       case "upload":
         onUploadRequestedChange(true);
         return;
@@ -1394,6 +1403,7 @@ export function Explorer({
         }),
       onHostMenu: () => onManageHosts(index),
       onClearGlob: () => onGlobChange(""),
+      onTail: (path) => onPaneChange(index, { tail: path }),
       onFilesDropped: (files) => uploadInto(index, files),
       onContextMenu: (point, name) => {
         // The inactive pane is activated first, or the menu, the status bar and
@@ -1516,6 +1526,11 @@ export function Explorer({
                   // The names this pane should draw dimmed, which is only ever
                   // a cut and only ever where it was taken from (TRE-71 §3).
                   cut={cutNamesIn(clip, pane.hostId, pane.path)}
+                  // From the URL rather than from `views`, which carries what
+                  // the reducer remembers: a tail is a link's business, not a
+                  // session's, and it is read back from the query string on a
+                  // cold open (TRE-34 §3).
+                  tail={panes[index].tail}
                   heat={heat}
                   now={now}
                   callbacks={callbacksFor(index)}

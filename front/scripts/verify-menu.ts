@@ -146,6 +146,7 @@ check("the entries shape", ids(resolveActions(context(), "menu")), [
   "rename",
   "chmod",
   "download",
+  "tail",
   "link",
   "hash",
   "copyPath",
@@ -256,6 +257,22 @@ const TABLE: ReadonlyArray<{
     id: "link",
     want: "A signed link points at a file",
   },
+  // The tail follows one file (TRE-34). A directory has no lines to follow, and
+  // "tail these four" is a different feature the ticket puts out of scope.
+  { what: "tail one file", context: context(), id: "tail", want: null },
+  { what: "tail a directory", context: context({ entries: ["dir"] }), id: "tail", want: "A tail follows a file" },
+  { what: "tail two files", context: context({ entries: ["file", "file"] }), id: "tail", want: ONE },
+  { what: "tail with nothing selected", context: context({ entries: [] }), id: "tail", want: NOTHING },
+  { what: "tail on an unbound pane", context: context({ hostId: null }), id: "tail", want: NO_HOST },
+  // Absent from the directory menu: a right-click on empty space is about the
+  // directory, and the strip's picker is what serves that case.
+  {
+    what: "tail in the directory menu",
+    context: context({ kind: "directory", entries: [] }),
+    id: "tail",
+    want: "ABSENT",
+  },
+
   { what: "open a directory in the other pane", context: context({ entries: ["dir"] }), id: "openOther", want: null },
   // It points the other pane at this host rather than sending anything there,
   // so an empty pane over there is not a reason to refuse.

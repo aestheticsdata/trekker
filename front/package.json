@@ -12,6 +12,7 @@
     "verify:clipboard": "node scripts/verify-clipboard.ts",
     "verify:contrast": "node scripts/verify-contrast.ts",
     "verify:cursor": "node scripts/verify-cursor.ts",
+    "verify:log": "node scripts/verify-log.ts",
     "verify:menu": "node scripts/verify-menu.ts",
     "verify:permissions": "node scripts/verify-permissions.ts",
     "verify:virtual": "node scripts/verify-virtual.ts"

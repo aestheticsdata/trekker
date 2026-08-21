@@ -372,6 +372,15 @@ export class TailRegistryService implements OnModuleDestroy {
       return false;
     }
 
+    // An entry with no history at all is one that was created for this very
+    // subscription — the linger elapsed and the old one was reaped. A client
+    // presenting an id cannot have got it from *this* incarnation, and the
+    // sequence is about to start again at zero, so what follows is a fresh
+    // backfill and not a resume. Without this the ordinary case of a laptop
+    // closed for a minute reports `resumed` and the strip keeps the lines it
+    // already had, which the backfill then repeats underneath them.
+    if (entry.total === 0) return false;
+
     const wantFrom = args.lastEventId + 1;
     if (wantFrom >= entry.total) return true;
 

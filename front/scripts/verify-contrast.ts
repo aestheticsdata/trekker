@@ -46,6 +46,16 @@ import {
   SUDO_INK,
   SUDO_SURFACE,
 } from "../src/helpers/sudo.ts";
+import {
+  MOCKUP_STATUS_HEX,
+  STATUS_INK,
+  TAIL_BODY_INK,
+  TAIL_BUTTON_FILL,
+  TAIL_BUTTON_INK,
+  TAIL_HEADER_INK,
+  TAIL_NOTE_INK,
+  TAIL_SURFACE,
+} from "../src/helpers/tail.ts";
 import { TOOLTIP_INK, TOOLTIP_LABEL_INK, TOOLTIP_SUBJECT_INK, TOOLTIP_SURFACE } from "../src/helpers/tooltip.ts";
 import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK } from "../src/helpers/treemap.ts";
 
@@ -105,6 +115,53 @@ check("$ on a command preview", PROMPT_INK, COMMAND_SURFACE);
 check("the elevated note", PROMPT_ELEVATED_INK, MODAL_SURFACE);
 check("the elevate button", ELEVATE_INK, ELEVATE_FILL);
 
+/*
+ * The live tail's strip (TRE-34). The status inks are the reason this block
+ * exists: a colour that says "this request failed" is worth nothing if the
+ * reader has to squint at it, and all three of the mockup's fail AA on the
+ * ground the mockup itself draws them on.
+ *
+ * The ground is the other half of it. `--color-pane-sunk` is one step below the
+ * pane, and that one step is enough to break an ink that clears AA on the pane
+ * — which is why every ink the strip carries is measured here rather than
+ * inherited on the strength of already passing somewhere lighter.
+ */
+console.log("\n--- the live tail strip (TRE-34) ---");
+check("the file name in the header", TAIL_HEADER_INK, TAIL_SURFACE);
+check("a line of the log", TAIL_BODY_INK, TAIL_SURFACE);
+check("a gap or rotation marker", TAIL_NOTE_INK, TAIL_SURFACE);
+check("status 2xx and 3xx", STATUS_INK.ok, TAIL_SURFACE);
+check("status 4xx", STATUS_INK.client, TAIL_SURFACE);
+check("status 5xx", STATUS_INK.server, TAIL_SURFACE);
+// The picker's buttons are the one thing in the strip that changes colour under
+// the pointer, so both of their grounds have to hold.
+check("a picker button, hovered", TAIL_BODY_INK, "bg-pane-hover");
+check("retry and follow", TAIL_BUTTON_INK, TAIL_BUTTON_FILL);
+
+/*
+ * And the pair those two buttons would have worn.
+ *
+ * `bg-accent` with `text-on-accent` is what this app reaches for when something
+ * is the thing to press, and it is 3.62:1 — under AA, at every size, wherever
+ * it already appears. That is a finding about the palette rather than about
+ * this strip, so it is printed here rather than quietly worked around: the
+ * strip does not use it, and the places that do are somebody's next ticket.
+ */
+const onAccent = ratio(hexOf("text-on-accent"), hexOf("bg-accent"));
+console.log(`  --   on-accent, refused for the buttons  ${onAccent.toFixed(2).padStart(5)}:1  ${verdict(onAccent)}`);
+
+/*
+ * And the ink the strip would have inherited without being measured.
+ *
+ * `--color-on-pane-muted` is this app's ordinary colour for a quiet line on a
+ * pane and clears AA there at 4.74:1. One step down onto the strip it is
+ * 4.35:1 and does not. Printed rather than checked, like `ink-faint` in the
+ * bubble above: it is not a pair that ships, it is the reason a pair that would
+ * have shipped does not.
+ */
+const muted = ratio(hexOf("text-on-pane-muted"), hexOf(TAIL_SURFACE));
+console.log(`  --   on-pane-muted, which the pane passes  ${muted.toFixed(2).padStart(5)}:1  ${verdict(muted)}`);
+
 console.log("\n--- the tooltip bubble (TRE-76) ---");
 check("subject", TOOLTIP_SUBJECT_INK, TOOLTIP_SURFACE);
 check("value", TOOLTIP_INK, TOOLTIP_SURFACE);
@@ -134,6 +191,23 @@ for (const band of ["#0a4487", "#0a54a8", "#0b63c5", "#2f3b52", "#5b6478", "#7d8
   const size = ratio(hexOf(BAND_SIZE_INK), band);
   console.log(
     `  ${band}  name ${name.toFixed(2).padStart(5)} ${verdict(name)}   size ${size.toFixed(2).padStart(5)} ${verdict(size)}`,
+  );
+}
+
+/**
+ * The mockup's own three status inks, on the mockup's own ground.
+ *
+ * Same treatment as the band ramp above and for the same reason: three of these
+ * are why the tokens differ from the drawing, and a decision to overrule a
+ * mockup should be readable as a measurement rather than as taste.
+ */
+console.log("\n--- for the record: the mockup's own status inks, which is why ours differ ---");
+for (const [name, hex] of Object.entries(MOCKUP_STATUS_HEX)) {
+  const measured = ratio(hex, hexOf(TAIL_SURFACE));
+  const ours = ratio(hexOf(STATUS_INK[name as keyof typeof STATUS_INK]), hexOf(TAIL_SURFACE));
+  console.log(
+    `  ${name.padEnd(7)} ${hex}  ${measured.toFixed(2).padStart(5)} ${verdict(measured).padEnd(15)}` +
+      `→ ours ${ours.toFixed(2).padStart(5)} ${verdict(ours)}`,
   );
 }
 

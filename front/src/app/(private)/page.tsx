@@ -162,7 +162,20 @@ export default function HomePage() {
   const active = shared.active as PaneIndex;
   const panes: readonly [PaneUrl, PaneUrl] = [left, right];
   const setPane = (pane: PaneIndex, patch: Partial<PaneUrl>) => {
-    void (pane === 0 ? setLeft(patch) : setRight(patch));
+    // A live tail follows a file on *this pane's* host (TRE-34). Moving the
+    // pane to another machine leaves that path pointing at a file which is very
+    // likely not there, so the mark goes with the host rather than surviving it
+    // as a stream that 404s. One rule here rather than at the nine call sites
+    // that can rebind a pane, where the tenth would forget.
+    //
+    // A *change* of host, not merely a patch that mentions one: several of
+    // those call sites write the host and the path together while staying on
+    // the same machine, and a tail dropped because the other pane was pointed
+    // at a directory it was already on would be a bug with no visible cause.
+    // Skipped outright when the caller is setting both in one breath.
+    const moved = patch.host !== undefined && patch.host !== panes[pane].host;
+    const next = moved && patch.tail === undefined ? { ...patch, tail: null } : patch;
+    void (pane === 0 ? setLeft(next) : setRight(next));
   };
 
   /**

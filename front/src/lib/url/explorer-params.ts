@@ -80,10 +80,36 @@ export const paneParams = {
   path: parseAsAbsolutePath.withDefault("/").withOptions({ history: "push" }),
   sort: parseAsStringLiteral(SORT_KEYS).withDefault("name"),
   dir: parseAsNumberLiteral([1, -1] as const).withDefault(1),
+  /**
+   * The file this pane's live tail is following, or null for none (TRE-34 §3).
+   *
+   * Here rather than in React state because the URL *is* the mark. The design
+   * needed some way for a reader to say "this one, and keep it", and a pane
+   * parameter already survives a reload, a cold open and a link sent to
+   * somebody else — which is the whole of what marking a file has to do, at the
+   * cost of no schema, no migration and no second place for the answer to live.
+   *
+   * No `history: "push"`, unlike `path`. Starting a tail is not a navigation,
+   * and a back button that undid it one file at a time would make ⌫ mean two
+   * different things in the same pane.
+   */
+  tail: parseAsAbsolutePath,
 };
 
-export const LEFT_KEYS: UrlKeys<typeof paneParams> = { host: "aHost", path: "aPath", sort: "aSort", dir: "aDir" };
-export const RIGHT_KEYS: UrlKeys<typeof paneParams> = { host: "bHost", path: "bPath", sort: "bSort", dir: "bDir" };
+export const LEFT_KEYS: UrlKeys<typeof paneParams> = {
+  host: "aHost",
+  path: "aPath",
+  sort: "aSort",
+  dir: "aDir",
+  tail: "aTail",
+};
+export const RIGHT_KEYS: UrlKeys<typeof paneParams> = {
+  host: "bHost",
+  path: "bPath",
+  sort: "bSort",
+  dir: "bDir",
+  tail: "bTail",
+};
 
 /**
  * Everything shared by the two panes.

@@ -219,14 +219,73 @@ three more, and they carry more meaning than the heat ramp did — the whole poi
 of colouring a status code is that a 502 is findable without reading digits.
 
 So the hues stay, the ground stays, and each ink is darkened until it clears
-4.5:1, with `verify:contrast` extended to measure this table the way it already
-measures the age ramp and the treemap bands. The mockup's pixels are the
-reference; they have never been the thing that ships unexamined.
+4.5:1 with margin, and `verify:contrast` is extended to measure this table the
+way it already measures the age ramp and the treemap bands. The mockup's pixels
+are the reference; they have never been the thing that ships unexamined.
+
+| Class | Mockup | On `#93b4d1` | Ships as | On `#93b4d1` |
+|---|---|---|---|---|
+| 2xx / 3xx | `#2f7a4a` | 2.42:1 | `#1a4428` | 5.10:1 |
+| 4xx | `#1c4a68` | 4.35:1 | `#1a4260` | 4.86:1 |
+| 5xx | `#a33` | 3.00:1 | `#75201f` | 4.89:1 |
 
 Note also `4.35:1` on 4xx: the same `--color-on-pane-muted` clears AA
 comfortably on the pane itself (`#9bbcd7`, 4.74:1) and fails on the strip. The
 sunk ground is what breaks it, which is worth knowing before anyone reuses a
 pane ink on a darker surface again.
+
+### What the strip does with a stream
+
+Four things the browser has to get right, and three of them are about a
+connection rather than about a log.
+
+**A refusal is not a retry.** `EventSource` cannot see a status code. What the
+spec says is that a response which is not 200 `text/event-stream` *fails the
+connection* — `readyState` goes to `CLOSED` and the browser does not retry — and
+that is exactly the shape of every refusal this route can produce: a path
+outside the roots, a directory instead of a file, a cap, a rate limit. So
+`CLOSED` means refused and `CONNECTING` means a drop, and only the second one is
+`EventSource`'s own business. The refusal is then asked for a second time as an
+ordinary `fetch`, aborted before its body is read, purely to learn which of the
+four it was — the difference between "that is not a regular file" and a spinner
+that never resolves.
+
+**`error` is two events with one name.** The frame the server sends and the DOM
+event `EventSource` fires on a failure are both dispatched as `error` on the
+same object, and nothing in the spec keeps them apart. What does is `data`: the
+SSE frame has it, the failure does not. Named on both sides so the next person
+to write a client for this protocol does not have to find out.
+
+**A fatal error must close the stream from this end.** The server ends the
+response after one, and a response that ends cleanly is one `EventSource`
+reconnects to — which would restart the tail against the host that just gave
+up, for ever.
+
+**A reconnect that could not resume has to say so.** This turned up a real
+inaccuracy in the registry: `replay()` returned `resumed: true` whenever the
+client's position was at or past `entry.total`, which is also true of an entry
+created fresh — the ordinary shape of a laptop closed for longer than the
+ten-second linger. The strip would then have kept the lines it had while the
+new source's backfill repeated them underneath. An entry with no history at all
+is now reported honestly, and the strip clears and marks the restart.
+
+### Two traps in the plumbing, both caught before they shipped
+
+**`whitelist: true` strips what it does not know.** The tailed file is a pane
+URL parameter, and the session-restore layout is a footprint of the query
+string, so the new key had to be added to `SaveLayoutDto` as well. Without it
+the pipe would have dropped `tail` silently on the way in, the front's strict
+schema would have failed to parse it on the way out, and every session restore
+in the install would quietly have become a cold open. The reader's own schema
+also defaults the key, so a layout stored before today parses as "following
+nothing" instead of costing its owner one lost restore.
+
+**The sunk ground breaks a pane ink.** The markers the strip writes reached for
+`--color-on-pane-muted`, which is this app's ordinary colour for a quiet line
+and clears AA on the pane at 4.74:1. On the strip it is 4.35:1. That is the
+exact failure this document had already described one section above, walked into
+within the hour, and caught by `pnpm verify:contrast` rather than by looking —
+which is the argument for the script in one line.
 
 ## Out of scope, and staying that way
 

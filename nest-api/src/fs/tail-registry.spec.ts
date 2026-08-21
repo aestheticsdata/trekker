@@ -377,6 +377,19 @@ describe("TailRegistryService", () => {
       expect(resumed.subscriber.gaps()[0].reason).toBe("slow-client");
       expect(resumed.subscriber.linesReceived()).toEqual(["one", "two", "three"]);
     });
+
+    it("refuses to call a reconnect onto a fresh entry a resume", () => {
+      // The ordinary shape of a laptop closed for a minute: the entry was
+      // reaped, and the one created for this subscription has emitted nothing.
+      // Its sequence is about to start again at zero, so the client's id
+      // describes a history that no longer exists — and the strip has to be
+      // told, or it keeps the lines it had and the backfill repeats them
+      // underneath.
+      const rejoined = attach(registry, driver, { lastEventId: 41 });
+
+      expect(rejoined.subscription.resumed).toBe(false);
+      expect(rejoined.subscriber.linesReceived()).toEqual([]);
+    });
   });
 
   describe("shutdown", () => {

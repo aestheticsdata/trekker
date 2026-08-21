@@ -15,6 +15,14 @@ import { TAIL_HEARTBEAT_MS } from "@fs/tail-limits";
  * progress feed. A tail has four disjoint frame kinds and honours
  * `Last-Event-ID`, and re-encoding an event name inside the JSON would be
  * strictly worse than the field SSE already has for it.
+ *
+ * One of those names is `error`, and anybody writing a client for this needs to
+ * know that it collides with `EventSource`'s own DOM error event: both are
+ * dispatched under that name on the same object and nothing in the spec keeps
+ * them apart. What does keep them apart is `data` — an SSE frame has it, a
+ * connection failure does not. The name stays because it is the accurate one
+ * for what the frame says, and because renaming it would only move the trap to
+ * whoever next assumes the obvious name means the obvious thing.
  */
 
 /** The headers, verbatim from the three streams that came before. */

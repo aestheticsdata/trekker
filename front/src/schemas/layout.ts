@@ -23,6 +23,22 @@ const PaneLayoutSchema = z.object({
   path: z.string().min(1).max(700).startsWith("/"),
   sort: z.enum(SORT_KEYS),
   dir: z.union([z.literal(1), z.literal(-1)]),
+  /**
+   * The file this pane's live tail is following (TRE-34), or null for none.
+   *
+   * The only field here with a default, and it is the *added* field: a layout
+   * stored before this key existed has no `tail`, and under a strict object a
+   * missing key is a parse failure — so every account in the install would have
+   * taken one cold open on the day this shipped, losing the position it had.
+   * Defaulting says the honest thing instead, which is that a layout written
+   * without a tail was a layout following nothing.
+   *
+   * A default belongs on a key being introduced, and only while layouts written
+   * before it still exist. It is not a licence to soften the schema generally —
+   * an *unknown* key still fails, because that means the writer and the reader
+   * disagree rather than that one of them is older.
+   */
+  tail: z.string().min(1).max(700).startsWith("/").nullable().default(null),
 });
 
 export const StoredLayoutSchema = z.strictObject({
@@ -52,7 +68,7 @@ export type StoredLayout = z.infer<typeof StoredLayoutSchema>;
  * just read.
  */
 export function serialiseLayout(layout: StoredLayout): string {
-  const pane = ({ host, path, sort, dir }: StoredLayout["a"]) => ({ host, path, sort, dir });
+  const pane = ({ host, path, sort, dir, tail }: StoredLayout["a"]) => ({ host, path, sort, dir, tail });
   const { active, split, view, heat, insp, du, duRoot, glob } = layout;
   return JSON.stringify({ a: pane(layout.a), b: pane(layout.b), active, split, view, heat, insp, du, duRoot, glob });
 }

@@ -35,6 +35,7 @@ export type ActionId =
   | "rename"
   | "chmod"
   | "download"
+  | "tail"
   | "upload"
   | "link"
   | "copyPath"
@@ -183,6 +184,16 @@ const SPECS: Readonly<Record<ActionId, Spec>> = {
   // and a directory streams as a zip, and there is no third shape that is
   // several of either (TRE-26).
   download: { label: "download", hint: "F3", why: all(host, one) },
+  // The strip's other way in (TRE-34 §3). The directory heuristic offers logs
+  // where logs usually are; this is how somebody follows the one that is not
+  // there, and it is the only route that works in an ordinary directory.
+  //
+  // Files only, and one at a time — the strip follows a file, and "tail these
+  // four" is a different feature the ticket puts out of scope.
+  tail: {
+    label: "tail this file",
+    why: all(host, one, onlyKind(["file"], "A tail follows a file")),
+  },
   upload: { label: "upload here", short: "upload", hint: "↑", why: host },
   link: {
     label: "mint signed link",
@@ -250,6 +261,7 @@ const ENTRIES_SHAPE: readonly ShapeRow[] = [
   "rename",
   "chmod",
   "download",
+  "tail",
   "link",
   "hash",
   "copyPath",

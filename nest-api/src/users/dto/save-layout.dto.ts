@@ -45,6 +45,27 @@ export class PaneLayoutDto {
 
   @IsIn([1, -1])
   dir!: 1 | -1;
+
+  /**
+   * The file this pane's live tail is following, or null for none (TRE-34 §3).
+   *
+   * Nullable rather than optional, for the reason `duRoot` below is: null is
+   * what the explorer produces for "not following anything", and accepting its
+   * absence as well would let two payloads mean the same thing — which is how
+   * a layout stops comparing equal with itself and gets written back on every
+   * render.
+   *
+   * It has to be listed at all because the pipe is `whitelist: true`: a
+   * property this class does not declare is stripped rather than refused, and
+   * the front's schema for reading the column back is strict. A field dropped
+   * here would fail to parse there, and every session restore in the app would
+   * quietly become a cold open.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_PATH)
+  @Matches(/^\//, { message: "tail must be absolute" })
+  tail?: string | null;
 }
 
 export class SaveLayoutDto {
