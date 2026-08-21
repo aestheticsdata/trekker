@@ -328,6 +328,23 @@ export const LIMITS = {
    * denial of service against both, and no byte is altered by it.
    */
   compare: rule("limit:cmp", "comparisons", 20, 60, "TREKKER_LIMIT_COMPARISONS_PER_MIN"),
+
+  /**
+   * Live tails opened (TRE-34), per minute.
+   *
+   * An **opening** rate, and emphatically not a concurrency cap — the caps on
+   * how many may be open at once are `MAX_TAILS_PER_SESSION` and
+   * `MAX_TAILS_PER_HOST` in `fs/tail-limits.ts`, where the rest of what a tail
+   * costs while it runs is written down.
+   *
+   * Sixty is high for this table and the reason is the shape of the client.
+   * `EventSource` reconnects on its own — a laptop lid, a wifi hop, a phone
+   * moving between cells — and every reconnect is another open. A limit low
+   * enough to catch a script would punish a flaky network instead, and the
+   * thing actually worth bounding is already bounded by the concurrency caps,
+   * which refuse the fifth simultaneous tail whatever rate it arrived at.
+   */
+  tail: rule("limit:tail", "live tails", 60, 60, "TREKKER_LIMIT_TAILS_PER_MIN"),
 } as const satisfies Record<string, LimitRule>;
 
 /**

@@ -17,6 +17,7 @@
     "verify:disks": "tsx scripts/verify-disks.ts",
     "verify:scan": "tsx scripts/verify-scan.ts",
     "verify:hash": "tsx scripts/verify-hash.ts",
+    "verify:tail": "tsx scripts/verify-tail.ts",
     "account:create": "tsx scripts/create-account.ts",
     "host:create": "tsx scripts/create-host.ts",
     "rotate-key": "tsx scripts/rotate-master-key.ts",

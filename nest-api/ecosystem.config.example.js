@@ -142,6 +142,21 @@ const prodEnv = {
   // wanted. Read per request, so raising it takes effect without a restart.
   // TREKKER_RECURSIVE_ENTRY_CEILING: "10000",
   //
+  // What a live tail costs while it runs (TRE-34). These are not rate limits —
+  // `TREKKER_LIMIT_TAILS_PER_MIN` above bounds how often one may be *opened*,
+  // and these bound how many may be open and what each one does. The one file
+  // to read is nest-api/src/fs/tail-limits.ts, which says why each number is
+  // that number. All read at boot; a change needs a reload.
+  //
+  // Note that over SSH a tail runs no remote process at all: it polls `stat`
+  // and reads the byte delta, because closing an SSH channel does not kill a
+  // `tail -F` and an abandoned one would otherwise outlive the tab forever.
+  // TREKKER_TAIL_POLL_MS: "700",
+  // TREKKER_TAIL_LINGER_MS: "10000",
+  // TREKKER_TAIL_MAX_PER_SESSION: "4",
+  // TREKKER_TAIL_MAX_PER_HOST: "6",
+  // TREKKER_TAIL_CLIENT_BUFFER_BYTES: "262144",
+  //
   // How long a sudo window stays open, in minutes (TRE-29). Fifteen is the
   // default and the number the UI shows; the modal reads this back from the
   // API rather than hardcoding it, so lowering it here lowers what the dialog
@@ -158,6 +173,7 @@ const prodEnv = {
   //   TREKKER_LIMIT_LINK_FETCHES_PER_MIN       60       TRE-66, keyed by IP
   //   TREKKER_LIMIT_TRANSFERS_PER_MIN          20       TRE-23, copies+moves+retries
   //   TREKKER_LIMIT_HASH_JOBS_PER_MIN          20       TRE-27
+  //   TREKKER_LIMIT_TAILS_PER_MIN              60       TRE-34, opens not concurrency
   //
   // `TREKKER_LIMIT_TRANSFERS_IN_FLIGHT` is gone rather than renamed, and the
   // difference matters if you had set it: it named an in-flight cap, which a

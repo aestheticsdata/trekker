@@ -9,6 +9,8 @@ import { PermissionsService } from "@fs/permissions.service";
 import { LinkController } from "@fs/link.controller";
 import { LinkService } from "@fs/link.service";
 import { RenameService } from "@fs/rename.service";
+import { TailRegistryService } from "@fs/tail-registry.service";
+import { TailService } from "@fs/tail.service";
 import { UploadService } from "@fs/upload.service";
 
 /**
@@ -33,6 +35,8 @@ import { UploadService } from "@fs/upload.service";
     DownloadService,
     UploadService,
     LinkService,
+    TailService,
+    TailRegistryService,
   ],
   exports: [
     FsService,
@@ -44,6 +48,8 @@ import { UploadService } from "@fs/upload.service";
     DownloadService,
     UploadService,
     LinkService,
+    TailService,
+    TailRegistryService,
   ],
 })
 export class FsModule {}

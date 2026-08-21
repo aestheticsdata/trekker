@@ -11,6 +11,7 @@ import { DeleteDto, DeletePlanDto } from "@fs/dto/delete.dto";
 import { FsQueryDto } from "@fs/dto/fs-query.dto";
 import { RenameBatchDto } from "@fs/dto/rename-batch.dto";
 import { RenameDto } from "@fs/dto/rename.dto";
+import { TailQueryDto } from "@fs/dto/tail-query.dto";
 import { type DeletePlan, type DeleteResult, DeleteService } from "@fs/delete.service";
 import { contentDisposition, DOWNLOAD_CONTENT_TYPE, DOWNLOAD_CSP, parseRange, rangeLength } from "@fs/download-headers";
 import { sendDownload } from "@fs/download-response";
@@ -27,6 +28,8 @@ import {
 } from "@fs/permissions.service";
 import type { RenamePlan } from "@fs/rename-plan";
 import { type RenameResult, RenameService } from "@fs/rename.service";
+import { TailService } from "@fs/tail.service";
+import { heartbeat, lastEventIdOf, openStream, sendFrame, subscriberFor } from "@fs/tail-sse";
 import { UploadQueryDto } from "@fs/dto/upload.dto";
 import { receiveMultipart } from "@fs/upload-multipart";
 import { toRefusalException, type UploadOutcome, UploadService } from "@fs/upload.service";
@@ -61,8 +64,74 @@ export class FsController {
     private readonly remove: DeleteService,
     private readonly download: DownloadService,
     private readonly upload: UploadService,
+    private readonly tail: TailService,
     private readonly audit: AuditService,
   ) {}
+
+  /**
+   * A live tail, as server-sent events (TRE-34).
+   *
+   * Declared before `list` for no routing reason — `fs/tail` collides with
+   * nothing — but next to the other reads, because that is what it is.
+   *
+   * `async`, and the ordering is the whole design of the handler. Everything
+   * that can refuse — the rate limit, the roots guard, "that is not a regular
+   * file", the concurrency caps — runs inside `open()` **before** a single
+   * header is written, so a refusal is a real 403, 404, 409 or 429. After
+   * `openStream` the status line is spent and the only thing left to say is an
+   * `error` frame on a response that already returned 200.
+   *
+   * No CSRF: a GET is exempt on both sides, which is what lets the front open
+   * this with an `EventSource` — an `EventSource` cannot set a header, so a
+   * stream demanding one would be a stream the browser could never open.
+   *
+   * Not audited, and not exempted either: `audit-coverage.spec.ts` scans the
+   * mutating verbs, and a GET is outside it — the same position the five reads
+   * above are in. The bound that does apply is `LIMITS.tail`, spent by name
+   * inside the service because a GET has no decorator to declare one on.
+   */
+  @Get("tail")
+  async tailFile(@Req() req: Request, @Res() res: Response, @Query() query: TailQueryDto): Promise<void> {
+    const request = req as AuthenticatedRequest;
+
+    const opened = await this.tail.open({
+      userId: request.user.id,
+      sessionId: req.sessionID,
+      hostId: query.hostId,
+      path: query.path,
+      lines: query.lines,
+      lastEventId: lastEventIdOf(req.headers["last-event-id"]),
+      subscriber: subscriberFor(res),
+    });
+
+    openStream(res);
+    sendFrame(res, {
+      event: "ready",
+      data: {
+        hostId: query.hostId,
+        path: opened.realPath,
+        source: opened.source,
+        shared: opened.shared,
+        resumed: opened.resumed,
+      },
+    });
+
+    const ping = heartbeat(res);
+    let closed = false;
+    const close = (): void => {
+      if (closed) return;
+      closed = true;
+      clearInterval(ping);
+      opened.unsubscribe();
+    };
+
+    // `close` covers the ordinary end and the killed browser alike. `error` is
+    // here because a socket reset surfaces as `error` and does not always
+    // follow with `close` — and a subscriber left behind is a source that never
+    // learns nobody is listening, which is the leak this ticket is about.
+    req.on("close", close);
+    res.on("error", close);
+  }
 
   @Get("list")
   list(@Req() req: Request, @Query() query: FsQueryDto): Promise<ListResult> {
