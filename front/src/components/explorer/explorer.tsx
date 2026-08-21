@@ -17,6 +17,7 @@ import {
 } from "@components/explorer/pane-state";
 import { PermissionsModal } from "@components/explorer/permissions-modal";
 import { RenameModal } from "@components/explorer/rename-modal";
+import { TerminalPanel } from "@components/explorer/terminal-panel";
 import { TransferModal } from "@components/explorer/transfer-modal";
 import { HostManager } from "@components/hosts/host-manager";
 import { resolveActions } from "@components/shell/actions";
@@ -47,6 +48,7 @@ import type { PaneCallbacks } from "@components/explorer/pane";
 import type { PaneIndex, PaneView } from "@components/explorer/pane-state";
 import type { PermissionsTarget } from "@components/explorer/permissions-modal";
 import type { RenameMode, RenameTarget } from "@components/explorer/rename-modal";
+import type { TerminalDelete, TerminalPermissions, TerminalWorld } from "@components/explorer/terminal-runner";
 import type { TransferTarget } from "@components/explorer/transfer-modal";
 import type { ActionContext, ActionId, TargetKind } from "@components/shell/actions";
 import type { SplitMode } from "@components/shell/toolbar";
@@ -132,6 +134,8 @@ export function Explorer({
   onTransferMode,
   compareOpen,
   onCompareOpenChange,
+  terminalOpen,
+  onTerminalOpenChange,
   onClipboardChange,
   clearClipboardRequested,
   onClearClipboardRequestedChange,
@@ -223,6 +227,12 @@ export function Explorer({
   compareOpen: boolean;
   onCompareOpenChange: (open: boolean) => void;
   /**
+   * Whether the terminal is showing (TRE-35 §3). Owned by the page like the
+   * strip and the inspector are, so `⌥↩` and the status bar agree about it.
+   */
+  terminalOpen: boolean;
+  onTerminalOpenChange: (open: boolean) => void;
+  /**
    * What the clipboard is holding, in the one sentence the status bar shows
    * (TRE-71 §3) — null when it is holding nothing.
    *
@@ -286,6 +296,18 @@ export function Explorer({
    * selection to keep in step.
    */
   const [menu, setMenu] = useState<{ pane: PaneIndex; point: Point; name: string | null } | null>(null);
+  /**
+   * The two dialogues the terminal opens, each in its own slot (TRE-35 §1).
+   *
+   * Not `permissionsOpen`/`deleteOpen`, which are booleans whose target is
+   * derived from the active pane's selection — a `rm` typed with nothing
+   * selected would trip the "Nothing to delete" effect and close itself before
+   * it rendered. A typed line names its own targets, so it carries them, which
+   * is the same shape `paste` and `compareCopy` already take for the same
+   * reason.
+   */
+  const [terminalPermissions, setTerminalPermissions] = useState<TerminalPermissions | null>(null);
+  const [terminalDelete, setTerminalDelete] = useState<TerminalDelete | null>(null);
   const signedLink = useSignedLink();
   const hashJob = useHashJob();
 
@@ -407,6 +429,8 @@ export function Explorer({
     transferMode !== null ||
     paste !== null ||
     compareOpen ||
+    terminalPermissions !== null ||
+    terminalDelete !== null ||
     menu !== null;
 
   useEffect(() => {
@@ -1132,6 +1156,49 @@ export function Explorer({
     onPaneChange(index, { path });
   };
 
+  /**
+   * What the terminal is standing on, or null while the pane has no host.
+   *
+   * Built here because every effect in it is a closure of this component's —
+   * `go`, `dispatch`, `onPaneChange` — and handing them over is what makes the
+   * terminal a keyboard interface to the explorer rather than a second one
+   * beside it (TRE-35 §2).
+   */
+  const terminalHost = hosts.find((host) => host.id === activePane.hostId) ?? null;
+  const terminalWorld: TerminalWorld | null =
+    terminalHost === null
+      ? null
+      : {
+          host: terminalHost,
+          cwd: activePane.path,
+          hosts,
+          queryClient,
+          csrfToken,
+          cd: (path) => go(active, path),
+          back: () => {
+            // The pane's own Back, which walks the stack down rather than
+            // toggling the way a shell's `cd -` does. That is the honest
+            // mapping: this pane has a history and a back button, and a second
+            // notion of "the previous directory" kept only for the terminal
+            // would disagree with the button the first time either was used.
+            const target = backTarget(views[active]);
+            if (!target) return false;
+            dispatch({ type: "stacks", pane: active, ...target });
+            onPaneChange(active, { path: target.path });
+            return true;
+          },
+          bind: (hostId) => {
+            const host = hosts.find((candidate) => candidate.id === hostId);
+            if (!host) return;
+            // Both writes, as `openOther` does: the reducer's memory of where
+            // the pane was and the URL's record of where it is now.
+            dispatch({ type: "navigate", pane: active, path: host.homePath });
+            onPaneChange(active, { host: host.id, path: host.homePath });
+          },
+          openPermissions: setTerminalPermissions,
+          openDelete: setTerminalDelete,
+        };
+
   const open = (index: PaneIndex, row: FileRow) => {
     if (row.type === "dir") {
       go(index, openTarget(views[index].path, row.name));
@@ -1294,6 +1361,32 @@ export function Explorer({
       }
     },
   });
+
+  /**
+   * `⌥↩` toggles the terminal (TRE-35 §3).
+   *
+   * Its own listener because it has to be: both hooks below return early on
+   * `altKey`, deliberately — the pane's keys are unmodified ones, and a shortcut
+   * that carries a modifier is a different kind of key. So neither can express
+   * this one, and adding an option to them would loosen the rule they exist to
+   * state.
+   *
+   * It fires inside the terminal's own input as well, which is the point: the
+   * key that opens it is the key that closes it, and reaching for the mouse to
+   * put away something opened with the keyboard is the thing this avoids.
+   */
+  useEffect(() => {
+    if (overlayOpen) return;
+
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || !event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+      event.preventDefault();
+      onTerminalOpenChange(!terminalOpen);
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [overlayOpen, terminalOpen, onTerminalOpenChange]);
 
   // ⌘I is its own listener rather than a case in the switch above: that one
   // stands down while a modifier is held and while the glob field has focus,
@@ -1472,100 +1565,141 @@ export function Explorer({
   };
 
   return (
-    // Two rows of nesting, not one: the split arranges the panes, and the
-    // inspector sits beside whatever that arrangement produced. Left flat, a
-    // solo pane would stack the panel underneath itself rather than beside it.
-    <div className="flex h-full min-h-0">
-      {/* A query container, so a pane that is collapsing can hold its width in
+    // Three levels of nesting, and each one is doing something. The column is
+    // the terminal's: it docks under everything, the way the disk-usage strip
+    // docks under the whole app. The row inside it is the inspector's — left
+    // flat, a solo pane would stack the panel underneath itself rather than
+    // beside it. And the row inside *that* is the split's.
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1">
+        {/* A query container, so a pane that is collapsing can hold its width in
           `cqw` (TRE-62): half of this row is what a pane in a split is, and a
           percentage would resolve against the box that is animating. The row
           also hands both panes one clock, since a split change is an arrival
           and a departure at once — a pane arrives whenever the split goes on. */}
-      <div
-        className="pane-row @container flex min-h-0 min-w-0 flex-1"
-        data-motion={splitMode === "split" ? "open" : "close"}
-      >
-        {([0, 1] as const).map((index) => {
-          const shown = splitMode === "split" || (splitMode === "left" ? index === 0 : index === 1);
-          const pane = views[index];
-          const view = rendered[index];
-          return (
-            <CollapsiblePane
-              key={index}
-              open={shown}
-              // What this pane is worth when it is showing: half the row beside
-              // its neighbour, all of it alone. A pane on its way out keeps the
-              // one it had, which is why the wrapper holds it rather than
-              // reading this prop on the way down.
-              size={splitMode === "split" ? "50cqw" : "100cqw"}
-              fills
-              animate={animate}
-            >
-              {/* biome-ignore lint/a11y/noStaticElementInteractions: a cache warm-up on hover, with no behaviour of its own */}
-              <div
-                // Named so ⇧F10 can find the cursor row inside *this* pane: two
-                // panes can be showing the same directory, and the same name.
-                data-pane={index}
-                className="flex min-h-0 min-w-0 flex-1"
-                onMouseOver={(event) => prefetchFromEvent(pane, view.rows, event.target)}
-                onFocus={(event) => prefetchFromEvent(pane, view.rows, event.target)}
+        <div
+          className="pane-row @container flex min-h-0 min-w-0 flex-1"
+          data-motion={splitMode === "split" ? "open" : "close"}
+        >
+          {([0, 1] as const).map((index) => {
+            const shown = splitMode === "split" || (splitMode === "left" ? index === 0 : index === 1);
+            const pane = views[index];
+            const view = rendered[index];
+            return (
+              <CollapsiblePane
+                key={index}
+                open={shown}
+                // What this pane is worth when it is showing: half the row beside
+                // its neighbour, all of it alone. A pane on its way out keeps the
+                // one it had, which is why the wrapper holds it rather than
+                // reading this prop on the way down.
+                size={splitMode === "split" ? "50cqw" : "100cqw"}
+                fills
+                animate={animate}
               >
-                <Pane
-                  pane={pane}
-                  active={active === index}
-                  host={hosts.find((host) => host.id === pane.hostId) ?? null}
-                  rows={view.rows}
-                  meta={view.listing.data?.meta ?? null}
-                  // A disabled query never leaves `isPending`, so an unbound pane
-                  // would shimmer for ever if that alone drove the skeleton.
-                  loading={hostsPending || (pane.hostId !== null && view.listing.isPending)}
-                  error={view.listing.error}
-                  glob={index === active ? glob.trim() : ""}
-                  hiddenByGlob={index === active ? view.hiddenByGlob : 0}
-                  volume={volumes[index]}
-                  // The names this pane should draw dimmed, which is only ever
-                  // a cut and only ever where it was taken from (TRE-71 §3).
-                  cut={cutNamesIn(clip, pane.hostId, pane.path)}
-                  // From the URL rather than from `views`, which carries what
-                  // the reducer remembers: a tail is a link's business, not a
-                  // session's, and it is read back from the query string on a
-                  // cold open (TRE-34 §3).
-                  tail={panes[index].tail}
-                  heat={heat}
-                  now={now}
-                  callbacks={callbacksFor(index)}
-                />
-              </div>
-            </CollapsiblePane>
-          );
-        })}
+                {/* biome-ignore lint/a11y/noStaticElementInteractions: a cache warm-up on hover, with no behaviour of its own */}
+                <div
+                  // Named so ⇧F10 can find the cursor row inside *this* pane: two
+                  // panes can be showing the same directory, and the same name.
+                  data-pane={index}
+                  className="flex min-h-0 min-w-0 flex-1"
+                  onMouseOver={(event) => prefetchFromEvent(pane, view.rows, event.target)}
+                  onFocus={(event) => prefetchFromEvent(pane, view.rows, event.target)}
+                >
+                  <Pane
+                    pane={pane}
+                    active={active === index}
+                    host={hosts.find((host) => host.id === pane.hostId) ?? null}
+                    rows={view.rows}
+                    meta={view.listing.data?.meta ?? null}
+                    // A disabled query never leaves `isPending`, so an unbound pane
+                    // would shimmer for ever if that alone drove the skeleton.
+                    loading={hostsPending || (pane.hostId !== null && view.listing.isPending)}
+                    error={view.listing.error}
+                    glob={index === active ? glob.trim() : ""}
+                    hiddenByGlob={index === active ? view.hiddenByGlob : 0}
+                    volume={volumes[index]}
+                    // The names this pane should draw dimmed, which is only ever
+                    // a cut and only ever where it was taken from (TRE-71 §3).
+                    cut={cutNamesIn(clip, pane.hostId, pane.path)}
+                    // From the URL rather than from `views`, which carries what
+                    // the reducer remembers: a tail is a link's business, not a
+                    // session's, and it is read back from the query string on a
+                    // cold open (TRE-34 §3).
+                    tail={panes[index].tail}
+                    heat={heat}
+                    now={now}
+                    callbacks={callbacksFor(index)}
+                  />
+                </div>
+              </CollapsiblePane>
+            );
+          })}
+        </div>
+
+        <CollapsiblePane
+          open={inspector}
+          size="var(--spacing-inspector)"
+          animate={animate}
+          // The panel's own breakpoint, moved out to the box that has the width:
+          // below 1100px there is no inspector at all, and a wrapper animating
+          // open behind `display: none` would hand 218px to a panel that is not
+          // there. A resize across it is not an open, and animates nothing.
+          className="hidden inspector:flex"
+        >
+          <Inspector
+            host={hosts.find((host) => host.id === activePane.hostId) ?? null}
+            path={activePane.path}
+            rows={activeView.rows}
+            selected={inspected}
+            sort={activePane.sort}
+            dir={activePane.dir}
+            glob={glob.trim()}
+            loading={hostsPending || (activePane.hostId !== null && activeView.listing.isPending)}
+            error={activeView.listing.error}
+            now={now}
+            onClose={() => onInspectorChange(false)}
+            onEditPermissions={() => onPermissionsOpenChange(true)}
+          />
+        </CollapsiblePane>
       </div>
 
-      <CollapsiblePane
-        open={inspector}
-        size="var(--spacing-inspector)"
-        animate={animate}
-        // The panel's own breakpoint, moved out to the box that has the width:
-        // below 1100px there is no inspector at all, and a wrapper animating
-        // open behind `display: none` would hand 218px to a panel that is not
-        // there. A resize across it is not an open, and animates nothing.
-        className="hidden inspector:flex"
-      >
-        <Inspector
-          host={hosts.find((host) => host.id === activePane.hostId) ?? null}
-          path={activePane.path}
-          rows={activeView.rows}
-          selected={inspected}
-          sort={activePane.sort}
-          dir={activePane.dir}
-          glob={glob.trim()}
-          loading={hostsPending || (activePane.hostId !== null && activeView.listing.isPending)}
-          error={activeView.listing.error}
-          now={now}
-          onClose={() => onInspectorChange(false)}
-          onEditPermissions={() => onPermissionsOpenChange(true)}
+      <TerminalPanel
+        open={terminalOpen}
+        world={terminalWorld}
+        hostsPending={hostsPending}
+        onClose={() => onTerminalOpenChange(false)}
+      />
+
+      {terminalPermissions && (
+        <PermissionsModal
+          target={{
+            hostId: terminalPermissions.hostId,
+            directory: terminalPermissions.directory,
+            entries: terminalPermissions.entries,
+            // The mode the line named, which is the whole difference between
+            // this and the toolbar's button.
+            initialMode: terminalPermissions.mode,
+            origin: "terminal",
+          }}
+          onClose={() => setTerminalPermissions(null)}
+          onApplied={() => {
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, terminalPermissions.hostId] });
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.ENTRY, terminalPermissions.hostId] });
+          }}
         />
-      </CollapsiblePane>
+      )}
+
+      {terminalDelete && (
+        <DeleteModal
+          target={{ ...terminalDelete, origin: "terminal" }}
+          onClose={() => setTerminalDelete(null)}
+          onApplied={() => {
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, terminalDelete.hostId] });
+            void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.ENTRY, terminalDelete.hostId] });
+          }}
+        />
+      )}
 
       {permissionsTarget && (
         <PermissionsModal

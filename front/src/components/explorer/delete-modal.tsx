@@ -34,6 +34,14 @@ export interface DeleteTargetSelection {
   directory: string;
   /** What is selected, in listing order. Never empty. */
   entries: readonly FileRow[];
+  /**
+   * Which surface opened this, when it was not a button (TRE-35).
+   *
+   * The plan is not marked and does not need to be — it reads and is exempt
+   * from the log. What is marked is the delete itself, which is the row anyone
+   * would ever go looking for.
+   */
+  origin?: "terminal";
 }
 
 export function DeleteModal({
@@ -80,7 +88,7 @@ function DeletePanel({
   const { csrfToken } = useAuth();
   const queryClient = useQueryClient();
   const { push } = useToast();
-  const { hostId, directory, entries } = target;
+  const { hostId, directory, entries, origin } = target;
 
   const paths = entries.map((entry) => joinPath(directory, entry.name));
 
@@ -103,7 +111,7 @@ function DeletePanel({
   });
 
   const remove = useMutation({
-    mutationFn: () => deletePaths(hostId, paths, typed, csrfToken),
+    mutationFn: () => deletePaths(hostId, paths, typed, csrfToken, origin),
     throwOnError: false,
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, hostId] });

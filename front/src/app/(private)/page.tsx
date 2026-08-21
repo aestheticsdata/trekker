@@ -58,6 +58,17 @@ export default function HomePage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
   /**
+   * Whether the terminal is showing (TRE-35 §3).
+   *
+   * Local rather than URL-backed, which is where the inspector and the strip
+   * keep the same kind of flag. The difference is what a reload should do: a
+   * link that reopens somebody's split and their two directories is the point
+   * of the URL, and a link that also reopens a terminal is a link that types
+   * into somebody else's session. `⌥↩` brings it back with its history intact —
+   * that part *is* persisted, per tab, which is what the ticket asks for.
+   */
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  /**
    * A request, not a state (TRE-26).
    *
    * The other three flags open a modal that stays open. This one asks the
@@ -281,7 +292,13 @@ export default function HomePage() {
         />
       }
       strip={
-        shared.du && (
+        // The terminal takes the strip's place while it is open, as the mockup
+        // has it. They are the same kind of object — a fixed-height panel
+        // docked under the panes — and stacking both would spend a third of the
+        // window on furniture. Null rather than hidden, which is what the slot
+        // asks for: the strip holds an SSE connection.
+        shared.du &&
+        !terminalOpen && (
           <DiskUsage
             host={activeHost}
             // Pinned once something has been scanned, and following the active
@@ -294,7 +311,7 @@ export default function HomePage() {
           />
         )
       }
-      onShowStrip={shared.du ? null : () => changeLayout({ du: true })}
+      onShowStrip={shared.du || terminalOpen ? null : () => changeLayout({ du: true })}
     >
       <Explorer
         hosts={hosts ?? []}
@@ -332,6 +349,8 @@ export default function HomePage() {
         onTransferMode={setTransferMode}
         compareOpen={compareOpen}
         onCompareOpenChange={setCompareOpen}
+        terminalOpen={terminalOpen}
+        onTerminalOpenChange={setTerminalOpen}
         onClipboardChange={setClipboard}
         clearClipboardRequested={clearClipboardRequested}
         onClearClipboardRequestedChange={setClearClipboardRequested}

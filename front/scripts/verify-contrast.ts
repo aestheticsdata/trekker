@@ -33,7 +33,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
 import { WARN_CHIP_FILL, WARN_CHIP_INK } from "../src/helpers/disks.ts";
 import { AGE_BUCKETS, HEAT, HEAT_OFF_INK, PANE_SURFACES } from "../src/helpers/heat.ts";
 import {
@@ -56,6 +55,22 @@ import {
   TAIL_NOTE_INK,
   TAIL_SURFACE,
 } from "../src/helpers/tail.ts";
+import {
+  PROMPT_CHAR_INK,
+  PROMPT_WHERE_INK,
+  PROMPT_WHO_INK,
+  TERMINAL_BAR,
+  TERMINAL_DONE_INK,
+  TERMINAL_ECHO_INK,
+  TERMINAL_ERROR_INK,
+  TERMINAL_HINT_INK,
+  TERMINAL_LABEL_INK,
+  TERMINAL_OUTPUT_INK,
+  TERMINAL_QUIET_INK,
+  TERMINAL_SURFACE,
+  TERMINAL_TABLE_INK,
+  TERMINAL_TITLE_INK,
+} from "../src/helpers/terminal.ts";
 import { TOOLTIP_INK, TOOLTIP_LABEL_INK, TOOLTIP_SUBJECT_INK, TOOLTIP_SURFACE } from "../src/helpers/tooltip.ts";
 import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK } from "../src/helpers/treemap.ts";
 
@@ -137,6 +152,27 @@ check("status 5xx", STATUS_INK.server, TAIL_SURFACE);
 // the pointer, so both of their grounds have to hold.
 check("a picker button, hovered", TAIL_BODY_INK, "bg-pane-hover");
 check("retry and follow", TAIL_BUTTON_INK, TAIL_BUTTON_FILL);
+
+console.log("\n--- the terminal (TRE-35) ---");
+// Seven kinds of line on the panel's own ground, which is a step below every
+// other surface in the app — so nothing measured elsewhere carries over.
+check("the line somebody typed", TERMINAL_ECHO_INK, TERMINAL_SURFACE);
+check("a scalar answer", TERMINAL_OUTPUT_INK, TERMINAL_SURFACE);
+check("a table of them", TERMINAL_TABLE_INK, TERMINAL_SURFACE);
+check("something that changed", TERMINAL_DONE_INK, TERMINAL_SURFACE);
+check("a refusal", TERMINAL_ERROR_INK, TERMINAL_SURFACE);
+check("the line under a refusal", TERMINAL_HINT_INK, TERMINAL_SURFACE);
+check("the opening line", TERMINAL_QUIET_INK, TERMINAL_SURFACE);
+// The prompt row sits on the panel; the header sits on `chrome`, one step up,
+// because the mockup puts a lid on the hole rather than a sixth bar.
+check("who the next line runs as", PROMPT_WHO_INK, TERMINAL_SURFACE);
+check("where it runs", PROMPT_WHERE_INK, TERMINAL_SURFACE);
+check("the `$`", PROMPT_CHAR_INK, TERMINAL_SURFACE);
+// TRE-29's amber, unchanged and now on a second surface. This one is the
+// signal, so it is the one that must not be marginal anywhere.
+check("the `#`, elevated", PROMPT_ELEVATED_INK, TERMINAL_SURFACE);
+check("the word TERMINAL", TERMINAL_TITLE_INK, TERMINAL_BAR);
+check("the header beside it, and its two buttons", TERMINAL_LABEL_INK, TERMINAL_BAR);
 
 /*
  * And the pair those two buttons would have worn.

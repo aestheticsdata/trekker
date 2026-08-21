@@ -58,6 +58,25 @@
    * carries, and that is why it does. */
   --color-pane-sunk: #93b4d1;
 
+  /* A fifth depth in the dark half, below `chrome`, and it exists for one box:
+   * the terminal (TRE-35 §3). The mockup sinks the panel below every other
+   * surface in the app and then puts its *header* back on `chrome`, so the two
+   * read as a lid on a hole rather than as one more bar. Nothing else uses it,
+   * and nothing else should — a sixth depth is a depth nobody can place. */
+  --color-terminal: #04161f;
+  /* And the one ink on it the mockup gets wrong. 2a writes the path in the
+   * prompt, and its opening scrollback, as `#4d7f99` — which is
+   * `--color-ink-faint`, and on this ground it measures 4.22:1. Under AA, and
+   * under it for the one thing on the panel that says *where the next command
+   * will run*.
+   *
+   * TRE-33 settled what happens then and TRE-34 followed it: the hue is the
+   * mockup's, the ground is the mockup's, and the ink is lifted until it
+   * clears. 4.87:1 here, which is deliberately modest — `--color-ink-link` at
+   * 5.04:1 is the identity beside it, and a path that outshone the account it
+   * runs as would invert the hierarchy the mockup is drawing. */
+  --color-on-terminal-dim: #538aa6;
+
   /* ---- ink -------------------------------------------------------------
    * On dark, brightest first. `ink` is body text, `ink-muted` labels,
    * `ink-faint` the small caps that only need to be findable.
@@ -252,6 +271,14 @@
    * argument the half-steps above make: the mockup's number, kept as itself. */
   --leading-log: 1.65;
 
+  /* The terminal's own (TRE-35 §3), which is not the tail's. The mockup writes
+   * the panel's body as `400 11px/1.55` against the tail's `9.5px/1.65`: a
+   * terminal is read a line at a time as it answers, a log is scanned down a
+   * column, and the two want different rhythms. Kept as the mockup's number for
+   * the reason `--leading-log` is — over twelve lines, rounding onto
+   * `leading-snug` is three pixels of drift in a box whose height is a token. */
+  --leading-term: 1.55;
+
   /* ---- motion -----------------------------------------------------------
    * Skeleton rows pulse rather than sweep: a listing is a column of bars, and
    * a travelling highlight across eleven of them reads as a progress bar for
@@ -325,6 +352,13 @@
    * listing above it losing a screenful. In `rem` like the rest, so a scaled-up
    * UI gets a taller strip rather than eight smaller lines. */
   --spacing-tailbody: 7.8125rem; /* 125px — 8 × 9.5px × 1.65 */
+  /* The terminal (TRE-35 §3), which the mockup states outright rather than
+   * leaving to be derived: the whole panel is 198px and the body takes what the
+   * 22px header and the input row leave — about nine lines of `11px/1.55`. In
+   * `rem` like the rest, so a scaled-up UI gets a taller panel rather than the
+   * same one with fewer lines in it. */
+  --spacing-terminal: 12.375rem; /* 198px */
+  --spacing-termbar: 1.375rem; /* 22px — its header */
   /* The inspector's width (TRE-17). A token since TRE-62, because two boxes
    * now need the same number: the panel, and the wrapper that opens it. */
   --spacing-inspector: 13.625rem; /* 218px */

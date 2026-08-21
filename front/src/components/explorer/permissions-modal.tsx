@@ -50,6 +50,28 @@ export interface PermissionsTarget {
   directory: string;
   /** What is selected, in listing order. Never empty. */
   entries: readonly FileRow[];
+  /**
+   * The mode this should open on, when the caller already has one in mind.
+   *
+   * Absent from a selection, which has no mode of its own to propose, and
+   * present from the terminal: `chmod 644 notes.txt` has said which bits it
+   * means, and a dialogue that opened on the file's *current* mode would make
+   * the person type the answer they had just typed (TRE-35 §1).
+   *
+   * Three or four octal digits, validated the same way as a file's own — an
+   * unparseable one falls through to the first entry's, because a caller with a
+   * bad mode should still get the dialogue rather than nothing.
+   */
+  initialMode?: string;
+  /**
+   * Which surface opened this, when it was not a button (TRE-35).
+   *
+   * Carried on the target rather than read from a context, because the audit
+   * row this ends up in should be traceable to the caller that claimed it. A
+   * dialogue opened from the toolbar leaves it absent, which is what a button
+   * means.
+   */
+  origin?: "terminal";
 }
 
 export function PermissionsModal({
@@ -99,7 +121,7 @@ function PermissionsPanel({
 }) {
   const { csrfToken } = useAuth();
   const { push } = useToast();
-  const { hostId, directory, entries } = target;
+  const { hostId, directory, entries, initialMode, origin } = target;
 
   const first = entries[0];
   const paths = entries.map((entry) => joinPath(directory, entry.name));
@@ -109,8 +131,12 @@ function PermissionsPanel({
 
   // The mode the panel opens on is the first entry's, as the ticket asks. When
   // they differ that is a starting point rather than a description, which is
-  // what the notice below the grid is for.
-  const [bits, setBits] = useState(() => parseMode(first.mode) ?? 0o644);
+  // what the notice below the grid is for. A caller that named one — the
+  // terminal — is proposing it instead, and gets the same treatment: a starting
+  // point, shown in the grid, applied only by the button.
+  const [bits, setBits] = useState(
+    () => (initialMode === undefined ? null : parseMode(initialMode)) ?? parseMode(first.mode) ?? 0o644,
+  );
   const [owner, setOwner] = useState("");
   const [recursive, setRecursive] = useState(false);
   const [outcome, setOutcome] = useState<ChangeResult | null>(null);
@@ -140,7 +166,7 @@ function PermissionsPanel({
       setFailure(null);
       setOutcome(null);
 
-      const mode = await changeMode({ hostId, paths, mode: octal, recursive }, csrfToken);
+      const mode = await changeMode({ hostId, paths, mode: octal, recursive }, csrfToken, origin);
 
       // Ownership is a separate call and a separate privilege, so it only runs
       // when the field was actually typed in. Sending the unchanged owner back
