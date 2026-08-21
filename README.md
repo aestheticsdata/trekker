@@ -7,8 +7,37 @@ Trekker reaches a host either as the machine it runs on or over SSH, behind one 
 interface. There is nothing to install on the servers you browse: any Linux with `sshd` works,
 and the machine hosting Trekker is just another entry with a different driver.
 
-> **Status: early.** The skeleton and the schema are in place (TRE-4, TRE-6). Hosts, browsing and
-> every operation are still ahead — see `docs/superpowers/specs/2026-08-09-trekker-design.md`.
+> **Status.** Hosts, browsing and every file operation work end to end. The insight, shell and
+> polish pass is what remains — see `docs/superpowers/specs/2026-08-09-trekker-design.md`.
+
+## What it does
+
+- **Browse** — dual panes with tabs, breadcrumbs, sorting, glob filtering, multi-selection, a
+  right-click menu, and a virtualised list that survives a `node_modules`. Pane state lives in the
+  URL, so a layout is a link and the back button walks directory history; a bare URL restores the
+  last one.
+- **Operate** — create a directory or a file, rename (single, or a regex batch previewed before it
+  runs), `chmod` and `chown` including recursively, delete behind a typed confirmation verified
+  server-side, and cut, copy and paste across panes and across hosts.
+- **Transfer** — copy and move within a host or between two, planned first so every conflict is
+  decided per file, then run as a job with byte counters, ETA, cancel and retry, streamed over SSE.
+- **In and out** — streamed uploads, downloads with range requests and zip-on-the-fly for a
+  directory, and signed links (HMAC, its own key, one path, expiring) for handing a file to
+  something that has no session.
+- **Inspect** — a panel on the selected entry, `sha256` as a background job, and a recursive diff
+  between the two panes.
+- **See the disk** — `df` and mounts in the sidebar, per-host cpu and io sparklines, and `du` scans
+  kept in the database so the treemap and the age heat map survive a reload.
+- **Watch** — a live tail strip over SSE, and an activity strip fed by the very rows every mutation
+  writes to the audit log.
+- **Type** — a terminal that is not a shell: twelve commands, each parsed into a typed intent and
+  run through the calls the buttons already make. `cd` moves the pane, `ssh` rebinds it, `chmod` and
+  `rm` open their dialogues rather than executing. There is no passthrough, and adding a command
+  means adding a parser.
+
+Still ahead: the `⌘K` palette, saved views, a git overlay on listings, and the SSH integration and
+end-to-end harness. The app is dark-only and assumes a wide
+viewport — it says so rather than degrading badly on a phone.
 
 ## Before you run this
 
@@ -171,15 +200,17 @@ without claiming it there first.
 
 ```
 front/                 Next app — (public) and (private) route groups
-nest-api/              NestJS API — config, database, prisma, redis, health
+nest-api/              NestJS API — config, database, prisma, redis, health, users, secrets,
+                       hosts, fs, transfers, hashes, compare, scans, bookmarks, audit
 nest-api/prisma/       schema, migrations, seed
 docs/                  design docs (docs/superpowers/specs/)
 ```
 
-Path aliases mirror the module layout on both sides: `@config/…`, `@database/…`, `@redis/…`,
-`@health/…` in the API; `@app/…`, `@components/…`, `@lib/…`, `@styles/…` in the front. There is
-deliberately no `@prisma/…` alias — it would shadow the npm scope the Prisma packages live in, so
-`src/prisma/` is imported relatively.
+Path aliases mirror the module layout on both sides: one per module in the API (`@config/…`,
+`@database/…`, `@hosts/…`, `@fs/…`, `@transfers/…` and so on); `@app/…`, `@components/…`, `@lib/…`,
+`@auth/…`, `@helpers/…`, `@schemas/…`, `@styles/…` in the front. There is deliberately no
+`@prisma/…` alias — it would shadow the npm scope the Prisma packages live in, so `src/prisma/` is
+imported relatively.
 
 ## Scripts
 
