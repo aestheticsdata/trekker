@@ -15,6 +15,7 @@
     "verify:log": "node scripts/verify-log.ts",
     "verify:menu": "node scripts/verify-menu.ts",
     "verify:permissions": "node scripts/verify-permissions.ts",
+    "verify:terminal": "node scripts/verify-terminal.ts",
     "verify:virtual": "node scripts/verify-virtual.ts"
   },
   "dependencies": {
