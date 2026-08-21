@@ -26,6 +26,26 @@ import type { Observable } from "rxjs";
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /**
+ * The header a client may use to say which surface an action came from, and the
+ * only values it may say (TRE-35).
+ *
+ * A closed list rather than a length cap, because this is a column in the audit
+ * log and a client that can write free text into one can write a sentence that
+ * reads like somebody else's entry. Anything unrecognised is dropped silently
+ * and the row reads as a button, which is the honest default: the header is a
+ * label on a request that had the same permissions either way, so a forged or
+ * malformed one must not be able to fail the operation.
+ */
+export const ORIGIN_HEADER = "x-trekker-origin";
+const ORIGINS = new Set(["terminal"]);
+
+/** Exported for `audit.spec.ts`: a client-writable audit field needs a test. */
+export function originOf(request: { header(name: string): string | undefined }): string | undefined {
+  const claimed = request.header(ORIGIN_HEADER);
+  return claimed !== undefined && ORIGINS.has(claimed) ? claimed : undefined;
+}
+
+/**
  * A refusal is the request being told no before it did anything — the wrong
  * credentials, a rate limit, a path outside the roots. A failure is the
  * operation running and not working. Worth separating: a burst of refusals is
@@ -174,6 +194,7 @@ export class AuditInterceptor implements NestInterceptor {
       summary: intent.summary,
       tag: intent.tag,
       hostId: intent.hostId,
+      origin: originOf(request),
       destructive: spec?.destructive ?? false,
       payload,
     };

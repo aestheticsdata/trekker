@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { HttpException } from "@nestjs/common";
 import { ActivityService } from "@audit/activity.service";
+import { ORIGIN_HEADER, originOf } from "@audit/audit.interceptor";
 import { AuditService } from "@audit/audit.service";
 import { LIMITS } from "@audit/limits";
 import { RateLimitService } from "@audit/rate-limit.service";
@@ -136,6 +139,51 @@ function redisReturning(counts: number[], ttl = 42): { redis: RedisService; expi
   } as unknown as RedisService;
   return { redis, expires };
 }
+
+// ------------------------------------------------------------------- origin
+
+describe("where an action was started from", () => {
+  const asking = (value: string | undefined) => ({
+    header: (name: string) => (name === ORIGIN_HEADER ? value : undefined),
+  });
+
+  it("records a surface it recognises", () => {
+    expect(originOf(asking("terminal"))).toBe("terminal");
+  });
+
+  it("records nothing at all when the header is absent, which is what a button is", () => {
+    expect(originOf(asking(undefined))).toBeUndefined();
+  });
+
+  it("drops anything not on the list rather than storing it", () => {
+    // The whole reason this is a closed set and not a length cap. `origin` is a
+    // column in the audit log, and a client that can write free text into one
+    // can write something that reads like a different entry.
+    for (const forged of [
+      "ui",
+      "TERMINAL",
+      " terminal",
+      "terminal ",
+      "terminal; drop",
+      "<b>terminal</b>",
+      "",
+      "root",
+    ]) {
+      expect(originOf(asking(forged))).toBeUndefined();
+    }
+  });
+
+  it("is a label and never a permission", () => {
+    // Stated as a test because it is the thing most likely to be forgotten by
+    // whoever adds the second origin: nothing anywhere reads this value to
+    // decide what a request may do. If that ever changes, a forged header
+    // becomes a privilege escalation, and this test is where to notice.
+    const source = readFileSync(join(__dirname, "audit.interceptor.ts"), "utf8");
+    const uses = source.split("\n").filter((line) => line.includes("originOf(") && !line.startsWith("export"));
+    expect(uses).toHaveLength(1);
+    expect(uses[0]).toContain("origin:");
+  });
+});
 
 describe("rate limits", () => {
   const rule = LIMITS.passwordChange;

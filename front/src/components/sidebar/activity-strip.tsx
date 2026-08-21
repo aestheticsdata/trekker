@@ -57,7 +57,15 @@ function Row({ item }: { item: ActivityView }) {
       content={
         <TooltipBlock
           note={item.detail}
-          rows={[{ label: "when", value: stamp(item.createdAt) }]}
+          // Where it came from goes in the tooltip rather than as a badge on
+          // the row: the row is 176px and its summary already truncates, so a
+          // chip would be bought with the only words that say what happened.
+          // Only shown when there is something to say — a button is the default
+          // and a row marked "from: ui" on every entry marks nothing (TRE-35).
+          rows={[
+            { label: "when", value: stamp(item.createdAt) },
+            ...(item.origin === null ? [] : [{ label: "from", value: item.origin }]),
+          ]}
           subject={item.summary}
         />
       }

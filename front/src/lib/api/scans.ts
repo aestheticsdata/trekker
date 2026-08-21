@@ -105,11 +105,17 @@ export async function fetchScanState(hostId: string, root: string): Promise<Scan
   return (await apiRequest(`/hosts/${hostId}/scan?${query.toString()}`)) as ScanState;
 }
 
-export async function startScan(hostId: string, root: string, csrfToken: string | null): Promise<ScanView> {
+export async function startScan(
+  hostId: string,
+  root: string,
+  csrfToken: string | null,
+  origin?: "terminal",
+): Promise<ScanView> {
   return (await apiRequest(`/hosts/${hostId}/scan`, {
     method: "POST",
     body: { root },
     csrfToken,
+    origin,
   })) as ScanView;
 }
 

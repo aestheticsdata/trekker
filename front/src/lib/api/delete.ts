@@ -78,8 +78,10 @@ export async function deletePaths(
   paths: readonly string[],
   confirmation: string,
   csrfToken: string | null,
+  origin?: "terminal",
 ): Promise<DeleteResult> {
   return (await apiRequest("/fs/delete", {
+    origin,
     method: "POST",
     body: { hostId, paths, confirmation },
     csrfToken,

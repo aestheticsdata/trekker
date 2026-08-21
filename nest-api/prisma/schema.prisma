@@ -698,6 +698,25 @@ model ActivityLog {
   /// index, not a JSON scan.
   elevated Boolean @default(false)
 
+  /// Where in the UI the action was started from — `terminal` (TRE-35), or null
+  /// for the buttons, which are the default and need no marking.
+  ///
+  /// Its own column for the same reason `elevated` has one, and it is the same
+  /// question one step along: "what did this session do as root" and "what did
+  /// this session type rather than click" are both things you ask of a whole
+  /// history at once, and a JSON scan over `payload` is not how you ask them.
+  ///
+  /// Not `tag`, which is already spoken for — that is the badge on the strip,
+  /// and it carries counts, sizes and transports. A column that sometimes means
+  /// "3 files" and sometimes means "terminal" cannot be filtered on.
+  ///
+  /// Client-supplied, and therefore never trusted as a claim about privilege:
+  /// it says which surface a request came from, and the surfaces have exactly
+  /// the same permissions. A forged value moves nothing but a label. It is
+  /// still validated against a closed list, because an audit column is a
+  /// terrible place to let a client write free text.
+  origin String? @db.VarChar(16)
+
   /// Destroyed or moved data, or granted privilege. Copied onto the row from
   /// the route's `@Audited` spec rather than derived from `kind` at prune
   /// time: the prune job runs months later, and a `kind` renamed or retired in

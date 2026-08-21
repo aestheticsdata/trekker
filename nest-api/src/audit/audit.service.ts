@@ -14,6 +14,8 @@ export interface AuditOpening {
   tag?: string;
   hostId?: string;
   elevated?: boolean;
+  /** Which surface started it, from the request header. Null means a button. */
+  origin?: string;
   /** Carried from the route's `@Audited` spec. Decides the retention window. */
   destructive?: boolean;
   payload?: Record<string, unknown>;
@@ -82,6 +84,7 @@ export class AuditService {
           summary: opening.summary.slice(0, 255),
           tag: opening.tag?.slice(0, 32) ?? null,
           elevated: opening.elevated ?? false,
+          origin: opening.origin ?? null,
           destructive: opening.destructive ?? false,
           outcome: "pending",
           payload: (redact(opening.payload) ?? undefined) as never,

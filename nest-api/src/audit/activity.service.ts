@@ -17,6 +17,8 @@ export interface ActivityView {
   outcome: "pending" | "success" | "failure" | "refused";
   detail: string | null;
   elevated: boolean;
+  /** Which surface started it — "terminal" (TRE-35), or null for a button. */
+  origin: string | null;
   /**
    * A string, not a number. The column is a BigInt — `JSON.stringify` throws
    * outright on one, and `Number()` would silently lose precision on a large
@@ -78,6 +80,7 @@ export class ActivityService {
         outcome: true,
         detail: true,
         elevated: true,
+        origin: true,
         bytes: true,
         durationMs: true,
         createdAt: true,
@@ -98,6 +101,7 @@ export class ActivityService {
         outcome: row.outcome,
         detail: row.detail,
         elevated: row.elevated,
+        origin: row.origin,
         bytes: row.bytes === null ? null : row.bytes.toString(),
         durationMs: row.durationMs,
         createdAt: row.createdAt.toISOString(),

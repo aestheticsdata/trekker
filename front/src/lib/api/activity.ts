@@ -23,6 +23,8 @@ export interface ActivityView {
   /** Why it failed or was refused. Already redacted server-side. */
   detail: string | null;
   elevated: boolean;
+  /** Which surface started it — `"terminal"` (TRE-35), or null for a button. */
+  origin: string | null;
   /**
    * A string, not a number: the column is a 64-bit count, and JSON has no
    * integer type that holds one without losing the low bits. Parse it where

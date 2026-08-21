@@ -56,8 +56,12 @@ export interface OwnerChange {
   recursive?: boolean;
 }
 
-export async function changeMode(input: ModeChange, csrfToken: string | null): Promise<ChangeResult> {
-  return (await apiRequest("/fs/chmod", { method: "POST", body: input, csrfToken })) as ChangeResult;
+export async function changeMode(
+  input: ModeChange,
+  csrfToken: string | null,
+  origin?: "terminal",
+): Promise<ChangeResult> {
+  return (await apiRequest("/fs/chmod", { method: "POST", body: input, csrfToken, origin })) as ChangeResult;
 }
 
 export async function changeOwner(input: OwnerChange, csrfToken: string | null): Promise<ChangeResult> {

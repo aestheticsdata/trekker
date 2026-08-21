@@ -10,6 +10,7 @@ export const API_ORIGIN = process.env.NODE_ENV === "production" ? "" : "http://l
 
 /** The header Trekker's CsrfGuard reads (nest-api/src/users/csrf-token.util.ts). */
 const CSRF_HEADER = "x-csrf-token";
+const ORIGIN_HEADER = "x-trekker-origin";
 
 /**
  * An API refusal, carrying what the server actually said.
@@ -35,6 +36,20 @@ export interface RequestOptions {
   body?: unknown;
   /** Required by the API for every unsafe verb. */
   csrfToken?: string | null;
+  /**
+   * Which surface started this, for the audit log (TRE-35).
+   *
+   * Only ever `"terminal"`, and only on the three mutating calls a typed line
+   * can reach. Absent means a button, which is the default and needs no saying
+   * — a header on every request in the app would be a column that is never
+   * null and therefore never a filter.
+   *
+   * Declared per call rather than carried in a context, deliberately. This ends
+   * up in an audit row, and an audit row should be traceable to the line of
+   * code that claimed it: an ambient origin picked up from a provider is
+   * exactly the kind of thing that is right for a year and then quietly wrong.
+   */
+  origin?: "terminal";
   /**
    * Set on the handful of calls that answer 401 to mean *what you sent is
    * wrong* rather than *your session is gone* — a wrong password, a wrong
@@ -91,6 +106,10 @@ export async function apiRequest(path: string, options: RequestOptions = {}): Pr
   // Attached whenever we have one and the verb needs it. A GET carrying it
   // would be harmless but pointless.
   if (options.csrfToken && method !== "GET") headers[CSRF_HEADER] = options.csrfToken;
+  // A label, not a claim: the API grants the terminal nothing the buttons do
+  // not have, so a forged value moves a word in a log and no permission at all.
+  // The server still checks it against a closed list before storing it.
+  if (options.origin !== undefined) headers[ORIGIN_HEADER] = options.origin;
 
   const response = await fetch(`${API_ORIGIN}/api${path}`, {
     method,
