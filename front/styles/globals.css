@@ -65,48 +65,83 @@
    * and nothing else should — a sixth depth is a depth nobody can place. */
   --color-terminal: #04161f;
   /* And the one ink on it the mockup gets wrong. 2a writes the path in the
-   * prompt, and its opening scrollback, as `#4d7f99` — which is
-   * `--color-ink-faint`, and on this ground it measures 4.22:1. Under AA, and
-   * under it for the one thing on the panel that says *where the next command
-   * will run*.
+   * prompt, and its opening scrollback, as `#4d7f99` — which was
+   * `--color-ink-faint` until TRE-81 lifted that too, and on this ground it
+   * measures 4.22:1. Under AA, and under it for the one thing on the panel that
+   * says *where the next command will run*.
    *
    * TRE-33 settled what happens then and TRE-34 followed it: the hue is the
    * mockup's, the ground is the mockup's, and the ink is lifted until it
-   * clears. 4.87:1 here, which is deliberately modest — `--color-ink-link` at
-   * 5.04:1 is the identity beside it, and a path that outshone the account it
+   * clears. 4.87:1 here, which is deliberately modest — `--color-ink-label` at
+   * 5.52:1 is the identity beside it, and a path that outshone the account it
    * runs as would invert the hierarchy the mockup is drawing. */
   --color-on-terminal-dim: #538aa6;
 
-  /* Two inks for the sunk `--color-strip` ground, and the ⌘K palette is what
-   * needed them (TRE-36 §4). The panel is 2a's, drawn on that ground, and two
-   * of the inks 2a draws on it are under AA: the group headers and the `›` at
-   * `#3e8fae` measure 4.34:1, and every quiet line — the match count, the
-   * footer, a row's second line — at `#4d7f99` measures 3.64:1.
-   *
-   * Same answer as TRE-33, TRE-34 and TRE-35 gave on their own surfaces: keep
-   * the hue, keep the ground, lift the ink until it clears, and say so. 4.76:1
-   * and 4.87:1, both measured by `pnpm verify:contrast`.
-   *
-   * Named for the ground rather than the panel, because the ground has another
-   * tenant: the docked disk-usage strip is drawn on `--color-strip` too, and it
-   * still carries the mockup's own two values inline, where no check can see
-   * them (TRE-80). When that is fixed it is a swap to these, not a new pair. */
-  --color-on-strip-label: #4896b3;
-  --color-on-strip-dim: #5c96af;
+  /* `--color-on-strip-label` and `--color-on-strip-dim` used to live here: two
+   * inks the ⌘K palette needed because 2a's own two are under AA on this ground
+   * (TRE-36 §4). They are gone, and nothing regressed — TRE-81 found that the
+   * same two of 2a's values are under AA on *every* dark ground this app draws
+   * them on, not only the sunk one, so the correction moved up into the ink
+   * ladder itself. `--color-ink-label` and `--color-ink-faint` below are those
+   * two, lifted two more points so they also clear `--color-app`, and they
+   * measure better on the strip than the pair they replace (4.98 against 4.76,
+   * 5.04 against 4.87). A ground-named token whose ground turns out to be every
+   * ground is a general ink wearing a local name, which is the mistake TRE-78
+   * spent a ticket undoing. */
 
   /* ---- ink -------------------------------------------------------------
    * On dark, brightest first. `ink` is body text, `ink-muted` labels,
    * `ink-faint` the small caps that only need to be findable.
+   *
+   * The bottom of the ladder is not the mockup's (TRE-81). 2a writes every
+   * quiet second line as `#4d7f99` and every small-caps header as `#3e8fae`,
+   * and measured against the five grounds this app actually draws them on, the
+   * first clears AA on none of them and the second on one:
+   *
+   *     ground   2a's quiet   2a's label
+   *     chrome      3.82         4.57
+   *     strip       3.64         4.34
+   *     app         3.36         4.02
+   *     raised      2.92         3.49
+   *     line        2.61         3.12
+   *
+   * `text-ink-faint` alone appeared 114 times, so this was not a colour used
+   * once in the wrong place; it was the app's ordinary way of writing something
+   * quietly. Same answer TRE-33, TRE-34, TRE-35 and TRE-36 each gave on their
+   * own surface, applied to the ladder instead of to one panel: keep the hue,
+   * keep the ground, lift the ink until it clears.
+   *
+   * Lift it until it clears *what*, though, is the decision. The five grounds
+   * are not equally hard, and an ink lifted far enough for `line` — the
+   * lightest of them — lands within a hair of `ink-dim` and the ladder loses a
+   * step. So the two lifted inks are cut for the three grounds a quiet line
+   * *rests* on (`chrome`, `strip`, `app`), and `raised` and `line` step up to
+   * `ink-dim`, which clears both. That is not a new rule: `raised` and `line`
+   * are what a row turns when it is hovered, selected or floating, and TRE-36's
+   * palette already switches ink with the row for exactly this reason.
+   *
+   * `--color-ink-label` is the app's one accent-coloured text: a section header,
+   * a panel's name, the `›` in the palette, the `$` in a command preview, the
+   * account a terminal will run as. It replaces three names for the same
+   * `#3e8fae` — `accent-soft` used as an ink, `ink-link`, and the palette's
+   * `on-strip-label` — and that value was never legible as text anywhere but
+   * `chrome`, which is the mistake TRE-78 found in `--color-accent` one step
+   * along. `accent-soft` is still a fill, a border and a bar; it is no longer
+   * an ink. Every ratio here is printed by `pnpm verify:contrast`, which since
+   * TRE-81 reads the components too.
    */
   --color-ink: #e8f2f7;
   --color-ink-soft: #cfe6f1;
   --color-ink-muted: #8fc0d6;
   --color-ink-dim: #6fb2c9;
-  --color-ink-faint: #4d7f99;
-  --color-ink-link: #3e8fae;
+  --color-ink-faint: #5e99b1;
+  --color-ink-label: #439abc;
   /* One step below faint, and the last one that is still a colour rather than
    * the background. For marks that must be present without being read — the
-   * inert arrow beside a name a pattern does not change (TRE-22). */
+   * inert arrow beside a name a pattern does not change (TRE-22), the `·` on a
+   * rename row that stays as it is — and for a control that is off. Both are
+   * outside 1.4.3, which asks nothing of an inactive control or of decoration,
+   * and `verify:contrast` will not accept it anywhere else. */
   --color-ink-ghost: #33495c;
 
   /* On the light panes, where the same hierarchy runs the other way.
@@ -157,14 +192,21 @@
    * the line and no basis for a whole app's primary button. */
   --color-accent-fill: #6fb2c9;
   --color-accent-fill-hover: #97c9dc;
-  --color-warning: #c98a3e;
+  /* Lifted from 2a's `#c98a3e` by a hair (TRE-81). Amber is the one meaning ink
+   * that lands on `raised` — a toast, a hovered sidebar row, the note above a
+   * saved view — and there it measured 4.36:1. This clears every dark ground at
+   * 4.64:1 or better, and it also improves the filled chip, where dark ink over
+   * amber goes from 5.74:1 to 6.11:1. */
+  --color-warning: #cc9048;
   /* The same idea as `danger-wash` below, for the sudo chrome (TRE-29): the
    * surface a warning-coloured *label* sits on, rather than a warning-coloured
    * fill that carries dark text. It has to be dark, and the obvious shortcut —
    * `bg-warning/10` over whatever is behind it — is what it exists to replace.
-   * That composite lands at 4.41:1 over `app`, under AA, because tinting a
-   * backdrop toward amber moves it *closer* to amber text. Measured, not
-   * eyeballed: `pnpm verify:contrast`. */
+   * That composite landed at 4.41:1 over `app` when it was measured, under AA,
+   * because tinting a backdrop toward amber moves it *closer* to amber text.
+   * TRE-81's lift takes the same composite to 4.69:1, so the ratio is no longer
+   * the argument — but the other half of it never was: a translucent fill is a
+   * colour `verify:contrast` cannot read, and this token is one it can. */
   --color-warning-wash: #241a0f;
   --color-danger: #7f2f2f;
   --color-danger-mid: #aa3333;

@@ -16,9 +16,11 @@ export const DISK_CELLS = 10;
  * The filled chip that marks a warning in the chrome — a stale scan today.
  *
  * A solid fill rather than a tint. `bg-warning/15` reads as the gentler thing
- * to do, and it composites to `#273339` over `--color-strip`, on which
- * `--color-warning` measures 4.44:1 — under AA by a margin nobody would ever
- * catch by looking. A translucent fill also cannot be checked by
+ * to do, and it composited to `#273339` over `--color-strip`, on which
+ * `--color-warning` measured 4.44:1 — under AA by a margin nobody would ever
+ * catch by looking. TRE-81's lift puts that same composite at 4.67:1, so the
+ * ratio no longer decides it and the second reason does, as it always did. A
+ * translucent fill cannot be checked by
  * `verify-contrast.ts`, which reads token hexes and has no way to composite,
  * so the tint would have been the one warning in the app that quietly opted out
  * of the check the rest of it passes. Here rather than in the component so the
@@ -26,6 +28,35 @@ export const DISK_CELLS = 10;
  */
 export const WARN_CHIP_FILL = "bg-warning";
 export const WARN_CHIP_INK = "text-on-accent";
+
+/**
+ * Every ink the docked strip puts on its own ground (TRE-80).
+ *
+ * The strip is drawn on `--color-strip`, which is a fourth depth nothing else
+ * in the dark half uses except the ⌘K palette — so an ink that clears AA on the
+ * chrome does not automatically clear here, and until this ticket two of these
+ * did not. The mockup writes the heading in `#3e8fae` (4.34:1) and a dozen
+ * quiet lines in `#4d7f99` (3.64:1), both inline, where `verify-contrast.ts`
+ * could not see them.
+ *
+ * Declared here rather than in the component for the reason `press.ts` and
+ * `tail.ts` exist: a pair the check can read is a pair the check can hold, and
+ * the strip's ground is a fact about the strip rather than about one `<p>`.
+ * `verify:contrast` now also sweeps the components, so an inline pair no longer
+ * escapes it either — but a surface with a named ground is still the clearer
+ * way to say what a box is drawn on.
+ */
+export const STRIP_SURFACE = "bg-strip";
+/** `DISK USAGE ·` and the mount it is reading. */
+export const STRIP_LABEL_INK = "text-ink-label";
+/** The scan state, "never scanned", the facts row, the empty states. */
+export const STRIP_QUIET_INK = "text-ink-faint";
+/** A figure the row is actually about — a size, a count, a phase. */
+export const STRIP_VALUE_INK = "text-ink-soft";
+/** The rescan control, which is the one thing here that answers a pointer. */
+export const STRIP_ACTION_INK = "text-ink-dim";
+/** A scan that failed, and the amber that says one is stale. */
+export const STRIP_ALARM_INK = "text-danger-soft";
 
 /**
  * How many of the ten cells are filled.

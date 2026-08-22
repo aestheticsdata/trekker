@@ -153,7 +153,7 @@ export function Sidebar({
 function Section({ title, counter, children }: { title: string; counter?: string; children: ReactNode }) {
   return (
     <section>
-      <h2 className="text-accent-soft flex items-baseline px-2.5 pt-1.5 pb-1 font-sans text-caps font-semibold tracking-[0.16em]">
+      <h2 className="text-ink-label flex items-baseline px-2.5 pt-1.5 pb-1 font-sans text-caps font-semibold tracking-[0.16em]">
         {title}
         {counter && <span className="text-ink-dim ml-auto font-mono font-normal tracking-normal">{counter}</span>}
       </h2>
@@ -233,7 +233,7 @@ function ServerRow({
       </Tooltip>
 
       {/* A measurement, so it degrades to a dash rather than vanishing. */}
-      <span className="text-ink-faint flex-none font-mono text-caps">
+      <span className="text-ink-dim flex-none font-mono text-caps">
         {summary?.pingMs === null || summary === undefined ? "—" : `${summary.pingMs}ms`}
       </span>
 
@@ -328,7 +328,7 @@ function Favourites({
                   >
                     <span className="text-ink-soft w-full truncate font-mono text-xs">{bookmark.label}</span>
                     {bookmark.hint && (
-                      <span className="text-ink-faint w-full truncate font-mono text-caps">{bookmark.hint}</span>
+                      <span className="text-ink-dim w-full truncate font-mono text-caps">{bookmark.hint}</span>
                     )}
                   </button>
                 </Tooltip>
@@ -337,7 +337,7 @@ function Favourites({
                     type="button"
                     onClick={() => remove.mutate(bookmark.id)}
                     aria-label={`Remove ${bookmark.label} from favourites`}
-                    className="text-ink-faint hover:text-danger-soft flex-none px-1 font-mono text-2xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                    className="text-ink-dim hover:text-danger-soft flex-none px-1 font-mono text-2xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                   >
                     ✕
                   </button>

@@ -246,9 +246,7 @@ function QueueRow({
   return (
     <div className="border-raised flex flex-col gap-1 border-t px-2.5 py-1.5">
       <div className="flex items-baseline gap-1.5">
-        <span className={`font-mono text-2xs ${failed ? "text-danger-soft" : "text-accent-soft"}`}>
-          {job.operation}
-        </span>
+        <span className={`font-mono text-2xs ${failed ? "text-danger-soft" : "text-ink-label"}`}>{job.operation}</span>
         <span className="text-ink-soft min-w-0 flex-1 truncate font-mono text-xs">{basename(job.dstPath)}</span>
         <Tooltip content={failed ? "Dismiss" : "Cancel"}>
           <button
@@ -273,7 +271,7 @@ function QueueRow({
             <button
               type="button"
               onClick={onRetry}
-              className="text-accent-soft hover:text-brand flex-none font-mono text-2xs"
+              className="text-ink-label hover:text-brand flex-none font-mono text-2xs"
             >
               retry {job.failed}
             </button>

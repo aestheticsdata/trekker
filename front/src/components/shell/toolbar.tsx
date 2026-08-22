@@ -87,7 +87,7 @@ export function Toolbar({
       <Rule />
 
       <label className="border-line-strong bg-chrome focus-within:border-accent-soft flex h-5 w-40 items-center gap-1.5 rounded-sm border px-2 stats:w-52.5">
-        <span className="text-accent-soft font-mono text-2xs">glob</span>
+        <span className="text-ink-label font-mono text-2xs">glob</span>
         <input
           type="text"
           value={glob}

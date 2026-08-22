@@ -153,7 +153,7 @@ function UploadTray() {
       className="bg-app border-line-strong fixed bottom-[calc(var(--spacing-statusbar)+0.5rem)] left-3 z-50 flex w-76 flex-col rounded-sm border shadow-2xl"
     >
       <header className="border-line flex items-center gap-2 border-b px-2.5 py-1.5">
-        <span className="text-accent-soft font-mono text-2xs tracking-label">uploads</span>
+        <span className="text-ink-label font-mono text-2xs tracking-label">uploads</span>
         <span className="text-ink-faint font-mono text-2xs">
           {sending > 0 ? `${sending} in flight` : `${rows.length} finished`}
         </span>

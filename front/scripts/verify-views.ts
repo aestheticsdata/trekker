@@ -278,10 +278,13 @@ for (const file of ["view-strip.tsx", "view-list.tsx", "view-form.tsx", "view-me
   // by nothing else, so moving it there moves it everywhere.
   ok(`${file} spells no ⌥ of its own`, !source.includes("⌥"));
   ok(`${file} names no Digit code`, !source.includes("Digit"));
-  // 2a's quiet ink is 3.82:1 on this app's chrome and clears AA on every ground
-  // in this feature; the lifted ones are named constants `verify:contrast`
-  // measures. `disabled:` is the one exemption, and it is the standard's:
-  // WCAG 1.4.3 does not hold an inactive control to a ratio.
+  // The quiet step does not survive this feature's grounds. TRE-81 lifted
+  // `ink-faint` until it clears `chrome`, `strip` and `app` — but a view's chip
+  // fills with `line` when it is the one restored, and its row in the sidebar
+  // fills with `raised`, and on those two the quiet step is 3.58 and 4.05. So
+  // everything here is `ink-dim` or a named constant `verify:contrast` measures.
+  // `disabled:` is the one exemption, and it is the standard's: WCAG 1.4.3 does
+  // not hold an inactive control to a ratio.
   for (const [, before] of source.matchAll(/(\S*)text-ink-faint/g)) {
     ok(`${file}: ink-faint only on a disabled control`, before.endsWith("disabled:"));
   }

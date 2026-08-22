@@ -107,7 +107,7 @@ function Volume({ disk, onOpen }: { disk: DiskMount; onOpen: () => void }) {
             the 11px line it sits on and would set the height of the whole row. */}
         <span className="flex items-baseline font-mono text-xs leading-none font-medium">
           <span className="text-ink min-w-0 flex-1 truncate">{disk.mountPoint}</span>
-          <span className={`ml-1.5 flex-none text-2xs leading-none ${disk.warn ? "text-warning" : "text-accent-soft"}`}>
+          <span className={`ml-1.5 flex-none text-2xs leading-none ${disk.warn ? "text-warning" : "text-ink-dim"}`}>
             {disk.percent}%
           </span>
         </span>
@@ -129,7 +129,7 @@ function Volume({ disk, onOpen }: { disk: DiskMount; onOpen: () => void }) {
           ))}
         </span>
 
-        <span className="text-ink-faint flex items-baseline font-mono text-caps leading-none">
+        <span className="text-ink-dim flex items-baseline font-mono text-caps leading-none">
           {/* The device is the half that can be long — `vg0-log`, but also a
               `/dev/mapper/…` — so it is the half that truncates. */}
           <span className="min-w-0 flex-1 truncate">

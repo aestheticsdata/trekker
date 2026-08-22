@@ -86,7 +86,7 @@ export function RootsEditor({
               <Tooltip content={holdsHome ? "The home sits inside this root" : undefined}>
                 <span
                   className={`w-8 flex-none text-center font-mono text-3xs tracking-label ${
-                    holdsHome ? "text-accent-soft" : "text-transparent"
+                    holdsHome ? "text-ink-label" : "text-transparent"
                   }`}
                 >
                   HOME

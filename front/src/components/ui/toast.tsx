@@ -107,7 +107,7 @@ function ToastRow({ toast }: { toast: Toast }) {
       className={`bg-raised animate-toast-in pointer-events-auto flex flex-col gap-0.5 rounded-sm border px-2.5 py-1.5 shadow-lg ${TONE_CLASS[toast.tone]}`}
     >
       <span className="text-xs">{toast.message}</span>
-      {toast.detail && <span className="text-ink-faint font-mono text-2xs break-all">{toast.detail}</span>}
+      {toast.detail && <span className="text-ink-dim font-mono text-2xs break-all">{toast.detail}</span>}
     </output>
   );
 }

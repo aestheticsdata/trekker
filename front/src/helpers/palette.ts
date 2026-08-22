@@ -320,6 +320,13 @@ export const GLYPH = {
 // that fill nothing between `ink-faint` and `ink-dim` clears at all — the whole
 // span from 2.61 to 4.82 is a wall — so the second line switches ink with the
 // row, exactly as the mockup already switches the icon and the label.
+//
+// The two lifted inks were `--color-on-strip-label` and `--color-on-strip-dim`,
+// named for this ground because at the time only this ground had been measured.
+// TRE-81 measured the rest and found the same two of 2a's values under AA on
+// every one of them, so the pair moved into the ink ladder as `ink-label` and
+// `ink-faint` and the local names went. Nothing here changed but the spelling,
+// and both numbers went up: 4.98 and 5.04 against 4.76 and 4.87.
 
 export const PALETTE_SURFACE = "bg-strip";
 export const PALETTE_EDGE = "border-accent";
@@ -327,20 +334,20 @@ export const PALETTE_EDGE = "border-accent";
 export const PALETTE_RULE = "border-line";
 
 /** The `›` and the group headers — 2a's `#3e8fae`, lifted to clear. */
-export const PALETTE_LABEL_INK = "text-on-strip-label";
+export const PALETTE_LABEL_INK = "text-ink-label";
 /** The count, the footer, the empty state — 2a's `#4d7f99`, lifted to clear. */
-export const PALETTE_QUIET_INK = "text-on-strip-dim";
+export const PALETTE_QUIET_INK = "text-ink-faint";
 export const PALETTE_INPUT_INK = "text-ink";
 
 /** The row under the keyboard, which is also the row under the pointer. */
 export const ROW_FILL = "bg-line";
 export const ROW_EDGE = "border-accent";
 
-export const ICON_INK = "text-on-strip-dim";
+export const ICON_INK = "text-ink-faint";
 export const ICON_ON_INK = "text-brand";
 export const ROW_LABEL_INK = "text-ink-soft";
 export const ROW_LABEL_ON_INK = "text-ink";
-export const ROW_DETAIL_INK = "text-on-strip-dim";
+export const ROW_DETAIL_INK = "text-ink-faint";
 /** On the selected row's fill, where the quiet step does not survive. */
 export const ROW_DETAIL_ON_INK = "text-ink-dim";
 /** An entry that cannot run now: legible, obviously quieter, reason attached. */

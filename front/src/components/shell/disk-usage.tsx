@@ -3,7 +3,17 @@
 import { useAuth } from "@auth/context/AuthContext";
 import { useToast } from "@components/ui/toast";
 import { Tooltip, TooltipBlock } from "@components/ui/tooltip";
-import { volumeFor, WARN_CHIP_FILL, WARN_CHIP_INK } from "@helpers/disks";
+import {
+  STRIP_ACTION_INK,
+  STRIP_ALARM_INK,
+  STRIP_LABEL_INK,
+  STRIP_QUIET_INK,
+  STRIP_SURFACE,
+  STRIP_VALUE_INK,
+  volumeFor,
+  WARN_CHIP_FILL,
+  WARN_CHIP_INK,
+} from "@helpers/disks";
 import { formatTotal, parentPath } from "@helpers/listing";
 import { PRESS } from "@helpers/press";
 import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK, treemapBands } from "@helpers/treemap";
@@ -260,14 +270,16 @@ export function DiskUsage({
   return (
     <section
       aria-label="Disk usage"
-      className="bg-strip border-line h-strip flex-none border-t px-2.5 py-2"
+      className={`${STRIP_SURFACE} border-line h-strip flex-none border-t px-2.5 py-2`}
     >
       <div className="flex items-baseline gap-2.25">
         {/* Two truncating halves, and only the second one gives way. The label
             is four fixed words; the root is a path with no bound on it, and left
             whole it would push `scan` and `hide` off the right edge of the bar
             on any deep directory. */}
-        <h2 className="text-accent-soft flex min-w-0 items-baseline gap-1 font-sans text-caps leading-none font-semibold tracking-[0.16em]">
+        <h2
+          className={`${STRIP_LABEL_INK} flex min-w-0 items-baseline gap-1 font-sans text-caps leading-none font-semibold tracking-[0.16em]`}
+        >
           <span className="flex-none whitespace-nowrap">DISK USAGE</span>
           {host && (
             <Tooltip content={`${host.label}:${root}`}>
@@ -376,7 +388,7 @@ function Summary({
 }) {
   const line = "min-w-0 flex-1 truncate font-mono text-caption leading-none";
 
-  if (!host) return <p className={`${line} text-ink-faint`}>No host in the active pane.</p>;
+  if (!host) return <p className={`${line} ${STRIP_QUIET_INK}`}>No host in the active pane.</p>;
 
   if (running) {
     const counted = live
@@ -384,12 +396,12 @@ function Summary({
       : null;
 
     return (
-      <p className={`${line} text-ink-faint flex items-center gap-1.5`}>
+      <p className={`${line} ${STRIP_QUIET_INK} flex items-center gap-1.5`}>
         <span
           aria-hidden
           className="bg-accent-soft h-1.25 w-5 flex-none animate-shimmer"
         />
-        <span className="text-ink-soft flex-none">{live ? PHASE_LABEL[live.phase] : "starting a scan"}</span>
+        <span className={`${STRIP_VALUE_INK} flex-none`}>{live ? PHASE_LABEL[live.phase] : "starting a scan"}</span>
         <span className="min-w-0 truncate">
           {[counted, scan ? `showing the scan from ${formatAgo(scan.ageSeconds)}` : null]
             .filter((part): part is string => part !== null)
@@ -399,13 +411,13 @@ function Summary({
     );
   }
 
-  if (pending) return <p className={`${line} text-ink-faint`}>Looking for a kept scan…</p>;
+  if (pending) return <p className={`${line} ${STRIP_QUIET_INK}`}>Looking for a kept scan…</p>;
   // Before the "never scanned" arm, because they are different claims and only
   // one of them is about the disk: a request that failed knows nothing about
   // whether this root has ever been walked, and saying so would be an assertion
   // built out of a network error.
-  if (failed) return <p className={`${line} text-danger-soft`}>Could not read this host's scans.</p>;
-  if (!scan) return <p className={`${line} text-ink-faint`}>Never scanned.</p>;
+  if (failed) return <p className={`${line} ${STRIP_ALARM_INK}`}>Could not read this host's scans.</p>;
+  if (!scan) return <p className={`${line} ${STRIP_QUIET_INK}`}>Never scanned.</p>;
 
   const parts = [
     volume
@@ -420,7 +432,7 @@ function Summary({
   ].filter((part): part is string => part !== null);
 
   return (
-    <p className={`${line} text-ink-faint flex items-baseline gap-1.5`}>
+    <p className={`${line} ${STRIP_QUIET_INK} flex items-baseline gap-1.5`}>
       {scan.stale && (
         <Tooltip content={`This install calls a scan current for ${formatDuration(scan.staleAfterSeconds)}.`}>
           <span className={`${WARN_CHIP_FILL} ${WARN_CHIP_INK} flex-none rounded-xs px-1 py-0.5 leading-none`}>
@@ -514,12 +526,14 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
  */
 function Working({ live }: { live: ScanProgress | null }) {
   return (
-    <div className="border-line-strong text-ink-faint flex h-7.5 items-center gap-2.25 border px-2 font-mono text-caption leading-none">
+    <div
+      className={`border-line-strong ${STRIP_QUIET_INK} flex h-7.5 items-center gap-2.25 border px-2 font-mono text-caption leading-none`}
+    >
       <span
         aria-hidden
         className="bg-accent-soft h-1.25 w-6 flex-none animate-shimmer"
       />
-      <span className="text-ink-soft flex-none">{live ? PHASE_LABEL[live.phase] : "starting…"}</span>
+      <span className={`${STRIP_VALUE_INK} flex-none`}>{live ? PHASE_LABEL[live.phase] : "starting…"}</span>
       {live && (
         <span className="min-w-0 truncate">
           {formatCount(live.inodes)} entries · {formatTotal(Number(live.bytes))} · {live.elapsedSeconds}s
@@ -564,7 +578,7 @@ function Blank({
       <Tooltip content={failure ?? undefined}>
         <p
           className={`min-w-0 flex-1 truncate font-mono text-caption leading-none ${
-            failure ? "text-danger-soft" : "text-ink-faint"
+            failure ? STRIP_ALARM_INK : STRIP_QUIET_INK
           }`}
         >
           {failure ?? `${root} has not been scanned yet — du walks it once and the result is kept.`}
@@ -597,7 +611,9 @@ function Facts({ scan }: { scan: ScanView | null }) {
   const old = scan?.facts.oldFiles;
 
   return (
-    <div className="text-ink-faint mt-1.5 flex gap-4 overflow-hidden font-mono text-caption leading-none whitespace-nowrap">
+    <div
+      className={`${STRIP_QUIET_INK} mt-1.5 flex gap-4 overflow-hidden font-mono text-caption leading-none whitespace-nowrap`}
+    >
       <Fact
         label="largest"
         hint={largest?.path}
@@ -657,7 +673,7 @@ function Fact({ label, hint, children }: { label: string; hint?: ReactNode; chil
   return (
     <Tooltip content={hint}>
       <span className="min-w-0 truncate">
-        {label}: <span className="text-ink-soft">{children ?? "—"}</span>
+        {label}: <span className={STRIP_VALUE_INK}>{children ?? "—"}</span>
       </span>
     </Tooltip>
   );
@@ -689,7 +705,7 @@ function Action({
         type="button"
         onClick={onClick}
         disabled={disabled}
-        className="text-ink-dim hover:text-ink flex-none font-mono text-caption leading-none whitespace-nowrap disabled:opacity-60"
+        className={`${STRIP_ACTION_INK} hover:text-ink flex-none font-mono text-caption leading-none whitespace-nowrap disabled:opacity-60`}
       >
         {children}
       </button>
@@ -698,7 +714,7 @@ function Action({
 }
 
 function Note({ children }: { children: ReactNode }) {
-  return <p className="text-ink-faint flex h-7.5 items-center font-mono text-caption leading-none">{children}</p>;
+  return <p className={`${STRIP_QUIET_INK} flex h-7.5 items-center font-mono text-caption leading-none`}>{children}</p>;
 }
 
 /** How long ago, in one unit — the age column's own habit. */

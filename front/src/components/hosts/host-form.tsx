@@ -535,7 +535,7 @@ function ProbePanel({
         <button
           type="button"
           onClick={() => onUseHome(probe.homeDir as string)}
-          className="text-ink-link self-start font-mono text-2xs hover:underline"
+          className="text-ink-label self-start font-mono text-2xs hover:underline"
         >
           use {probe.homeDir} as the home
         </button>

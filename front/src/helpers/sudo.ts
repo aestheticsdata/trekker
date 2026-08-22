@@ -27,7 +27,7 @@ export const SUDO_INK = "text-warning";
 /** The chrome behind a command preview, in every modal that draws one. */
 export const COMMAND_SURFACE = "bg-chrome";
 /** `$` while unelevated. */
-export const PROMPT_INK = "text-ink-link";
+export const PROMPT_INK = "text-ink-label";
 /** `#` while a window is open, and the note under the box that says what it means. */
 export const PROMPT_ELEVATED_INK = "text-warning";
 

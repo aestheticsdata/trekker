@@ -182,7 +182,7 @@ function TransferPanel({
   return (
     <>
       <header className="bg-chrome border-line flex h-topbar flex-none items-center gap-2 border-b px-3">
-        <span className="text-accent-soft font-mono text-xs font-semibold tracking-label">{verb}</span>
+        <span className="text-ink-label font-mono text-xs font-semibold tracking-label">{verb}</span>
         <Endpoint
           host={hosts.find((host) => host.id === target.srcHostId) ?? null}
           path={target.srcPaths.length === 1 ? target.srcPaths[0] : `${target.srcPaths.length} entries`}

@@ -30,7 +30,7 @@
  * has to be composited against its backdrop first, which is why none are here.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WARN_CHIP_FILL, WARN_CHIP_INK } from "../src/helpers/disks.ts";
@@ -127,6 +127,8 @@ const AA = 4.5;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tokens = readTokens(join(here, "..", "styles", "globals.css"));
+const SRC = join(here, "..", "src");
+const inkCache = new Map<string, Set<string>>();
 
 let checked = 0;
 let failures = 0;
@@ -474,6 +476,451 @@ console.log(
     `→ ours ${ratio(hexOf(DIRTY_DOT), hexOf(CHIP_ON_FILL)).toFixed(2).padStart(5)} (1.4.11 wants 3:1)`,
 );
 
+
+/*
+ * And every colour the components write inline (TRE-81).
+ *
+ * Everything above this line is measured because somebody put the pair in a
+ * table in `src/helpers` first. That is how `press.ts`, `tail.ts`, `palette.ts`
+ * and the rest came to exist, and it is also how this file spent five tickets
+ * being confident about the surfaces it knew and blind to the rest: a class
+ * name written straight into a component was a pair no check could see. It hid
+ * 114 uses of an ink that clears AA on none of this app's grounds.
+ *
+ * So the components are read too. The scan finds every `text-*` that resolves
+ * to a token; the table below says which ground each one is drawn on; and a
+ * file whose inks and the table disagree fails, in either direction. That last
+ * part is the point — the next inline colour someone adds is not measured
+ * against a guess, it stops the check until a human says what it sits on.
+ *
+ * Two things the scan cannot know, and both are declared rather than inferred:
+ *
+ *   `on` is the ground, and a component cannot be asked for it. A row's colour
+ *   comes from a parent, often in another file, so every box here is somebody's
+ *   reading of the tree rather than something the regex found. A box may name
+ *   several grounds, and then every ink in it is checked against all of them —
+ *   which over-checks rather than under-checks, so a box that is too coarse
+ *   fails loudly instead of passing quietly.
+ *
+ *   `exempt` is the handful of inks WCAG asks nothing of: an inactive control
+ *   (1.4.3 sets no ratio for one) and pure decoration. Each says which, in
+ *   writing, next to the ink. `disabled:` is stripped before the scan for the
+ *   same reason and needs no entry.
+ */
+
+type Box = {
+  /** The ground, or grounds, this box's text is drawn on. */
+  readonly on: readonly string[];
+  readonly inks: readonly string[];
+  /** Why this box is separate from the rest of the file, when it is not obvious. */
+  readonly note?: string;
+};
+
+type Room = {
+  /** Path under `src/`. */
+  readonly file: string;
+  readonly boxes: readonly Box[];
+  /** Ink → the reason 1.4.3 does not reach it. */
+  readonly exempt?: Readonly<Record<string, string>>;
+};
+
+/** The three depths quiet text rests on, and the two a row turns when it lifts. */
+const APP = "bg-app";
+const CHROME_BG = "bg-chrome";
+const STRIP = "bg-strip";
+const RAISED = "bg-raised";
+const LINE = "bg-line";
+const DANGER_WASH = "bg-danger-wash";
+const WARNING_WASH = "bg-warning-wash";
+
+/** What a modal is: a panel, its inputs and footer, and its refusal box. */
+const PANEL = [APP, CHROME_BG, DANGER_WASH];
+const INACTIVE = "an inactive control — 1.4.3 sets no ratio for one";
+
+const ROOMS: readonly Room[] = [
+  { file: "app/(public)/about/page.tsx", boxes: [{ on: [APP], inks: ["ink-faint", "ink-muted"] }] },
+  { file: "app/(public)/login/page.tsx", boxes: [{ on: [APP], inks: ["ink"] }] },
+  { file: "app/(public)/recover/page.tsx", boxes: [{ on: [APP], inks: ["ink", "ink-muted"] }] },
+  { file: "app/(public)/signup/page.tsx", boxes: [{ on: [APP], inks: ["ink"] }] },
+  { file: "app/error.tsx", boxes: [{ on: [APP], inks: ["ink", "ink-dim"] }] },
+  { file: "app/layout.tsx", boxes: [{ on: [APP], inks: ["ink"] }] },
+
+  {
+    // The card's header and footer are chrome and its body is the app surface,
+    // but only the two bars carry text of their own — the body is the fields.
+    file: "components/auth/auth-card.tsx",
+    boxes: [{ on: [CHROME_BG], inks: ["danger-soft", "ink", "ink-faint", "ink-muted", "success", "warning"] }],
+  },
+  {
+    file: "components/auth/auth-field.tsx",
+    boxes: [
+      { on: [APP], inks: ["danger-soft", "ink-faint", "ink-muted"], note: "label, hint and error, on the card's body" },
+      { on: [CHROME_BG], inks: ["ink", "ink-faint", "ink-muted"], note: "the input, its placeholder and the reveal" },
+    ],
+  },
+
+  {
+    file: "components/explorer/compare-modal.tsx",
+    boxes: [
+      { on: [STRIP], inks: ["brand", "ink-muted", "ink-faint"], note: "this modal's header is the sunk ground" },
+      {
+        on: [...PANEL, WARNING_WASH],
+        inks: ["brand", "danger-soft", "ink", "ink-dim", "ink-faint", "ink-muted", "ink-soft", "success", "warning"],
+      },
+    ],
+    exempt: { "ink-ghost": INACTIVE },
+  },
+  {
+    file: "components/explorer/create-modal.tsx",
+    boxes: [
+      { on: [LINE], inks: ["ink"], note: "the header bar" },
+      { on: PANEL, inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-muted", "ink-soft"] },
+    ],
+  },
+  {
+    file: "components/explorer/delete-modal.tsx",
+    boxes: [
+      {
+        on: [APP, CHROME_BG, DANGER_WASH],
+        inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-muted", "ink-soft", "success", "warning"],
+      },
+    ],
+  },
+  {
+    file: "components/explorer/inspector.tsx",
+    boxes: [
+      { on: [LINE], inks: ["brand", "ink-dim"], note: "the panel's own header bar" },
+      { on: [RAISED], inks: ["ink-muted"], note: "a permission cell that is not granted" },
+      { on: [CHROME_BG], inks: ["brand", "ink", "ink-dim", "ink-faint", "ink-label", "ink-muted", "ink-soft"] },
+    ],
+  },
+  {
+    file: "components/explorer/pane.tsx",
+    boxes: [
+      { on: [LINE], inks: ["brand", "ink", "ink-dim", "ink-muted"], note: "the tab strip, which is the one dark box in a light pane" },
+      { on: ["bg-on-pane-muted"], inks: ["ink"], note: "the badge that says a mount is nearly full" },
+      {
+        on: ["bg-pane", "bg-pane-active"],
+        inks: [
+          "danger",
+          "on-pane",
+          "on-pane-data",
+          "on-pane-dim",
+          "on-pane-faint",
+          "on-pane-label",
+          "on-pane-muted",
+          "on-pane-strong",
+        ],
+      },
+      {
+        on: ["bg-pane-hover", "bg-pane-sel", "bg-pane-sel-idle"],
+        inks: ["danger", "on-pane", "on-pane-data", "on-pane-dim", "on-pane-faint", "on-pane-muted", "on-pane-strong"],
+        note: "the same row, hovered and selected",
+      },
+      {
+        on: ["bg-pane-bar", "bg-pane-bar-active"],
+        inks: ["on-pane", "on-pane-data", "on-pane-dim", "on-pane-faint", "on-pane-label", "on-pane-muted"],
+        note: "the path row, the column header and the footer — the pane's three bars",
+      },
+      { on: ["bg-pane-chip"], inks: ["on-pane"] },
+    ],
+    exempt: {
+      "pane-line": INACTIVE,
+      "ink-faint": "the dot beside an inactive tab, which is a graphic — 1.4.11 wants 3:1 of it and it has 3.62",
+      "on-pane-bright": "the type tag, whose fills are one-offs in `listing.ts` and are measured from there",
+    },
+  },
+  {
+    file: "components/explorer/permissions-modal.tsx",
+    boxes: [
+      { on: [LINE], inks: ["ink", "ink-muted"], note: "the header bar" },
+      { on: ["bg-warning"], inks: ["on-accent"], note: "the chip that says the change is recursive" },
+      { on: [APP, CHROME_BG], inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-muted", "ink-soft", "warning"] },
+    ],
+  },
+  {
+    file: "components/explorer/rename-modal.tsx",
+    boxes: [
+      { on: [LINE], inks: ["ink", "ink-muted"], note: "the header bar" },
+      { on: ["bg-line-strong"], inks: ["ink"], note: "the run of a name the pattern matched" },
+      { on: PANEL, inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-muted", "ink-soft"] },
+    ],
+    exempt: { "ink-ghost": "the `·` on a row nothing happens to, which is `aria-hidden` decoration beside the word `unchanged`" },
+  },
+  {
+    file: "components/explorer/tail-strip.tsx",
+    boxes: [
+      { on: ["bg-pane-sunk"], inks: ["log-client", "log-server", "on-pane-data"] },
+      { on: ["bg-pane-hover"], inks: ["on-pane-data"], note: "its picker buttons under the pointer" },
+    ],
+  },
+  { file: "components/explorer/terminal-panel.tsx", boxes: [{ on: ["bg-terminal"], inks: ["ink"] }] },
+  {
+    file: "components/explorer/transfer-modal.tsx",
+    boxes: [
+      {
+        on: PANEL,
+        inks: ["brand", "danger-soft", "ink", "ink-faint", "ink-label", "ink-muted", "ink-soft", "warning"],
+      },
+    ],
+  },
+
+  {
+    file: "components/hosts/field.tsx",
+    boxes: [
+      { on: [APP], inks: ["danger-soft", "ink-faint", "ink-muted", "ink-soft"], note: "label, hint and error" },
+      { on: [CHROME_BG], inks: ["ink", "ink-faint", "ink-soft"], note: "the input and its placeholder" },
+    ],
+  },
+  {
+    file: "components/hosts/host-form.tsx",
+    boxes: [
+      {
+        on: [APP, CHROME_BG],
+        inks: ["danger-soft", "ink-faint", "ink-label", "ink-muted", "ink-soft", "success", "warning"],
+      },
+    ],
+  },
+  {
+    file: "components/hosts/host-manager.tsx",
+    boxes: [
+      { on: [APP, CHROME_BG], inks: ["ink", "ink-faint", "ink-muted", "ink-soft"] },
+      { on: [RAISED], inks: ["ink-dim", "ink-muted", "ink-soft"], note: "a host row, which is raised when it is current or hovered" },
+    ],
+  },
+  {
+    file: "components/hosts/roots-editor.tsx",
+    boxes: [{ on: [APP], inks: ["danger-soft", "ink-faint", "ink-label", "ink-muted"] }],
+    exempt: { "line-strong": INACTIVE },
+  },
+  { file: "components/hosts/sudo-badge.tsx", boxes: [{ on: [CHROME_BG], inks: ["ink-faint", "warning"] }] },
+  {
+    file: "components/hosts/sudo-modal.tsx",
+    boxes: [
+      {
+        on: [APP, CHROME_BG, WARNING_WASH],
+        inks: ["danger-soft", "ink", "ink-faint", "ink-muted", "ink-soft", "warning"],
+      },
+    ],
+  },
+
+  { file: "components/shell/app-shell.tsx", boxes: [{ on: [APP], inks: ["ink", "ink-faint", "ink-muted"] }] },
+  { file: "components/shell/disk-usage.tsx", boxes: [{ on: [STRIP], inks: ["ink"], note: "the rescan control under the pointer; the rest of the strip is declared in `disks.ts`" }] },
+  { file: "components/shell/palette.tsx", boxes: [{ on: [STRIP], inks: ["ink-faint"], note: "the input's placeholder; the rest of the panel is declared in `palette.ts`" }] },
+  {
+    file: "components/shell/status-bar.tsx",
+    boxes: [{ on: [CHROME_BG], inks: ["brand", "ink", "ink-dim", "ink-faint", "ink-muted", "ink-soft"] }],
+  },
+  {
+    file: "components/shell/toolbar.tsx",
+    boxes: [
+      { on: [LINE], inks: ["ink-soft"], note: "the current cell of the split control" },
+      // A pressed filter is `bg-warning/10` or `bg-accent/20` over the bar, and a
+      // composite is a colour this file cannot resolve — the note at the top says
+      // why. Both were measured by hand and both clear: amber over `app` at
+      // 4.69:1, and `brand` over the blue tint at 8.18:1. The inks below are
+      // checked on the bar itself, which is where the same controls sit unpressed.
+      {
+        on: [APP, CHROME_BG],
+        inks: ["brand", "danger-soft", "ink", "ink-dim", "ink-faint", "ink-label", "ink-muted", "ink-soft", "warning"],
+      },
+    ],
+  },
+  {
+    file: "components/shell/top-bar.tsx",
+    boxes: [{ on: [CHROME_BG, LINE], inks: ["brand", "ink", "ink-dim", "ink-muted", "ink-soft"] }],
+  },
+  {
+    file: "components/shell/ui-scale.tsx",
+    boxes: [{ on: [CHROME_BG], inks: ["ink", "ink-dim", "ink-faint", "ink-muted"] }],
+    exempt: { "line-strong": INACTIVE },
+  },
+
+  {
+    file: "components/sidebar/activity-strip.tsx",
+    boxes: [{ on: [CHROME_BG], inks: ["ink", "ink-faint", "ink-muted"] }],
+  },
+  {
+    file: "components/sidebar/sidebar.tsx",
+    boxes: [
+      { on: [CHROME_BG], inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-label", "ink-soft"] },
+      { on: [RAISED], inks: ["danger-soft", "ink", "ink-dim", "ink-soft"], note: "a host row and a favourite, which raise under the pointer" },
+    ],
+  },
+  {
+    file: "components/sidebar/volumes.tsx",
+    boxes: [
+      { on: [CHROME_BG], inks: ["ink-faint"], note: "the line that says there are none" },
+      { on: [RAISED], inks: ["ink", "ink-dim", "warning"], note: "a mount row, which raises under the pointer" },
+    ],
+  },
+
+  { file: "components/ui/command-line.tsx", boxes: [{ on: [CHROME_BG], inks: ["ink-muted"] }] },
+  {
+    file: "components/ui/context-menu.tsx",
+    boxes: [
+      { on: [STRIP], inks: ["danger-soft", "ink-dim", "ink-faint", "ink-soft"] },
+      { on: [LINE], inks: ["danger-soft", "ink-dim", "ink-soft"], note: "the row under the cursor, where the quiet step steps up" },
+    ],
+  },
+  {
+    file: "components/ui/toast.tsx",
+    boxes: [{ on: [RAISED], inks: ["danger-soft", "ink-dim", "ink-soft", "success", "warning"] }],
+  },
+  {
+    file: "components/ui/transfers.tsx",
+    boxes: [{ on: [CHROME_BG], inks: ["brand", "danger-soft", "ink", "ink-faint", "ink-label", "ink-soft"] }],
+  },
+  {
+    file: "components/ui/uploads.tsx",
+    boxes: [
+      {
+        on: [APP],
+        inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-label", "ink-muted", "success"],
+        note: "the panel; its only chrome is the progress track, which carries nothing",
+      },
+    ],
+  },
+
+  {
+    file: "components/views/view-form.tsx",
+    boxes: [
+      { on: [LINE], inks: ["ink", "ink-muted"], note: "the header bar" },
+      { on: [RAISED], inks: ["ink-muted"], note: "a slot button under the pointer" },
+      { on: PANEL, inks: ["danger-soft", "ink", "ink-dim", "ink-muted", "ink-soft"] },
+    ],
+  },
+  {
+    file: "components/views/view-list.tsx",
+    boxes: [{ on: [CHROME_BG, RAISED], inks: ["ink", "ink-dim", "ink-muted", "warning"] }],
+  },
+  {
+    file: "components/views/view-rebind.tsx",
+    boxes: [
+      { on: [LINE], inks: ["ink", "ink-muted"], note: "the header bar" },
+      { on: [APP, CHROME_BG], inks: ["ink", "ink-dim", "ink-muted", "ink-soft"] },
+    ],
+  },
+  {
+    file: "components/views/view-strip.tsx",
+    boxes: [
+      { on: [CHROME_BG], inks: ["ink-label", "ink-muted"] },
+      { on: [RAISED, LINE], inks: ["ink-muted"], note: "the two buttons at the end of the strip, under the pointer" },
+    ],
+  },
+];
+
+/*
+ * The pairs that fail and are not this ticket's to fix.
+ *
+ * All of them are on the light panes, and they are one finding rather than
+ * eight: the pane surface is light enough that its ink ladder has no room left
+ * below about 4.5:1, so the step called `faint` cannot exist there at AA and
+ * the furniture bars are lighter still. Lifting the dark side was a swap;
+ * lifting these means deciding whether the pane keeps four quiet steps or
+ * three, which is a design decision about the app's most distinctive surface
+ * and belongs to TRE-82 rather than to a ticket about `--color-ink-faint`.
+ *
+ * Frozen, not tolerated: the list is compared exactly, so fixing one without
+ * removing its line fails, and adding a ninth fails too.
+ */
+const KNOWN_DEFICIT: readonly (readonly [string, string, string])[] = [
+  ["components/explorer/pane.tsx", "text-danger", "bg-pane"],
+  ["components/explorer/pane.tsx", "text-on-pane-dim", "bg-pane-bar"],
+  ["components/explorer/pane.tsx", "text-on-pane-dim", "bg-pane-bar-active"],
+  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane"],
+  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane-active"],
+  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane-hover"],
+  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane-sel-idle"],
+  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane-bar"],
+  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane-bar-active"],
+  ["components/explorer/pane.tsx", "text-on-pane-label", "bg-pane-bar"],
+  ["components/explorer/pane.tsx", "text-on-pane-muted", "bg-pane-bar"],
+  ["components/explorer/pane.tsx", "text-on-pane-muted", "bg-pane-bar-active"],
+];
+
+console.log("\n--- and the type tag, whose fills are one-offs rather than tokens ---");
+for (const fill of tagFills()) check(`a tag on ${fill}`, "text-on-pane-bright", fill);
+
+/*
+ * The sweep prints only what fails. Five hundred `ok` lines would bury the
+ * sections above, which are the ones somebody reads when they are choosing a
+ * colour; this one is read when it stops passing.
+ */
+console.log("\n--- every inline pair in `src/components` and `src/app` ---");
+
+const deficit = new Set(KNOWN_DEFICIT.map((row) => row.join(" ")));
+const stillFailing = new Set<string>();
+let swept = 0;
+
+for (const room of ROOMS) {
+  const found = inksOf(room.file);
+  const declared = new Set(room.boxes.flatMap((box) => box.inks));
+  const exempt = new Set(Object.keys(room.exempt ?? {}));
+
+  checked += 1;
+  const undeclared = [...found].filter((ink) => !declared.has(ink) && !exempt.has(ink));
+  const stale = [...declared].filter((ink) => !found.has(ink));
+  if (undeclared.length > 0 || stale.length > 0) {
+    failures += 1;
+    if (undeclared.length > 0) {
+      console.log(`  FAIL ${room.file} writes ${undeclared.map((i) => `text-${i}`).join(", ")}, which no box here names`);
+    }
+    if (stale.length > 0) {
+      console.log(`  FAIL ${room.file} no longer writes ${stale.map((i) => `text-${i}`).join(", ")}, which a box still claims`);
+    }
+  }
+
+  for (const box of room.boxes) {
+    for (const ink of box.inks) {
+      if (!found.has(ink)) continue;
+      for (const ground of box.on) {
+        const key = `${room.file} text-${ink} ${ground}`;
+        const measured = ratio(hexOf(`text-${ink}`), hexOf(ground));
+        if (deficit.has(key)) {
+          if (measured < AA) stillFailing.add(key);
+          continue;
+        }
+        swept += 1;
+        checked += 1;
+        if (measured >= AA) continue;
+        failures += 1;
+        console.log(`  FAIL ${room.file} · text-${ink} on ${ground}  ${measured.toFixed(2)}:1 — needs ${AA}:1`);
+      }
+    }
+  }
+}
+
+/*
+ * A file that writes a colour and is in no room is the case this whole section
+ * exists for: the next inline pair somebody adds. It fails here rather than
+ * shipping unmeasured.
+ */
+const uncovered = componentFiles().filter((file) => !ROOMS.some((room) => room.file === file) && inksOf(file).size > 0);
+checked += 1;
+if (uncovered.length === 0) {
+  console.log(`  ok   ${swept} inline pairs across ${ROOMS.length} files, and every file that writes one is in the table`);
+} else {
+  failures += 1;
+  console.log(`  FAIL these write a colour and belong to no room: ${uncovered.join(", ")}`);
+}
+
+console.log("\n--- known to fail, and TRE-82's to fix rather than this ticket's ---");
+for (const [file, ink, ground] of KNOWN_DEFICIT) {
+  const measured = ratio(hexOf(ink), hexOf(ground));
+  console.log(
+    `  --   ${file.replace("components/explorer/", "")} · ${ink.padEnd(16)} on ${ground.padEnd(18)} ${measured.toFixed(2).padStart(5)}:1`,
+  );
+}
+checked += 1;
+const settled = KNOWN_DEFICIT.filter((row) => !stillFailing.has(row.join(" ")));
+if (settled.length === 0) {
+  console.log(`  ok   all ${KNOWN_DEFICIT.length} are still drawn and still failing — none is listed after being fixed`);
+} else {
+  failures += 1;
+  console.log(`  FAIL no longer drawn, or no longer failing, and still listed: ${settled.map((r) => r.join(" ")).join("; ")}`);
+}
+
 console.log(`\n${checked - failures}/${checked} pairs pass AA at ${AA}:1.`);
 process.exit(failures === 0 ? 0 : 1);
 
@@ -496,8 +943,16 @@ function check(what: string, inkClass: string, backgroundClass: string): void {
   console.log(`  FAIL ${line}  — needs ${AA}:1`);
 }
 
-/** Tailwind's own rule: `bg-x` and `text-x` both resolve `--color-x`. */
+/**
+ * Tailwind's own rule: `bg-x` and `text-x` both resolve `--color-x`.
+ *
+ * A literal hex passes through, because two of the surfaces measured here are
+ * not tokens at all — the mockup's own values, kept as literals precisely so
+ * the correction beside them stays readable, and the type tag's one-off fills.
+ */
 function hexOf(utility: string): string {
+  if (utility.startsWith("#")) return utility.toLowerCase();
+
   const token = `--color-${utility.replace(/^(bg|text)-/, "")}`;
   const hex = tokens.get(token);
   if (!hex) {
@@ -545,4 +1000,62 @@ function luminance(hex: string): number {
 
 function verdict(measured: number): string {
   return measured >= AA ? "AA" : measured >= 3 ? "large text only" : "fails";
+}
+
+/* ---- reading the components -------------------------------------------- */
+
+/** A class name written in prose is not a pair that ships. */
+function code(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
+
+/**
+ * Every token a file writes as text, with the variants stripped.
+ *
+ * `disabled:` is dropped rather than collected: 1.4.3 asks no ratio of an
+ * inactive control, so a greyed-out button is the one place this app may write
+ * an ink that fails. Every other variant — `hover:`, `placeholder:`,
+ * `group-hover:`, `focus-visible:` — is text somebody reads, and is kept.
+ */
+function inksOf(file: string): Set<string> {
+  const cached = inkCache.get(file);
+  if (cached !== undefined) return cached;
+
+  const found = new Set<string>();
+  for (const [, variants, token] of code(readFileSync(join(SRC, file), "utf8")).matchAll(
+    /(?:^|["'\s`{])((?:[a-z-]+:)*)text-([a-z0-9-]+)/g,
+  )) {
+    if (!tokens.has(`--color-${token}`)) continue;
+    if (variants.includes("disabled:")) continue;
+    found.add(token);
+  }
+
+  inkCache.set(file, found);
+  return found;
+}
+
+/** Every component, as a path under `src` — the two trees that render. */
+function componentFiles(): readonly string[] {
+  const found: string[] = [];
+  for (const tree of ["components", "app"]) {
+    for (const entry of readdirSync(join(SRC, tree), { recursive: true, encoding: "utf8" })) {
+      if (entry.endsWith(".tsx")) found.push(`${tree}/${entry}`);
+    }
+  }
+  return found.sort();
+}
+
+/**
+ * The type tag's fills, read out of `listing.ts`.
+ *
+ * Twenty one-off hexes rather than tokens, and deliberately so — they belong to
+ * that badge and nothing else. That does not exempt them from being measured;
+ * it only means the ground is a literal instead of a name.
+ */
+function tagFills(): readonly string[] {
+  const source = readFileSync(join(SRC, "helpers", "listing.ts"), "utf8");
+  const found = new Set<string>();
+  for (const [, fill] of source.matchAll(/className: "bg-(?:\[(#[0-9a-f]{6})\])"/g)) found.add(fill);
+  for (const [, fill] of source.matchAll(/className: "(bg-[a-z-]+)"/g)) found.add(fill);
+  return [...found].sort();
 }

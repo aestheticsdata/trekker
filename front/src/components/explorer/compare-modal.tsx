@@ -413,7 +413,7 @@ function Filters({
         onChange={(event) => onNeedle(event.target.value)}
         placeholder="filter by name"
         aria-label="Filter the comparison by name"
-        className="bg-chrome border-line text-ink-soft placeholder:text-ink-ghost min-w-0 flex-1 border px-2 py-1 font-mono text-2xs"
+        className="bg-chrome border-line text-ink-soft placeholder:text-ink-faint min-w-0 flex-1 border px-2 py-1 font-mono text-2xs"
       />
     </div>
   );
@@ -498,7 +498,7 @@ function Row({
 
 /** One side's facts, or a visible absence. */
 function Side({ facts }: { facts: CompareEntry["a"] }) {
-  if (facts === null) return <span className="text-ink-ghost text-right font-mono text-2xs/none">—</span>;
+  if (facts === null) return <span className="text-ink-faint text-right font-mono text-2xs/none">—</span>;
 
   return (
     <span className="text-ink-dim text-right font-mono text-2xs/[1.4]">

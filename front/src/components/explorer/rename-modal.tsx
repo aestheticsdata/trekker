@@ -400,7 +400,7 @@ function Row({ row }: { row: RenameMapping }) {
         // that gets cut is the end, which is where the other name is.
         <Tooltip content={`${row.next} — ${row.problem.message}`}>
           <span className="text-danger-soft truncate font-mono text-xs/[1.3]">
-            {row.next} <span className="text-danger-mid">— {row.problem.message}</span>
+            {row.next} — {row.problem.message}
           </span>
         </Tooltip>
       ) : (

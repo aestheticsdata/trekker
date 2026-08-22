@@ -53,7 +53,7 @@ export function ViewStrip({
       aria-label="Saved views"
       className="flex min-w-0 items-center gap-1.25"
     >
-      <span className="text-accent-soft flex-none font-sans text-3xs font-semibold tracking-[0.16em]">VIEWS</span>
+      <span className="text-ink-label flex-none font-sans text-3xs font-semibold tracking-[0.16em]">VIEWS</span>
 
       {shown.map((view) => {
         const on = view.id === activeId;

@@ -543,15 +543,15 @@ export const TERMINAL_LABEL_INK = "text-ink-dim";
  *
  * Deliberately *not* `PROMPT_INK` from `sudo.ts`, and the difference is the
  * mockup's own. A modal's command preview is `$ chmod …` with no identity in
- * it, so its `$` carries the link blue. Here the identity is present and takes
- * that blue itself — `user@host` — leaving the `$` a step quieter. Same rule
+ * it, so its `$` carries the accent ink. Here the identity is present and takes
+ * that ink itself — `user@host` — leaving the `$` a step quieter. Same rule
  * about what the character *means*, drawn for a line that has more in it.
  *
  * The elevated `#` is `text-warning`, which is `PROMPT_ELEVATED_INK` exactly.
  * That one is the signal, and a signal that changed colour between two places
  * in the same app would not be one.
  */
-export const PROMPT_WHO_INK = "text-ink-link";
+export const PROMPT_WHO_INK = "text-ink-label";
 export const PROMPT_WHERE_INK = "text-on-terminal-dim";
 export const PROMPT_CHAR_INK = "text-ink-dim";
 

@@ -469,7 +469,7 @@ function TabStrip({
         type="button"
         onClick={callbacks.onNewTab}
         aria-label="New tab"
-        className="text-ink-faint hover:text-ink-muted flex items-center px-2.25 font-mono text-sm"
+        className="text-ink-dim hover:text-ink-muted flex items-center px-2.25 font-mono text-sm"
       >
         +
       </button>

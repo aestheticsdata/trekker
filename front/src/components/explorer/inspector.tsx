@@ -165,7 +165,7 @@ export function Inspector({
           <button
             type="button"
             onClick={onClose}
-            className="text-ink-faint hover:text-ink-muted font-normal"
+            className="text-ink-dim hover:text-ink-muted font-normal"
           >
             ⌘I
           </button>
@@ -763,7 +763,7 @@ function MetaRow({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function Heading({ children }: { children: ReactNode }) {
-  return <h2 className="text-ink-link mb-1.75 font-sans text-caps font-semibold tracking-[0.16em]">{children}</h2>;
+  return <h2 className="text-ink-label mb-1.75 font-sans text-caps font-semibold tracking-[0.16em]">{children}</h2>;
 }
 
 /**

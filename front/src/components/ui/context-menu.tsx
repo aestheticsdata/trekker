@@ -317,14 +317,21 @@ function Item({
         "flex h-5.75 items-center gap-2.25 px-2.75 font-mono text-xs/none",
         // Danger keeps its colour while disabled: `rm` should never look
         // routine, and a greyed-out `rm` is a routine-looking `rm`.
-        row.danger ? "text-danger-soft" : disabled ? "text-ink-faint" : "text-ink-soft",
+        row.danger ? "text-danger-soft" : disabled ? "text-ink-dim" : "text-ink-soft",
         disabled ? "cursor-not-allowed" : "cursor-pointer",
         active ? "bg-line" : "",
       ].join(" ")}
     >
       <span className="truncate">{row.label}</span>
       <div className="flex-1" />
-      {row.hint && <span className="text-ink-faint flex-none font-mono text-caption/none">{row.hint}</span>}
+      {row.hint && (
+        // The row fills with `line` under the cursor, and the quiet step is the one
+        // ink on this panel that does not survive that fill (3.62:1). It steps up
+        // with the row, as the palette's second line already does (TRE-36 §4).
+        <span className={`flex-none font-mono text-caption/none ${active ? "text-ink-dim" : "text-ink-faint"}`}>
+          {row.hint}
+        </span>
+      )}
     </div>
   );
 }

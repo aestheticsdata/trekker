@@ -167,14 +167,14 @@ function HostRow({
         className="flex min-w-0 flex-1 flex-col items-start text-left"
       >
         <span className="text-ink-soft w-full truncate font-mono text-xs">{host.label}</span>
-        <span className="text-ink-faint w-full truncate font-mono text-2xs">{describe(host)}</span>
+        <span className="text-ink-dim w-full truncate font-mono text-2xs">{describe(host)}</span>
       </button>
       <Tooltip content={bound ? "Already open in this pane" : "Open in this pane"}>
         <button
           type="button"
           onClick={onPick}
           aria-label={`Open ${host.label} in this pane`}
-          className={`flex-none px-1 font-mono text-2xs ${bound ? "text-accent-soft" : "text-ink-faint hover:text-ink"}`}
+          className={`flex-none px-1 font-mono text-2xs ${bound ? "text-ink-dim" : "text-ink-muted hover:text-ink"}`}
         >
           {bound ? "●" : "→"}
         </button>
