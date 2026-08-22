@@ -235,7 +235,7 @@ check("the header beside it, and its two buttons", TERMINAL_LABEL_INK, TERMINAL_
  * palette clears 4.5:1 against `--color-accent` from either side.
  *
  * Both halves of the replacement are checked below, and so is the ink that was
- * on the delete button: dark navy on dark red, 1.88:1, the worst pair in the
+ * on the delete button: dark navy on dark red, 1.83:1, the worst pair in the
  * app and on the one action it cannot undo.
  */
 console.log("\n--- the thing to press (TRE-78) ---");
@@ -294,13 +294,14 @@ console.log(
  * And the ink the strip would have inherited without being measured.
  *
  * `--color-on-pane-muted` is this app's ordinary colour for a quiet line on a
- * pane and clears AA there at 4.74:1. One step down onto the strip it is
- * 4.35:1 and does not. Printed rather than checked, like `ink-faint` in the
- * bubble above: it is not a pair that ships, it is the reason a pair that would
- * have shipped does not.
+ * pane. It cleared there at 4.74:1 and failed one step down onto the strip at
+ * 4.35:1, which is why the note ink is `label` — and TRE-82 then darkened
+ * `muted` far enough that it clears the sunk ground too. Still printed, and
+ * still not a pair that ships: `tail.ts` keeps `label` for the reason it gives
+ * itself, that the box has one voice, and the number no longer decides it.
  */
 const muted = ratio(hexOf("text-on-pane-muted"), hexOf(TAIL_SURFACE));
-console.log(`  --   on-pane-muted, which the pane passes  ${muted.toFixed(2).padStart(5)}:1  ${verdict(muted)}`);
+console.log(`  --   on-pane-muted, which no longer fails  ${muted.toFixed(2).padStart(5)}:1  ${verdict(muted)}`);
 
 /*
  * The ⌘K palette (TRE-36 §4), which has two grounds rather than one.
@@ -605,7 +606,6 @@ const ROOMS: readonly Room[] = [
           "danger",
           "on-pane",
           "on-pane-data",
-          "on-pane-dim",
           "on-pane-faint",
           "on-pane-label",
           "on-pane-muted",
@@ -614,13 +614,13 @@ const ROOMS: readonly Room[] = [
       },
       {
         on: ["bg-pane-hover", "bg-pane-sel", "bg-pane-sel-idle"],
-        inks: ["danger", "on-pane", "on-pane-data", "on-pane-dim", "on-pane-faint", "on-pane-muted", "on-pane-strong"],
+        inks: ["danger", "on-pane", "on-pane-data", "on-pane-faint", "on-pane-muted", "on-pane-strong"],
         note: "the same row, hovered and selected",
       },
       {
         on: ["bg-pane-bar", "bg-pane-bar-active"],
-        inks: ["on-pane", "on-pane-data", "on-pane-dim", "on-pane-faint", "on-pane-label", "on-pane-muted"],
-        note: "the path row, the column header and the footer — the pane's three bars",
+        inks: ["on-pane", "on-pane-data", "on-pane-label", "on-pane-muted"],
+        note: "the path row, the column header and the footer — the pane's three bars, which carry the ordinary quiet ink and not the quietest one (TRE-82)",
       },
       { on: ["bg-pane-chip"], inks: ["on-pane"] },
     ],
@@ -811,32 +811,37 @@ const ROOMS: readonly Room[] = [
 ];
 
 /*
- * The pairs that fail and are not this ticket's to fix.
+ * The twelve pairs the sweep found on the light panes, with what each was
+ * beside what it became (TRE-82). Thirteen lines for twelve pairs, because two
+ * different things were failing in the same ink on the same ground.
  *
- * All of them are on the light panes, and they are one finding rather than
- * eight: the pane surface is light enough that its ink ladder has no room left
- * below about 4.5:1, so the step called `faint` cannot exist there at AA and
- * the furniture bars are lighter still. Lifting the dark side was a swap;
- * lifting these means deciding whether the pane keeps four quiet steps or
- * three, which is a design decision about the app's most distinctive surface
- * and belongs to TRE-82 rather than to a ticket about `--color-ink-faint`.
+ * They were one finding rather than twelve. A pane is light, so its ink runs
+ * dark, and every step *down* in the surface family is a step *towards* the
+ * ink standing on it — which made the furniture bars, the darkest grounds in
+ * the app's lightest region, seven of the twelve, and five of the six inks
+ * they carry unreadable. Four of the remaining five are `on-pane-faint`, a
+ * fourth quiet step the pane had never had the room for. The last is a red
+ * that missed by four ten-thousandths.
  *
- * Frozen, not tolerated: the list is compared exactly, so fixing one without
- * removing its line fails, and adding a ninth fails too.
+ * The left-hand pair is a literal, because that is what it was: the palette
+ * ported 2a's hexes and 2a's hexes are what failed. Only `#31607f` is the
+ * app's own — 2a writes a symlink's target `#255473`, which measures 4.07:1
+ * and does not clear either.
  */
-const KNOWN_DEFICIT: readonly (readonly [string, string, string])[] = [
-  ["components/explorer/pane.tsx", "text-danger", "bg-pane"],
-  ["components/explorer/pane.tsx", "text-on-pane-dim", "bg-pane-bar"],
-  ["components/explorer/pane.tsx", "text-on-pane-dim", "bg-pane-bar-active"],
-  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane"],
-  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane-active"],
-  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane-hover"],
-  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane-sel-idle"],
-  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane-bar"],
-  ["components/explorer/pane.tsx", "text-on-pane-faint", "bg-pane-bar-active"],
-  ["components/explorer/pane.tsx", "text-on-pane-label", "bg-pane-bar"],
-  ["components/explorer/pane.tsx", "text-on-pane-muted", "bg-pane-bar"],
-  ["components/explorer/pane.tsx", "text-on-pane-muted", "bg-pane-bar-active"],
+const CORRECTED: readonly (readonly [string, string, string, string, string])[] = [
+  ["the ▾ on the host chip", "#31607f", "#7fa3c2", "text-on-pane-muted", "bg-pane-bar"],
+  ["  the same, keyboard here", "#31607f", "#8badc9", "text-on-pane-muted", "bg-pane-bar-active"],
+  ["a symlink's target", "#31607f", "#9bbcd7", "text-on-pane-faint", "bg-pane"],
+  ["  the same, keyboard here", "#31607f", "#a5c4dd", "text-on-pane-faint", "bg-pane-active"],
+  ["  the same, hovered", "#31607f", "#b6d0e4", "text-on-pane-faint", "bg-pane-hover"],
+  ["  the same, selected", "#31607f", "#b9d3e6", "text-on-pane-faint", "bg-pane-sel-idle"],
+  ["an owner that would not resolve", "#31607f", "#9bbcd7", "text-on-pane-faint", "bg-pane"],
+  ["the footer", "#1f4d69", "#7fa3c2", "text-on-pane-muted", "bg-pane-bar"],
+  ["  the same, keyboard here", "#1f4d69", "#8badc9", "text-on-pane-muted", "bg-pane-bar-active"],
+  ["every crumb but the last", "#1c4a68", "#7fa3c2", "text-on-pane-muted", "bg-pane-bar"],
+  ["  the same, keyboard here", "#1c4a68", "#8badc9", "text-on-pane-muted", "bg-pane-bar-active"],
+  ["the column header", "#123e59", "#7fa3c2", "text-on-pane-label", "bg-pane-bar"],
+  ["a symlink out of the root", "#7f2f2f", "#9bbcd7", "text-danger", "bg-pane"],
 ];
 
 console.log("\n--- and the type tag, whose fills are one-offs rather than tokens ---");
@@ -849,8 +854,6 @@ for (const fill of tagFills()) check(`a tag on ${fill}`, "text-on-pane-bright", 
  */
 console.log("\n--- every inline pair in `src/components` and `src/app` ---");
 
-const deficit = new Set(KNOWN_DEFICIT.map((row) => row.join(" ")));
-const stillFailing = new Set<string>();
 let swept = 0;
 
 for (const room of ROOMS) {
@@ -875,12 +878,7 @@ for (const room of ROOMS) {
     for (const ink of box.inks) {
       if (!found.has(ink)) continue;
       for (const ground of box.on) {
-        const key = `${room.file} text-${ink} ${ground}`;
         const measured = ratio(hexOf(`text-${ink}`), hexOf(ground));
-        if (deficit.has(key)) {
-          if (measured < AA) stillFailing.add(key);
-          continue;
-        }
         swept += 1;
         checked += 1;
         if (measured >= AA) continue;
@@ -905,20 +903,15 @@ if (uncovered.length === 0) {
   console.log(`  FAIL these write a colour and belong to no room: ${uncovered.join(", ")}`);
 }
 
-console.log("\n--- known to fail, and TRE-82's to fix rather than this ticket's ---");
-for (const [file, ink, ground] of KNOWN_DEFICIT) {
-  const measured = ratio(hexOf(ink), hexOf(ground));
+console.log("\n--- the light panes, as they were and as they are (TRE-82) ---");
+for (const [what, wasInk, wasGround, ink, ground] of CORRECTED) {
+  const before = ratio(hexOf(wasInk), hexOf(wasGround));
+  const after = ratio(hexOf(ink), hexOf(ground));
+  checked += 1;
+  if (after < AA) failures += 1;
   console.log(
-    `  --   ${file.replace("components/explorer/", "")} · ${ink.padEnd(16)} on ${ground.padEnd(18)} ${measured.toFixed(2).padStart(5)}:1`,
+    `  ${after >= AA ? "ok  " : "FAIL"} ${what.padEnd(32)} ${before.toFixed(2).padStart(5)} → ${after.toFixed(2).padStart(5)}:1`,
   );
-}
-checked += 1;
-const settled = KNOWN_DEFICIT.filter((row) => !stillFailing.has(row.join(" ")));
-if (settled.length === 0) {
-  console.log(`  ok   all ${KNOWN_DEFICIT.length} are still drawn and still failing — none is listed after being fixed`);
-} else {
-  failures += 1;
-  console.log(`  FAIL no longer drawn, or no longer failing, and still listed: ${settled.map((r) => r.join(" ")).join("; ")}`);
 }
 
 console.log(`\n${checked - failures}/${checked} pairs pass AA at ${AA}:1.`);

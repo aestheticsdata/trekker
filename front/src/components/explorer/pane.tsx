@@ -393,7 +393,7 @@ export function Pane({
         />
       )}
 
-      <footer className="bg-pane-bar border-pane-line text-on-pane-dim flex h-panefoot flex-none items-center gap-2.5 border-t px-2.25 font-mono text-2xs">
+      <footer className="bg-pane-bar border-pane-line text-on-pane-muted flex h-panefoot flex-none items-center gap-2.5 border-t px-2.25 font-mono text-2xs">
         {meta && !loading && !error && host && (
           <>
             <span className="whitespace-nowrap">
@@ -530,7 +530,7 @@ function PathRow({
           style={{ backgroundColor: host?.colour ?? "var(--color-ink-faint)" }}
         />
         {host?.label ?? "no host"}
-        <span className="text-on-pane-faint">▾</span>
+        <span className="text-on-pane-muted">▾</span>
       </button>
 
       <NavButton
@@ -814,7 +814,7 @@ function Row({
           does not reflow when it arrives. */}
       <span />
 
-      <span className="bg-pane-bar block h-1.5">
+      <span className="bg-pane-block block h-1.5">
         <span
           className={`block h-1.5 ${heat ? paint.bar : HEAT_OFF_BAR}`}
           style={{ width: `${share}%` }}
@@ -822,8 +822,8 @@ function Row({
       </span>
 
       <span className="text-on-pane-data text-right">{formatSize(row.size, row.type)}</span>
-      <span className="text-on-pane-dim">{row.mode}</span>
-      <span className={`truncate ${row.ownerResolved ? "text-on-pane-dim" : "text-on-pane-faint"}`}>{row.owner}</span>
+      <span className="text-on-pane-muted">{row.mode}</span>
+      <span className={`truncate ${row.ownerResolved ? "text-on-pane-muted" : "text-on-pane-faint"}`}>{row.owner}</span>
 
       {/* The padding is unconditional, so turning the heat map off removes a
           fill and never a pixel — the column keeps its width and no row moves. */}
@@ -847,17 +847,17 @@ function Skeleton() {
           className={`grid h-row animate-shimmer items-center ${GRID}`}
           style={{ animationDelay: `${index * 70}ms` }}
         >
-          <i className="bg-pane-bar-active block h-2" />
+          <i className="bg-pane-block block h-2" />
           <i
-            className="bg-pane-bar-active block h-2"
+            className="bg-pane-block block h-2"
             style={{ width: `${34 + ((index * 37) % 52)}%` }}
           />
           <i />
-          <i className="bg-pane-bar-active block h-1.5" />
-          <i className="bg-pane-bar-active block h-2" />
-          <i className="bg-pane-bar-active block h-2" />
-          <i className="bg-pane-bar-active block h-2" />
-          <i className="bg-pane-bar-active block h-2" />
+          <i className="bg-pane-block block h-1.5" />
+          <i className="bg-pane-block block h-2" />
+          <i className="bg-pane-block block h-2" />
+          <i className="bg-pane-block block h-2" />
+          <i className="bg-pane-block block h-2" />
         </div>
       ))}
     </div>

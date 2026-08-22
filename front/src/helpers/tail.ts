@@ -33,10 +33,14 @@ export const TAIL_BODY_INK = "text-on-pane-data";
  * colour while everything the file said is the body's.
  *
  * It was `--color-on-pane-muted` first, which is this app's ordinary ink for a
- * quiet line and clears AA on the pane at 4.74:1. On the sunk ground it is
- * 4.35:1 and does not — the exact failure the surface was documented as
- * causing, walked into within an hour of documenting it, and caught by
- * `pnpm verify:contrast` rather than by looking.
+ * quiet line. It cleared AA on the pane at 4.74:1 and, one step down onto the
+ * sunk ground, measured 4.35:1 and did not — the exact failure the surface was
+ * documented as causing, walked into within an hour of documenting it, and
+ * caught by `pnpm verify:contrast` rather than by looking.
+ *
+ * TRE-82 then darkened `muted` until it cleared the pane's furniture bars, and
+ * it clears the sunk ground on the way past, at 5.03:1. So the number no longer
+ * decides this and the paragraph above does: one box, one voice.
  */
 export const TAIL_NOTE_INK = "text-on-pane-label";
 

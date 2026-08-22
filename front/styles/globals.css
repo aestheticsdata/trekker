@@ -35,27 +35,48 @@
    * (path row, column header, footer), `sel`/`hover` the row states, `chip`
    * the small filled badges. The `-active` variants are what tells the eye
    * which of the two panes has the keyboard (TRE-16 §2).
+   *
+   * A bar sits one step below the listing it belongs to, and TRE-82 halved
+   * that step. 2a writes the bars as `#7fa3c2` and `#8badc9`, .132 of relative
+   * luminance under their pane, and on a light surface a step *down* is a step
+   * *towards* the dark ink standing on it: five of the six inks the bars carry
+   * failed AA there — the column header at 4.26:1 and the footer at 3.41:1.
+   * Darkening the inks to meet the bar instead is not available. With the bar
+   * where 2a puts it, every ink on it has to read 6.0:1 or better against the
+   * pane, and five near-blacks between 6.0 and 7.4 is not a ladder, it is a
+   * smear. So the step is .080 rather than .132, which is still a bar — the
+   * `pane-line` rule under it was doing most of that work anyway — and the
+   * .050 between a bar and its `-active` twin is the same .050 that separates
+   * `pane` from `pane-active`, so it is kept exactly.
    */
   --color-pane: #9bbcd7;
   --color-pane-active: #a5c4dd;
-  --color-pane-bar: #7fa3c2;
-  --color-pane-bar-active: #8badc9;
+  --color-pane-bar: #8badcb;
+  --color-pane-bar-active: #96b6d1;
   --color-pane-line: #6d92b3;
   --color-pane-hover: #b6d0e4;
   --color-pane-sel: #cfe6f1;
   --color-pane-sel-idle: #b9d3e6;
   --color-pane-chip: #c2d7e2;
   --color-pane-dash: #5c81a3;
+  /* The bars' old value, kept under a name of its own for the two things that
+   * wanted a dark *block* rather than a bar: the unfilled remainder of a share
+   * bar, and a skeleton row's cells. Both stand in for content, both sit on
+   * the listing, and both want to stay well under it — the opposite of what
+   * the bars needed, which is why moving one token was breaking the other. */
+  --color-pane-block: #7fa3c2;
   /* A depth *below* the pane, which the pane family did not have until the live
    * tail needed one (TRE-34). The mockup docks the tail strip on a ground one
    * step down from the listing it takes its space from — the same move
    * `--color-strip` makes for the disk-usage bar, in the light half of the app
    * rather than the dark one.
    *
-   * Worth knowing before anyone reuses a pane ink on it: the sunk ground breaks
-   * `--color-on-pane-muted`, which clears AA on the pane at 4.74:1 and fails
-   * here at 4.35:1. `pnpm verify:contrast` measures every ink this surface
-   * carries, and that is why it does. */
+   * Worth knowing before anyone reuses a pane ink on it: this ground used to
+   * break `--color-on-pane-muted`, which cleared AA on the pane at 4.74:1 and
+   * failed here at 4.35:1 — one step of surface was the whole margin. TRE-82's
+   * darker `muted` clears it at 5.03:1, so the trap is closed rather than
+   * avoided, but the surface is still a step nobody should spend twice.
+   * `pnpm verify:contrast` measures every ink this one carries. */
   --color-pane-sunk: #93b4d1;
 
   /* A fifth depth in the dark half, below `chrome`, and it exists for one box:
@@ -145,17 +166,38 @@
   --color-ink-ghost: #33495c;
 
   /* On the light panes, where the same hierarchy runs the other way.
-   * `strong` is a directory name, `data` a size, `dim` a mode or an owner,
-   * `label` the small caps of the column header, `faint` the explanatory
-   * second line of an empty state.
+   * `strong` is a directory name, `data` a size, `muted` a mode, an owner, a
+   * crumb or the footer, `label` the small caps of the column header, `faint`
+   * a symlink's target and the explanatory second line of an empty state.
+   *
+   * There were seven of these, and 2a's own values give four the same
+   * lightness: on `pane`, `muted` 4.74, `dim` 4.55, `strong` 4.53 and `danger`
+   * 4.50, inside a quarter of a ratio point of one another. `dim` and `muted`
+   * were one quiet step wearing two names — `tail.ts` and
+   * `scripts/verify-contrast.ts` had both already written "the ordinary ink of
+   * a quiet line on a pane" about `muted` — so TRE-82 keeps `muted` and
+   * darkens it until it clears the bars.
+   *
+   * The ladder on `pane` after: `faint` 4.85, `muted` 5.48, `label` 5.68,
+   * `data` 6.86, `on-pane` 7.39. 2a draws `faint`'s job — a symlink's target —
+   * in `#255473`, which measures 4.07:1; the app had drifted to `#31607f` at
+   * 3.40:1, a value 2a never writes anywhere.
+   *
+   * `strong` and `danger` are not on that ladder. They sit at 4.53 and 4.62,
+   * nine hundredths apart, which for two quiet greys would mean one step
+   * wearing two names again — but one is a saturated blue and the other is
+   * red, and nobody has ever had to tell those apart by their lightness. It
+   * leaves `strong` as the thinnest margin on the surface, three hundredths
+   * over the line, and it stays there because it is 2a's own and because the
+   * directory name is the pane's signature. `verify:contrast` is what stands
+   * between that margin and the next person who nudges `--color-pane`.
    */
   --color-on-pane: #0c2a44;
   --color-on-pane-strong: #0f4d74;
-  --color-on-pane-muted: #1c4a68;
+  --color-on-pane-muted: #17405d;
   --color-on-pane-data: #08304d;
-  --color-on-pane-dim: #1f4d69;
   --color-on-pane-label: #123e59;
-  --color-on-pane-faint: #31607f;
+  --color-on-pane-faint: #214865;
   --color-on-pane-bright: #f2f8fb;
 
   /* The wordmark, the logo's light pane, the glob caret and the column names
@@ -208,7 +250,12 @@
    * the argument — but the other half of it never was: a translucent fill is a
    * colour `verify:contrast` cannot read, and this token is one it can. */
   --color-warning-wash: #241a0f;
-  --color-danger: #7f2f2f;
+  /* `#7f2f2f` is 2a's, and everywhere but one place it is a fill or a border,
+   * where it is fine. The one place is the marker that says a symlink points
+   * outside the root, which is text on a light pane — and there it measured
+   * 4.4996:1, a fail by four ten-thousandths that no eye would ever call. Four
+   * points of red buy it a margin instead of a coin toss (TRE-82). */
+  --color-danger: #7c2e2e;
   --color-danger-mid: #aa3333;
   --color-danger-soft: #e39a9a;
   /* The fill behind a refusal that occupies a box of its own rather than a

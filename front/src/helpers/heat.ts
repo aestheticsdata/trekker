@@ -62,16 +62,16 @@ export const HEAT: readonly HeatPaint[] = [
   { bar: "bg-age-1", chip: "bg-age-1", ink: "text-on-pane-bright" },
   { bar: "bg-age-2", chip: "bg-age-2", ink: "text-on-pane-bright" },
   { bar: "bg-age-3", chip: "bg-age-3", ink: "text-on-accent" },
-  { bar: "bg-age-4", chip: null, ink: "text-on-pane-dim" },
-  { bar: "bg-age-5", chip: null, ink: "text-on-pane-dim" },
-  { bar: "bg-age-6", chip: null, ink: "text-on-pane-dim" },
+  { bar: "bg-age-4", chip: null, ink: "text-on-pane-muted" },
+  { bar: "bg-age-5", chip: null, ink: "text-on-pane-muted" },
+  { bar: "bg-age-6", chip: null, ink: "text-on-pane-muted" },
 ];
 
 /** The share bar with the heat map off: present, but saying nothing. */
 export const HEAT_OFF_BAR = "bg-share-idle";
 
 /** And the age column with it off — the same plain text the old buckets use. */
-export const HEAT_OFF_INK = "text-on-pane-dim";
+export const HEAT_OFF_INK = "text-on-pane-muted";
 
 /**
  * Every background an unchipped age can land on, worst case first.

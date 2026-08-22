@@ -72,8 +72,8 @@ export const SELECTED_FILL = "bg-accent-soft";
  * The destructive confirm, which needed no new colour — only the right ink.
  *
  * `bg-danger` was already correct. It was carrying `text-on-accent`, dark navy
- * on dark red, at **1.88:1** — the worst pair in the app, on the one button in
- * it that cannot be undone. `text-ink` on the same fill is 7.86:1.
+ * on dark red, at **1.83:1** — the worst pair in the app, on the one button in
+ * it that cannot be undone. `text-ink` on the same fill is 8.08:1.
  */
 export const DANGER_FILL = "bg-danger";
 export const DANGER_INK = "text-ink";
