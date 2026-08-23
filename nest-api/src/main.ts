@@ -10,6 +10,13 @@ import { formatRouteLog } from "@infrastructure/logger";
 import { RedisService } from "@redis/redis.service";
 import { SESSION_COOKIE_NAME, SESSION_TTL_SECONDS } from "@users/session.constants";
 
+/**
+ * The health route as the logging middleware below sees it. That middleware is
+ * mounted at "/api", and Express strips the mount path off `req.url` before
+ * calling it — so `GET /api/health` from outside is `/health` from in there.
+ */
+const HEALTH_PATH = "/health";
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   // Behind nginx: without this, req.ip is the proxy and every rate limit counts
@@ -51,12 +58,35 @@ async function bootstrap() {
     credentials: true,
   });
 
-  app.use("/api", (req: Request, _res: Response, next: NextFunction) => {
+  app.use("/api", (req: Request, res: Response, next: NextFunction) => {
     const url = req.originalUrl ?? req.url ?? req.path ?? "";
     const ip =
       (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ?? req.ip ?? req.socket?.remoteAddress ?? "?";
     const userAgent = (req.headers["user-agent"] ?? "unknown").slice(0, 60);
-    console.log(formatRouteLog(req.method, url, "Nest", { ip, userAgent }));
+    const line = formatRouteLog(req.method, url, "Nest", { ip, userAgent });
+
+    // Zeus probes /api/health on a loop, forever, and one line per probe buries every other route
+    // in the pm2 log. So the health line is not written on the way in like the rest — it is held
+    // until the response is done and written only if the probe did not succeed (IKN-32).
+    //
+    // Held rather than dropped, and that is the whole point: a probe that fails is the only thing
+    // this route ever has to say. The path is read here and not inside the callback, because by the
+    // time the response closes Express has restored `req.url` to the full original and `req.path`
+    // would read "/api/health" instead of "/health".
+    if (req.path === HEALTH_PATH) {
+      // `close` and not `finish`: `finish` never fires on a connection the client dropped
+      // mid-answer, and a probe that got no answer must not be the one case that logs nothing.
+      // `writableEnded` tells the two apart — `statusCode` alone cannot, because it still reads 200
+      // on a response that was never sent.
+      res.on("close", () => {
+        if (res.writableEnded && res.statusCode >= 200 && res.statusCode < 300) return;
+        console.log(line);
+      });
+      next();
+      return;
+    }
+
+    console.log(line);
     next();
   });
 
