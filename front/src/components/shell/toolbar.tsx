@@ -103,7 +103,7 @@ export function Toolbar({
         )}
       </label>
 
-      <Tooltip content="Column visibility arrives in TRE-16">
+      <Tooltip content="Column visibility isn't configurable yet">
         <span className="hidden items-center gap-2.25 font-mono text-2xs whitespace-nowrap stats:flex">
           <span className="text-ink-dim">columns</span>
           <span className="text-brand">{DEFAULT_COLUMNS.join(" · ")}</span>
