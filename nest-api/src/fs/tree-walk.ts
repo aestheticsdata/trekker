@@ -51,6 +51,7 @@ export interface WalkedEntry {
   kind: FileKind;
   size: number;
   uid: number;
+  gid: number;
   /** Permission bits, already masked. TRE-26 writes them into zip entries. */
   mode: number;
   mtimeMs: number;
@@ -146,6 +147,7 @@ export async function walkTree(
         kind: entry.kind,
         size: entry.size,
         uid: entry.uid,
+        gid: entry.gid,
         mode: entry.mode,
         mtimeMs: entry.mtimeMs,
       });
@@ -173,13 +175,21 @@ export async function walkTree(
 async function describeRoot(driver: HostDriver, root: string): Promise<WalkedEntry> {
   try {
     const stat = await driver.stat(root);
-    return { path: root, kind: stat.kind, size: stat.size, uid: stat.uid, mode: stat.mode, mtimeMs: stat.mtimeMs };
+    return {
+      path: root,
+      kind: stat.kind,
+      size: stat.size,
+      uid: stat.uid,
+      gid: stat.gid,
+      mode: stat.mode,
+      mtimeMs: stat.mtimeMs,
+    };
   } catch {
     // Zeroes rather than a guess, and `unknown` so nothing downstream counts it
     // as a directory it is not. A total that is short by one entry is better
     // than a risk line that invents an owner. `mode: 0` reads as "no bits
     // known", which is also what a zip entry written from it should carry.
-    return { path: root, kind: "unknown", size: 0, uid: -1, mode: 0, mtimeMs: 0 };
+    return { path: root, kind: "unknown", size: 0, uid: -1, gid: -1, mode: 0, mtimeMs: 0 };
   }
 }
 

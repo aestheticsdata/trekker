@@ -26,6 +26,8 @@ import {
   specialBits,
   PermissionsService,
 } from "@fs/permissions.service";
+import { UndoPermissionsDto } from "@fs/dto/undo-permissions.dto";
+import { PermissionsUndoService, type UndoResult } from "@fs/permissions-undo.service";
 import type { RenamePlan } from "@fs/rename-plan";
 import { type RenameResult, RenameService } from "@fs/rename.service";
 import { TailService } from "@fs/tail.service";
@@ -59,6 +61,7 @@ export class FsController {
   constructor(
     private readonly fs: FsService,
     private readonly permissions: PermissionsService,
+    private readonly permissionsUndo: PermissionsUndoService,
     private readonly rename: RenameService,
     private readonly create: CreateService,
     private readonly remove: DeleteService,
@@ -378,8 +381,12 @@ export class FsController {
       };
     },
   })
-  async chmod(@Req() req: Request, @Body() dto: ChangeModeDto): Promise<ChangeResult> {
+  async chmod(
+    @Req() req: Request,
+    @Body() dto: ChangeModeDto,
+  ): Promise<ChangeResult & { activityLogId: string | null }> {
     const mode = parseMode(dto.mode);
+    const activityLogId = this.audit.rowIdOf(req);
     const result = await this.permissions.chmod(
       userIdOf(req),
       dto.hostId,
@@ -387,6 +394,7 @@ export class FsController {
       mode,
       dto.recursive === true,
       req.sessionID,
+      activityLogId ?? undefined,
     );
 
     this.audit.annotate(req, {
@@ -404,7 +412,7 @@ export class FsController {
         elevated: result.elevated,
       },
     });
-    return result;
+    return { ...result, activityLogId };
   }
 
   @Post("chown")
@@ -424,7 +432,11 @@ export class FsController {
       };
     },
   })
-  async chown(@Req() req: Request, @Body() dto: ChangeOwnerDto): Promise<ChangeResult> {
+  async chown(
+    @Req() req: Request,
+    @Body() dto: ChangeOwnerDto,
+  ): Promise<ChangeResult & { activityLogId: string | null }> {
+    const activityLogId = this.audit.rowIdOf(req);
     const result = await this.permissions.chown(
       userIdOf(req),
       dto.hostId,
@@ -433,6 +445,7 @@ export class FsController {
       dto.group,
       dto.recursive === true,
       req.sessionID,
+      activityLogId ?? undefined,
     );
 
     this.audit.annotate(req, {
@@ -445,6 +458,60 @@ export class FsController {
         failed: result.failed,
         skippedLinks: result.skippedLinks,
         elevated: result.elevated,
+      },
+    });
+    return { ...result, activityLogId };
+  }
+
+  @Post("chmod/undo")
+  @UseGuards(CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  @Audited({
+    kind: "file.chmod.undo",
+    destructive: true,
+    limit: LIMITS.permissionChange,
+    describe: (request) => {
+      const body = request.body as { activityLogId?: string };
+      return { summary: "undo chmod", payload: { undoes: body.activityLogId } };
+    },
+  })
+  async undoChmod(@Req() req: Request, @Body() dto: UndoPermissionsDto): Promise<UndoResult> {
+    const result = await this.permissionsUndo.undoChmod(userIdOf(req), dto.activityLogId, req.sessionID);
+    this.audit.annotate(req, {
+      hostId: result.hostId,
+      summary: `undo chmod on ${count(result.restored, "entry", "entries")}`,
+      payload: {
+        restored: result.restored,
+        failed: result.failed,
+        elevated: result.elevated,
+        undoes: dto.activityLogId,
+      },
+    });
+    return result;
+  }
+
+  @Post("chown/undo")
+  @UseGuards(CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  @Audited({
+    kind: "file.chown.undo",
+    destructive: true,
+    limit: LIMITS.permissionChange,
+    describe: (request) => {
+      const body = request.body as { activityLogId?: string };
+      return { summary: "undo chown", payload: { undoes: body.activityLogId } };
+    },
+  })
+  async undoChown(@Req() req: Request, @Body() dto: UndoPermissionsDto): Promise<UndoResult> {
+    const result = await this.permissionsUndo.undoChown(userIdOf(req), dto.activityLogId, req.sessionID);
+    this.audit.annotate(req, {
+      hostId: result.hostId,
+      summary: `undo chown on ${count(result.restored, "entry", "entries")}`,
+      payload: {
+        restored: result.restored,
+        failed: result.failed,
+        elevated: result.elevated,
+        undoes: dto.activityLogId,
       },
     });
     return result;

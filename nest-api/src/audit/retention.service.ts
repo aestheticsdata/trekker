@@ -12,6 +12,15 @@ const ORDINARY_DAYS = Number.parseInt(process.env.TREKKER_AUDIT_RETENTION_DAYS ?
  */
 const DESTRUCTIVE_DAYS = Number.parseInt(process.env.TREKKER_AUDIT_RETENTION_DESTRUCTIVE_DAYS ?? "", 10) || 365;
 
+/**
+ * `PermissionSnapshots` rows (TRE-75), pruned on their own window —
+ * independent of the two above. The audit row they hang off keeps its
+ * normal retention; only the ability to undo it expires, and sooner,
+ * because a multi-megabyte snapshot from a large recursive change has no
+ * reason to live as long as a one-line summary.
+ */
+const SNAPSHOT_DAYS = Number.parseInt(process.env.TREKKER_PERMISSION_SNAPSHOT_RETENTION_DAYS ?? "", 10) || 30;
+
 /** Deleted per statement, so one prune never holds a long row-lock sweep. */
 const BATCH = 1_000;
 
@@ -63,14 +72,18 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
    * append-only rule in `audit-coverage.spec.ts` names this file and
    * `audit.service.ts` and nothing else.
    */
-  async prune(now: Date = new Date()): Promise<{ ordinary: number; destructive: number }> {
+  async prune(now: Date = new Date()): Promise<{ ordinary: number; destructive: number; snapshots: number }> {
     const ordinary = await this.pruneClass(false, new Date(now.getTime() - ORDINARY_DAYS * DAY_MS));
     const destructive = await this.pruneClass(true, new Date(now.getTime() - DESTRUCTIVE_DAYS * DAY_MS));
+    const snapshots = await this.pruneSnapshots(new Date(now.getTime() - SNAPSHOT_DAYS * DAY_MS));
 
     if (ordinary + destructive > 0) {
       this.logger.log(`Audit prune removed ${ordinary} ordinary and ${destructive} destructive rows`);
     }
-    return { ordinary, destructive };
+    if (snapshots > 0) {
+      this.logger.log(`Permission snapshot prune removed ${snapshots} rows`);
+    }
+    return { ordinary, destructive, snapshots };
   }
 
   private async pruneClass(destructive: boolean, before: Date): Promise<number> {
@@ -100,6 +113,32 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
       // which is a disk problem; a prune that crashes the API turns a disk
       // problem into an outage.
       this.logger.error(`Audit prune failed: ${(error as Error).message}`);
+    }
+
+    return removed;
+  }
+
+  private async pruneSnapshots(before: Date): Promise<number> {
+    let removed = 0;
+
+    try {
+      for (;;) {
+        const doomed = await this.prisma.permissionSnapshots.findMany({
+          where: { createdAt: { lt: before } },
+          select: { id: true },
+          take: BATCH,
+        });
+        if (doomed.length === 0) break;
+
+        const { count } = await this.prisma.permissionSnapshots.deleteMany({
+          where: { id: { in: doomed.map((row) => row.id) } },
+        });
+        removed += count;
+
+        if (doomed.length < BATCH) break;
+      }
+    } catch (error) {
+      this.logger.error(`Permission snapshot prune failed: ${(error as Error).message}`);
     }
 
     return removed;

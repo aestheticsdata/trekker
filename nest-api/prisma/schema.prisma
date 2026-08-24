@@ -752,6 +752,8 @@ model ActivityLog {
   user Users  @relation(fields: [userId], references: [id], onDelete: Cascade)
   host Hosts? @relation(fields: [hostId], references: [id], onDelete: SetNull)
 
+  permissionSnapshots PermissionSnapshots[]
+
   /// Cursor pagination orders by `id`, not `createdAt`: the id is a uuid v7,
   /// so it is already time-ordered, unique, and immune to two rows sharing a
   /// millisecond — which a createdAt cursor is not, and which loses rows
@@ -767,4 +769,33 @@ model ActivityLog {
   @@index([outcome, id])
   /// The prune job's only query: everything of one class older than a date.
   @@index([destructive, createdAt])
+}
+
+/// Old mode/uid/gid for one entry, before a chmod or chown changed it
+/// (TRE-75). Written only for entries the operation actually changed — the
+/// walk (or a single `stat` for a non-recursive change) already has these
+/// values in hand, so this is never a second fetch.
+///
+/// `path` is `Text`, unindexed: every lookup is by `activityLogId`, never by
+/// path, matching `DiskScanEntries.path`.
+///
+/// Pruned on its own 30-day schedule by `RetentionService`, independent of
+/// `ActivityLog`'s own 90/365-day retention — the audit summary line should
+/// outlive the ability to undo it. `onDelete: Cascade` is a referential
+/// backstop only, for the (normally never reached) case an `ActivityLog`
+/// row is deleted before its own snapshots have aged out; it is not the
+/// prune mechanism.
+model PermissionSnapshots {
+  id            String   @id @default(uuid(7)) @db.Char(36)
+  activityLogId String   @db.Char(36)
+  path          String   @db.Text
+  mode          Int
+  uid           Int
+  gid           Int
+  createdAt     DateTime @default(now())
+
+  activityLog ActivityLog @relation(fields: [activityLogId], references: [id], onDelete: Cascade)
+
+  @@index([activityLogId])
+  @@index([createdAt])
 }

@@ -26,6 +26,8 @@ export interface ChangeResult {
   unreadable: string[];
   /** Entries left untouched because they are denylisted on the host (TRE-52). */
   refused: string[];
+  /** The audit row this change wrote, for undo (TRE-75). */
+  activityLogId: string | null;
 }
 
 export interface CountResult {
@@ -71,4 +73,27 @@ export async function changeOwner(input: OwnerChange, csrfToken: string | null):
 export async function fetchEntryCount(hostId: string, path: string): Promise<CountResult> {
   const query = new URLSearchParams({ hostId, path });
   return (await apiRequest(`/fs/count?${query}`)) as CountResult;
+}
+
+export interface UndoOutcome {
+  path: string;
+  ok: boolean;
+  code?: string;
+  message?: string;
+}
+
+export interface UndoResult {
+  results: UndoOutcome[];
+  restored: number;
+  failed: number;
+  elevated: number;
+  hostId: string;
+}
+
+export async function undoChmod(activityLogId: string, csrfToken: string | null): Promise<UndoResult> {
+  return (await apiRequest("/fs/chmod/undo", { method: "POST", body: { activityLogId }, csrfToken })) as UndoResult;
+}
+
+export async function undoChown(activityLogId: string, csrfToken: string | null): Promise<UndoResult> {
+  return (await apiRequest("/fs/chown/undo", { method: "POST", body: { activityLogId }, csrfToken })) as UndoResult;
 }

@@ -11,6 +11,7 @@ import { PathGuardService } from "@hosts/path-guard/path-guard.service";
 import { SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
 import { SudoService } from "@hosts/sudo/sudo.service";
 import type { IdResolverService } from "@fs/id-resolver.service";
+import { PermissionSnapshotService, type SnapshotEntry } from "@fs/permission-snapshot.service";
 import { PermissionsService, describeMode, entryCeiling, parseMode, specialBits } from "@fs/permissions.service";
 import { walkTree } from "@fs/tree-walk";
 import { FsController } from "@fs/fs.controller";
@@ -85,6 +86,9 @@ function serviceFor(
             : null,
         ),
     },
+    permissionSnapshots: {
+      createMany: ({ data }: { data: unknown[] }) => Promise.resolve({ count: data.length }),
+    },
   } as unknown as PrismaService;
 
   const guard = new PathGuardService(prisma, denylist, memoryLimits(), silentAudit);
@@ -92,7 +96,13 @@ function serviceFor(
   // A real runner over a real (empty) window store: nothing here opens one, so
   // `isOpen` is always false and every change takes the ordinary path. That is
   // the point — TRE-29 must not have altered what happens without a window.
-  return new PermissionsService(factory, guard, ids, new SudoRunnerService(new SudoService()));
+  return new PermissionsService(
+    factory,
+    guard,
+    ids,
+    new SudoRunnerService(new SudoService()),
+    new PermissionSnapshotService(prisma),
+  );
 }
 
 /**
@@ -128,6 +138,9 @@ function elevatedServiceFor(
             : null,
         ),
     },
+    permissionSnapshots: {
+      createMany: ({ data }: { data: unknown[] }) => Promise.resolve({ count: data.length }),
+    },
   } as unknown as PrismaService;
 
   const guard = new PathGuardService(prisma, denylist, memoryLimits(), silentAudit);
@@ -137,9 +150,49 @@ function elevatedServiceFor(
   sudo.open(SESSION_ID, HOST_ID, "hunter2");
 
   return {
-    service: new PermissionsService(factory, guard, ids, new SudoRunnerService(sudo)),
+    service: new PermissionsService(
+      factory,
+      guard,
+      ids,
+      new SudoRunnerService(sudo),
+      new PermissionSnapshotService(prisma),
+    ),
     elevatedCalls,
   };
+}
+
+function serviceForWithSnapshots(roots: { path: string; access: "READ" | "WRITE" }[]): {
+  service: PermissionsService;
+  recorded: SnapshotEntry[];
+} {
+  const recorded: SnapshotEntry[] = [];
+  const prisma = {
+    hosts: {
+      findFirst: ({ where }: { where: { id: string; userId: string } }) =>
+        Promise.resolve(
+          where.id === HOST_ID && where.userId === USER_ID
+            ? { id: HOST_ID, userId: USER_ID, transport: "LOCAL", roots, user: { role: "MEMBER" } }
+            : null,
+        ),
+    },
+    permissionSnapshots: {
+      createMany: ({ data }: { data: SnapshotEntry[] }) => {
+        recorded.push(...data);
+        return Promise.resolve({ count: data.length });
+      },
+    },
+  } as unknown as PrismaService;
+
+  const guard = new PathGuardService(prisma, [join(base, "install")], memoryLimits(), silentAudit);
+  const factory = { forHost: () => Promise.resolve(new LocalDriver(HOST_ID)) } as unknown as HostDriverFactory;
+  const service = new PermissionsService(
+    factory,
+    guard,
+    ids,
+    new SudoRunnerService(new SudoService()),
+    new PermissionSnapshotService(prisma),
+  );
+  return { service, recorded };
 }
 
 const SESSION_ID = "session-under-test";
@@ -232,6 +285,66 @@ describe("walkTree", () => {
     expect(walked.paths).toContain(join(root, "closed"));
 
     await chmod(join(root, "closed"), 0o755);
+  });
+
+  it("carries gid alongside uid on every entry, including the root's own", async () => {
+    const root = join(base, "walk-gid");
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "f.txt"), "x");
+
+    const walked = await walkTree(new LocalDriver(HOST_ID), root, 100);
+
+    const expectedGid = process.getgid?.() ?? 0;
+    const file = walked.details.find((entry) => entry.path === join(root, "f.txt"));
+    const rootEntry = walked.details.find((entry) => entry.path === root);
+    expect(file?.gid).toBe(expectedGid);
+    expect(rootEntry?.gid).toBe(expectedGid);
+  });
+});
+
+describe("chmod — undo snapshots (TRE-75)", () => {
+  it("records the previous mode for every entry actually changed, when given an activityLogId", async () => {
+    const root = join(base, "snap-recursive");
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "a.txt"), "x");
+    await writeFile(join(root, "b.txt"), "y");
+    await chmod(join(root, "a.txt"), 0o644);
+    await chmod(join(root, "b.txt"), 0o600);
+
+    const { service, recorded } = serviceForWithSnapshots(writeRoot());
+
+    await service.chmod(USER_ID, HOST_ID, [root], 0o755, true, undefined, "activity-1");
+
+    const a = recorded.find((row) => row.path === join(root, "a.txt"));
+    const b = recorded.find((row) => row.path === join(root, "b.txt"));
+    expect(a?.mode).toBe(0o644);
+    expect(b?.mode).toBe(0o600);
+    expect(recorded.every((row) => row.activityLogId === "activity-1")).toBe(true);
+  });
+
+  it("records nothing when no activityLogId is given", async () => {
+    const root = join(base, "snap-none");
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "a.txt"), "x");
+
+    const { service, recorded } = serviceForWithSnapshots(writeRoot());
+
+    await service.chmod(USER_ID, HOST_ID, [root], 0o755, true);
+
+    expect(recorded).toEqual([]);
+  });
+
+  it("pays one stat for a non-recursive change, and records only that path", async () => {
+    const file = join(base, "snap-single.txt");
+    await writeFile(file, "x");
+    await chmod(file, 0o644);
+
+    const { service, recorded } = serviceForWithSnapshots(writeRoot());
+
+    await service.chmod(USER_ID, HOST_ID, [file], 0o600, false, undefined, "activity-2");
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({ activityLogId: "activity-2", path: file, mode: 0o644 });
   });
 });
 

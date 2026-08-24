@@ -6,6 +6,7 @@ import { PathGuardService } from "@hosts/path-guard/path-guard.service";
 import { toHttp } from "@fs/driver-http";
 import { octalMode } from "@fs/file-row";
 import { IdResolverService } from "@fs/id-resolver.service";
+import { PermissionSnapshotService, type SnapshotEntry } from "@fs/permission-snapshot.service";
 import { walkTree } from "@fs/tree-walk";
 import type { SudoOnlyProgram } from "@hosts/drivers/shell-quote";
 import { chmodArgv, chownArgv } from "@hosts/sudo/sudo-argv";
@@ -120,6 +121,7 @@ export class PermissionsService {
     private readonly guard: PathGuardService,
     private readonly ids: IdResolverService,
     private readonly sudoRunner: SudoRunnerService,
+    private readonly snapshots: PermissionSnapshotService,
   ) {}
 
   /**
@@ -160,6 +162,7 @@ export class PermissionsService {
     mode: number,
     recursive: boolean,
     sessionId?: string,
+    activityLogId?: string,
   ): Promise<ChangeResult> {
     return this.apply(
       userId,
@@ -169,6 +172,8 @@ export class PermissionsService {
       (driver, target) => driver.chmod(target, mode),
       { program: "chmod", argv: (target) => chmodArgv(mode, target) },
       sessionId,
+      undefined,
+      activityLogId,
     );
   }
 
@@ -185,6 +190,7 @@ export class PermissionsService {
     group: string | undefined,
     recursive: boolean,
     sessionId?: string,
+    activityLogId?: string,
   ): Promise<ChangeResult> {
     if (owner === undefined && group === undefined) {
       throw new BadRequestException("Give an owner, a group, or both.");
@@ -205,6 +211,7 @@ export class PermissionsService {
       { program: "chown", argv: (target) => chownArgv(uid, gid, target) },
       sessionId,
       driver,
+      activityLogId,
     );
   }
 
@@ -225,6 +232,7 @@ export class PermissionsService {
     elevated: ElevatedForm,
     sessionId?: string,
     existing?: HostDriver,
+    activityLogId?: string,
   ): Promise<ChangeResult> {
     if (paths.length === 0) throw new BadRequestException("No paths given.");
     if (paths.length > MAX_PATHS) {
@@ -241,6 +249,7 @@ export class PermissionsService {
     let skippedLinks = 0;
     let changed = 0;
     let elevatedEntries = 0;
+    const snapshots: SnapshotEntry[] = [];
 
     for (const path of paths) {
       // Validated one at a time, and a refusal on one path does not cancel the
@@ -257,6 +266,10 @@ export class PermissionsService {
       }
 
       let targets = [realPath];
+      // Before-values for this one top-level path, keyed by target — built
+      // only when there is an activityLogId to attach them to (TRE-75).
+      const before = new Map<string, { mode: number; uid: number; gid: number }>();
+
       if (recursive) {
         const ceiling = entryCeiling();
         const walked = await walkTree(driver, realPath, ceiling);
@@ -274,6 +287,16 @@ export class PermissionsService {
         targets = walked.paths;
         skippedLinks += walked.skippedLinks;
         unreadable.push(...walked.unreadable);
+        if (activityLogId) {
+          for (const entry of walked.details) {
+            before.set(entry.path, { mode: entry.mode, uid: entry.uid, gid: entry.gid });
+          }
+        }
+      } else if (activityLogId) {
+        // One stat to capture what this single path was before the change —
+        // affordable precisely because there is only one (TRE-75).
+        const stat = await driver.stat(realPath);
+        before.set(realPath, { mode: stat.mode, uid: stat.uid, gid: stat.gid });
       }
 
       // The walk invents paths the guard never saw, and a change aimed at a
@@ -289,13 +312,26 @@ export class PermissionsService {
         return false;
       });
 
-      const outcome = await this.applyTo(driver, path, permitted, change, elevated, sessionId, hostId);
+      const onChanged = activityLogId
+        ? (target: string) => {
+            const value = before.get(target);
+            if (value) snapshots.push({ activityLogId, path: target, ...value });
+          }
+        : undefined;
+
+      const outcome = await this.applyTo(driver, path, permitted, change, elevated, sessionId, hostId, onChanged);
       results.push(outcome);
       changed += outcome.entries;
       if (outcome.elevated) elevatedEntries += outcome.elevated;
     }
 
     const failed = results.filter((result) => !result.ok).length;
+
+    // Recorded before the all-failed check below: an entry can have genuinely
+    // changed even on a request that is overall classified as failed (one
+    // path's targets partially succeeded before that path hit its own
+    // failure), and that change is exactly as undoable as any other.
+    if (activityLogId) await this.snapshots.record(snapshots);
 
     // Nothing worked: the request achieved nothing, so it answers as a failure
     // rather than as a 200 whose body has to be read to discover that. A
@@ -315,6 +351,7 @@ export class PermissionsService {
     elevated: ElevatedForm,
     sessionId: string | undefined,
     hostId: string,
+    onChanged?: (target: string) => void,
   ): Promise<PathOutcome> {
     let entries = 0;
     let viaSudo = 0;
@@ -322,6 +359,7 @@ export class PermissionsService {
       try {
         await change(driver, target);
         entries += 1;
+        onChanged?.(target);
       } catch (error) {
         // Refused for want of privilege, with a window open: this is the case
         // the whole ticket exists for. Retried through `sudo chmod` rather than
@@ -336,6 +374,7 @@ export class PermissionsService {
             await this.sudoRunner.run(driver, sessionId, hostId, elevated.program, elevated.argv(target));
             entries += 1;
             viaSudo += 1;
+            onChanged?.(target);
             continue;
           } catch (elevatedError) {
             // The refusal that gets reported is this one, not the original: it
@@ -460,7 +499,7 @@ function asNumericId(value: string): number | null {
  * than a malfunction, so it says what to do about it instead of "permission
  * denied" — which reads as "you may not", when the truth is "not without root".
  */
-function failure(path: string, error: unknown): PathOutcome {
+export function failure(path: string, error: unknown): PathOutcome {
   if (isDriverError(error)) {
     return {
       path,

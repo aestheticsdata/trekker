@@ -26,7 +26,7 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
 function walked(path: string, kind: string, size = 0, mtimeMs = 0): WalkedEntry {
-  return { path, kind: kind as WalkedEntry["kind"], size, uid: 0, mode: 0o644, mtimeMs };
+  return { path, kind: kind as WalkedEntry["kind"], size, uid: 0, gid: 0, mode: 0o644, mtimeMs };
 }
 
 function item(name: string, kind = "file"): PlannedItem {

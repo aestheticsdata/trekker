@@ -9,6 +9,7 @@ import { RateLimitService } from "@audit/rate-limit.service";
 import { REDACTED, redact, redactDetail } from "@audit/redact";
 import { RetentionService } from "@audit/retention.service";
 
+import type { Request } from "express";
 import type { RedisService } from "@redis/redis.service";
 import type { PrismaService } from "../prisma/prisma.service";
 
@@ -286,7 +287,7 @@ describe("retention", () => {
 
     const removed = await new RetentionService(prisma).prune(now);
 
-    expect(removed).toEqual({ ordinary: 1, destructive: 1 });
+    expect(removed).toEqual({ ordinary: 1, destructive: 1, snapshots: 0 });
     expect(store.map((row) => row.id).sort()).toEqual(["destructive-mid", "ordinary-fresh"]);
   });
 
@@ -308,7 +309,11 @@ describe("retention", () => {
       },
     } as unknown as PrismaService;
 
-    await expect(new RetentionService(broken).prune(now)).resolves.toEqual({ ordinary: 0, destructive: 0 });
+    await expect(new RetentionService(broken).prune(now)).resolves.toEqual({
+      ordinary: 0,
+      destructive: 0,
+      snapshots: 0,
+    });
   });
 });
 
@@ -394,5 +399,23 @@ describe("activity paging", () => {
 
     expect(page.items[0].bytes).toBe("9007199254740993");
     expect(() => JSON.stringify(page)).not.toThrow();
+  });
+});
+
+describe("AuditService.rowIdOf", () => {
+  it("returns the id bindRow gave it", () => {
+    const service = new AuditService({} as PrismaService);
+    const request = {} as Request;
+
+    service.bindRow(request, "row-123");
+
+    expect(service.rowIdOf(request)).toBe("row-123");
+  });
+
+  it("returns null before any row is bound", () => {
+    const service = new AuditService({} as PrismaService);
+    const request = {} as Request;
+
+    expect(service.rowIdOf(request)).toBeNull();
   });
 });

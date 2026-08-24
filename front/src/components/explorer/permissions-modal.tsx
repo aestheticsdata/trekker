@@ -9,7 +9,7 @@ import { joinPath } from "@helpers/listing";
 import { parseMode } from "@helpers/permissions";
 import { ON_FILL, PRESS } from "@helpers/press";
 import { ApiError } from "@lib/api/client";
-import { changeMode, changeOwner, fetchEntryCount } from "@lib/api/permissions";
+import { changeMode, changeOwner, fetchEntryCount, undoChmod, undoChown } from "@lib/api/permissions";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useMutation, useQueries } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
@@ -163,7 +163,7 @@ function PermissionsPanel({
   });
 
   const apply = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<ChangeResult & { undo?: { kind: "chmod" | "chown"; activityLogId: string } }> => {
       setFailure(null);
       setOutcome(null);
 
@@ -174,7 +174,9 @@ function PermissionsPanel({
       // would turn every chmod into a chown that fails with EPERM for anyone
       // who is not root — a refusal for something nobody asked for.
       const wanted = owner.trim();
-      if (wanted === "" || wanted === startingOwner) return mode;
+      if (wanted === "" || wanted === startingOwner) {
+        return { ...mode, undo: mode.activityLogId ? { kind: "chmod", activityLogId: mode.activityLogId } : undefined };
+      }
 
       const [nextOwner, nextGroup] = wanted.split(":");
       const ownership = await changeOwner(
@@ -187,7 +189,11 @@ function PermissionsPanel({
         },
         csrfToken,
       );
-      return merge(mode, ownership);
+      // Both a chmod and a chown just ran, as two separately audited
+      // operations — "undo the change" is ambiguous between them, so neither
+      // is offered from this toast. Undo from the activity strip still
+      // reaches each one individually, by its own row (TRE-75).
+      return { ...merge(mode, ownership), undo: undefined };
     },
     onSuccess: (result) => {
       setOutcome(result);
@@ -198,10 +204,28 @@ function PermissionsPanel({
       if (result.failed > 0) return;
 
       const changedOwner = owner.trim();
+      const undo = result.undo;
       push({
         tone: "success",
         message: `${octal} · ${result.changed} ${result.changed === 1 ? "entry" : "entries"}`,
         detail: changedOwner && changedOwner !== startingOwner ? `owner ${changedOwner}` : undefined,
+        action: undo
+          ? {
+              label: "Undo",
+              title: "Restores only what this change touched — anything altered since is not affected.",
+              onClick: () => {
+                const call = undo.kind === "chmod" ? undoChmod : undoChown;
+                call(undo.activityLogId, csrfToken)
+                  .then(() => {
+                    onApplied();
+                    push({ tone: "info", message: "Reverted." });
+                  })
+                  .catch(() => {
+                    push({ tone: "danger", message: "Could not undo — it may have expired." });
+                  });
+              },
+            }
+          : undefined,
       });
       close();
     },
@@ -515,5 +539,9 @@ function merge(mode: ChangeResult, ownership: ChangeResult): ChangeResult {
     // tree and step over the same entries, so concatenating would report every
     // protected path twice for a run that changed both mode and owner.
     refused: [...new Set([...mode.refused, ...ownership.refused])],
+    // Two separate audit rows just ran; neither alone is "the" id for this
+    // merged run, so undo is not offered for it (TRE-75) — see the mutation
+    // below, which never reaches for this field.
+    activityLogId: null,
   };
 }

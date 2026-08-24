@@ -186,4 +186,9 @@ export class AuditService {
   annotationOf(request: Request): AuditAnnotation {
     return stateOf(request).annotation;
   }
+
+  /** @internal — the id `bindRow` gave this request, or null before one is bound. */
+  rowIdOf(request: Request): string | null {
+    return stateOf(request).rowId;
+  }
 }

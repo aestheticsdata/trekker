@@ -18,6 +18,8 @@ export interface Toast {
   message: string;
   /** Optional second line: the path, the count, the reason. */
   detail?: string;
+  /** A button rendered under the detail line — "Undo", and nothing else yet. */
+  action?: { label: string; onClick: () => void; title?: string };
 }
 
 interface ToastContextValue {
@@ -108,6 +110,19 @@ function ToastRow({ toast }: { toast: Toast }) {
     >
       <span className="text-xs">{toast.message}</span>
       {toast.detail && <span className="text-ink-dim font-mono text-2xs break-all">{toast.detail}</span>}
+      {toast.action && (
+        <button
+          type="button"
+          onClick={() => {
+            toast.action?.onClick();
+            dismiss(toast.id);
+          }}
+          title={toast.action.title}
+          className="text-ink hover:text-ink-muted mt-0.5 w-fit cursor-pointer font-mono text-2xs underline underline-offset-2"
+        >
+          {toast.action.label}
+        </button>
+      )}
     </output>
   );
 }

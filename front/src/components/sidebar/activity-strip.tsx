@@ -1,9 +1,12 @@
 "use client";
 
+import { useAuth } from "@auth/context/AuthContext";
+import { useToast } from "@components/ui/toast";
 import { Tooltip, TooltipBlock } from "@components/ui/tooltip";
 import { fetchActivity } from "@lib/api/activity";
+import { undoChmod, undoChown } from "@lib/api/permissions";
 import { QUERY_KEYS } from "@lib/query/keys";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { ActivityOutcome, ActivityView } from "@lib/api/activity";
 
@@ -48,6 +51,8 @@ export function ActivityStrip() {
 }
 
 function Row({ item }: { item: ActivityView }) {
+  const undoable = (item.kind === "file.chmod" || item.kind === "file.chown") && item.outcome === "success";
+
   return (
     // The row is 176px wide and its summary is a sentence, so the tooltip is not
     // a second copy of this row — it is the only place the row can be read. The
@@ -75,11 +80,47 @@ function Row({ item }: { item: ActivityView }) {
         <span className={`truncate font-sans text-xs ${item.outcome === "success" ? "text-ink-muted" : "text-ink"}`}>
           {item.summary}
         </span>
+        {undoable && <UndoButton item={item} />}
         <span className="text-ink-faint ml-auto flex-none font-mono text-caps tabular-nums">
           {since(item.createdAt)}
         </span>
       </li>
     </Tooltip>
+  );
+}
+
+/**
+ * The durable fallback for undo (TRE-75): a toast is where it is usually
+ * caught, but a dismissed one must not be the only way back, and this row
+ * survives as long as its `PermissionSnapshots` rows do (30 days).
+ */
+function UndoButton({ item }: { item: ActivityView }) {
+  const { csrfToken } = useAuth();
+  const { push } = useToast();
+  const queryClient = useQueryClient();
+
+  const undo = () => {
+    const call = item.kind === "file.chmod" ? undoChmod : undoChown;
+    call(item.id, csrfToken)
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY] });
+        push({ tone: "info", message: "Reverted." });
+      })
+      .catch(() => {
+        push({ tone: "danger", message: "Could not undo — it may have expired." });
+      });
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={undo}
+      aria-label="Undo"
+      title="Undo — restores only what this change touched, not anything altered since."
+      className="text-ink-faint hover:text-ink-muted flex-none cursor-pointer font-mono text-2xs"
+    >
+      ↺
+    </button>
   );
 }
 
