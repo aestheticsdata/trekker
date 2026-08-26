@@ -179,6 +179,17 @@ never be equal — see [Two keys, never one](#two-keys-never-one).
 `FRONTEND_URL` is the real subdomain, not a placeholder — it is what the API
 allows as an origin.
 
+`COOKIE_SECURE` stays out of the file on any normal install. Production defaults
+to a `Secure` session cookie, which is what an HTTPS subdomain wants, and this
+variable exists for the one case where the instance is fronted by plain HTTP:
+the browser drops a `Secure` cookie there, so every sign-in answers 200, no
+session sticks, and nothing in the API log says anything was wrong. Set
+`COOKIE_SECURE: "false"` then, and only then — in **your workstation's**
+`nest-api/ecosystem.config.js`, because the deploy uploads that file over the
+server's copy and an edit made on the box is reverted by the next deploy. A
+value that is neither `"true"` nor `"false"` refuses the boot and names the
+variable.
+
 ### 7. Deploy, API first
 
 The front's health panel expects the API to answer:

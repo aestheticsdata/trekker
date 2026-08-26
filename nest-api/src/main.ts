@@ -23,6 +23,13 @@ async function bootstrap() {
   // the whole internet as one client, and a Secure cookie is never set.
   (app.getHttpAdapter().getInstance() as Application).set("trust proxy", 1);
 
+  // Secure in production, unless the environment says otherwise. A browser drops a `Secure` cookie
+  // over plain HTTP, so an install fronted by a plain-HTTP proxy answers every sign-in 200 and keeps
+  // no session, with nothing in the log to read. Hardwired, the only lever was un-setting
+  // NODE_ENV=production, which changes far more than one cookie. The same escape hatch, and the same
+  // line, the sibling apps carry (TRE-91).
+  const cookieSecure = process.env.COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production";
+
   app.use(
     session({
       name: SESSION_COOKIE_NAME,
@@ -40,7 +47,7 @@ async function bootstrap() {
       proxy: true,
       cookie: {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: cookieSecure,
         sameSite: "lax",
         maxAge: SESSION_TTL_SECONDS * 1000,
       },
@@ -65,8 +72,8 @@ async function bootstrap() {
     const userAgent = (req.headers["user-agent"] ?? "unknown").slice(0, 60);
     const line = formatRouteLog(req.method, url, "Nest", { ip, userAgent });
 
-    // Zeus probes /api/health on a loop, forever, and one line per probe buries every other route
-    // in the pm2 log. So the health line is not written on the way in like the rest — it is held
+    // A sibling app probes /api/health on a loop, forever, and one line per probe buries every other
+    // route in the pm2 log. So the health line is not written on the way in like the rest — it is held
     // until the response is done and written only if the probe did not succeed (IKN-32).
     //
     // Held rather than dropped, and that is the whole point: a probe that fails is the only thing

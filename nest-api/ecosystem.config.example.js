@@ -85,6 +85,13 @@ const prodEnv = {
   // SSH keys is not a feature (TRE-7).
   SIGNUPS_ENABLED: "false",
 
+  // Leave this out on any normal install: production defaults to a Secure
+  // session cookie, which is what an HTTPS subdomain wants. Set it to "false"
+  // only where this instance is fronted by plain HTTP — a browser drops a Secure
+  // cookie there, so every sign-in answers 200 and no session sticks (TRE-91).
+  // Anything other than "true" or "false" refuses the boot, by name.
+  // COOKIE_SECURE: "false",
+
   // Decrypts every stored SSH credential (TRE-8). Generate ON THE SERVER:
   //   node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))"
   // The directory holding it must stay denylisted (TRE-11), otherwise a

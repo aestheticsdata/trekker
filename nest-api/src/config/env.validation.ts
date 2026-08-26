@@ -66,6 +66,26 @@ class EnvironmentVariables {
    */
   @IsIn(["true", "false"], { message: 'SIGNUPS_ENABLED must be "true" or "false"' })
   SIGNUPS_ENABLED!: string;
+
+  /**
+   * Optional. Unset — the normal case — means a Secure session cookie in
+   * production, which is what any HTTPS install wants. "false" is the escape
+   * hatch for an install fronted by plain HTTP, where the browser would drop the
+   * cookie and no sign-in would ever stick (TRE-91).
+   *
+   * Declared because the failure it prevents is one-sided. `main.ts` compares
+   * against the literal "false", so a value meant as "false" but spelled "False"
+   * leaves the cookie Secure, no session sticks, and the config reads as though
+   * it had been set. Validated, that is a boot failure naming the variable.
+   *
+   * Declared where the tuning knobs in `ecosystem.config.example.js` are not,
+   * and the difference is the point: those move a number, this one moves a
+   * security property, and a wrong value here is invisible from the outside.
+   * Same shape as HOST above — checked when set, never required.
+   */
+  @IsOptional()
+  @IsIn(["true", "false"], { message: 'COOKIE_SECURE, when set, must be "true" or "false"' })
+  COOKIE_SECURE?: string;
 }
 
 export function validate(config: Record<string, unknown>): EnvironmentVariables {
