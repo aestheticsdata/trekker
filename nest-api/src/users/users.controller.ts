@@ -88,12 +88,10 @@ export class UsersController {
   async signIn(@Body() dto: SignInDto, @Req() req: Request): Promise<SignInResponse & { csrfToken: string }> {
     const result = await this.usersService.signIn(dto.email, dto.password, clientIp(req));
 
-    // Before adopting the new session, not after: one live session per account,
-    // and a stolen cookie stops working the moment the owner signs in again.
-    await this.redisService.clearSessionsForUser(result.user.id);
-    (req.session as { userId?: string }).userId = result.user.id;
-
-    return { ...result, csrfToken: rotateCsrfToken(req) };
+    // What this used to do inline was write the account's id onto whatever
+    // session the request arrived on, which is the whole of the fixation hole
+    // (TRE-92). `establishSession` holds the order and the reason for each step.
+    return { ...result, csrfToken: await this.establishSession(req, result.user.id) };
   }
 
   @Post("add")
@@ -109,18 +107,28 @@ export class UsersController {
     @Req() req: Request,
   ): Promise<SignInResponse & { csrfToken: string; recoveryPassphrase: string }> {
     const result = await this.usersService.addUser(dto);
-    await this.redisService.clearSessionsForUser(result.user.id);
-    (req.session as { userId?: string }).userId = result.user.id;
+
+    // The same sequence sign-in runs, for the same reason: this route opens a
+    // session too, so a cookie planted on the registration screen would
+    // otherwise be inherited by the account it creates (TRE-92).
+    const csrfToken = await this.establishSession(req, result.user.id);
 
     // recoveryPassphrase is returned exactly here and nowhere else. There is no
     // endpoint to read it back — only the hash is kept.
-    return { ...result, csrfToken: rotateCsrfToken(req) };
+    return { ...result, csrfToken };
   }
 
   /**
    * Public: someone who needs recovery cannot sign in, so there is no session
    * and no CSRF token to present. The throttle in the service is what protects
    * this route.
+   *
+   * No `regenerate` here, unlike sign-in and registration (TRE-92). This route
+   * grants no identity, so there is none to fixate onto, and the service has
+   * already destroyed every session the account held — this request's included,
+   * if it happened to carry one. Nothing in the handler writes to the session,
+   * so the swept record is not written back on the way out. Regenerating would
+   * mint an anonymous session id for a response whose whole content is `ok`.
    */
   @Post("recover")
   @HttpCode(HttpStatus.OK)
@@ -186,11 +194,86 @@ export class UsersController {
       });
     });
   }
+
+  /**
+   * Everything that has to happen before a request may call itself signed in
+   * (TRE-92), in the one order that is safe. Shared by the two routes that open
+   * a session: sign-in and registration.
+   *
+   * 1. **Every session the account holds is destroyed.** One live session per
+   *    account, and a stolen cookie stops working the moment the owner signs in
+   *    again. The sweep matches on `userId`, so it cannot reach the session
+   *    being established here: that one carries no id yet, and is not in Redis
+   *    until this response ends.
+   *
+   *    First rather than last, and neither order is free. Sweeping first means
+   *    a `regenerate` that then fails has already ended the account's other
+   *    sessions and still answers 500. Sweeping after means a `regenerate` that
+   *    fails skips the sweep altogether, and "one live session per account"
+   *    quietly did not happen. The second is the one that fails silently, so it
+   *    is the one not chosen.
+   *
+   * 2. **This session's sudo windows are dropped**, read off the id it still
+   *    has. Windows are keyed by `sessionID` (TRE-29) and step 3 changes it, so
+   *    a window left open here is a root password held in memory with nothing
+   *    able to reach it. Only this session's, necessarily — `dropSession` takes
+   *    one session id, and step 1 has just destroyed the account's sessions on
+   *    other devices, whose windows this cannot see. That gap is older than this
+   *    method and outlives it; closing it needs a userId index in `SudoService`.
+   *
+   * 3. **The session id is regenerated.** The fixation fix, and the reason this
+   *    method exists: without it, a cookie planted in the visitor's browser —
+   *    one already resolving to a live session — is written to rather than
+   *    replaced, and whoever planted it keeps a working handle on the account.
+   *    Step 1 never covered that case, because at sweep time the planted record
+   *    still carries somebody else's `userId`.
+   *
+   * 4. **The identity and a fresh token go on the new object.** `regenerate`
+   *    replaces `req.session` wholesale, so anything written before it is on the
+   *    object it discarded. Both of these read `req.session` when called, which
+   *    is what makes the order below the only one that works.
+   */
+  private async establishSession(req: Request, userId: string): Promise<string> {
+    await this.redisService.clearSessionsForUser(userId);
+    this.sudo.dropSession(req.sessionID);
+
+    try {
+      await regenerateSession(req);
+    } catch (error) {
+      // `regenerate` mints the replacement before it reports the failure, so a
+      // rejection leaves an empty session behind that would otherwise be saved
+      // and cookied on the way out with the 500. Nothing here is worth
+      // remembering, so nothing is kept. The destroy's own failure is not worth
+      // reporting over the one already on its way up.
+      await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
+      throw error;
+    }
+
+    (req.session as { userId?: string }).userId = userId;
+    return rotateCsrfToken(req);
+  }
 }
 
 /** Behind nginx, req.ip is the proxy unless `trust proxy` is set — it is. */
 function clientIp(req: Request): string {
   return req.ip ?? req.socket?.remoteAddress ?? "unknown";
+}
+
+/**
+ * Promise wrapper around express-session's callback API — the same shape
+ * `logout` wraps `destroy` in, and what the sibling apps that already regenerate
+ * use. The error is normalised because express-session types it as `any`.
+ */
+function regenerateSession(req: Request): Promise<void> {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((error) => {
+      if (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 /** "1 sudo window", "2 sudo windows" — the same helper the fs routes use. */

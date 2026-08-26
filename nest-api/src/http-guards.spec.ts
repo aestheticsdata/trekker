@@ -1075,6 +1075,52 @@ describe("one live session per account", () => {
 });
 
 describe("sign-in", () => {
+  it("mints a new session id, so a cookie planted beforehand is dead after", async () => {
+    // The attack this closes: a cookie that already resolves to a live session
+    // is planted in the victim's browser, and the victim signs in on it. The
+    // handler used to write the victim's id onto that very session, and whoever
+    // planted it kept a working handle on the account. Clearing the account's
+    // other sessions never touched it — the sweep matches on `userId`, and at
+    // that moment the planted record still carried somebody else's.
+    const planted = await signIn(BOB);
+
+    const signedIn = await request(server as never)
+      .post("/api/users")
+      .set("Cookie", planted.cookie)
+      .send({ email: ALICE, password: PASSWORD })
+      .expect(200);
+
+    expect(cookieOf(signedIn)).not.toBe(planted.cookie);
+    await request(server as never)
+      .get("/api/users/me")
+      .set("Cookie", planted.cookie)
+      .expect(401);
+
+    const me = await request(server as never)
+      .get("/api/users/me")
+      .set("Cookie", cookieOf(signedIn))
+      .expect(200);
+    expect((body(me).user as { id: string }).id).toBe("user-alice");
+  });
+
+  it("hands back a token belonging to the session it hands back with it", async () => {
+    // The trap `regenerate` sets: written before it, the token lands on the
+    // object it discards, and the response then names a token the new session
+    // never held. Here to hold that ordering rather than to have failed first.
+    const first = await signIn(ALICE);
+    const second = await request(server as never)
+      .post("/api/users")
+      .set("Cookie", first.cookie)
+      .send({ email: ALICE, password: PASSWORD })
+      .expect(200);
+
+    const fetched = await request(server as never)
+      .get("/api/users/csrf")
+      .set("Cookie", cookieOf(second))
+      .expect(200);
+    expect(body(fetched).csrfToken).toBe(body(second).csrfToken);
+  });
+
   it("refuses a wrong password without saying which half was wrong", async () => {
     const wrongPassword = await request(server as never)
       .post("/api/users")
@@ -1156,6 +1202,25 @@ describe("registration", () => {
     // account, and registration must not hand the install away to whoever
     // signs up second (TRE-48).
     expect(body(response).user).toMatchObject({ role: "MEMBER" });
+  });
+
+  it("opens the new account's session on a fresh id, never the caller's", async () => {
+    // Registration opens a session, so it carries sign-in's exposure exactly
+    // and closes it the same way (TRE-92).
+    process.env.SIGNUPS_ENABLED = "true";
+    const planted = await signIn(BOB);
+
+    const created = await request(server as never)
+      .post("/api/users/add")
+      .set("Cookie", planted.cookie)
+      .send({ email: "new@example.test", password: PASSWORD })
+      .expect(201);
+
+    expect(cookieOf(created)).not.toBe(planted.cookie);
+    await request(server as never)
+      .get("/api/users/me")
+      .set("Cookie", planted.cookie)
+      .expect(401);
   });
 
   it("never lets the screen and the guard disagree", async () => {
