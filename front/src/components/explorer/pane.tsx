@@ -953,33 +953,27 @@ function EmptyState({
  * No 429 arm: a refused path answers 403 however many times it is asked for,
  * so there is no "come back in a minute" state for a listing to be in (TRE-50).
  *
- * The 401 arm is the one nobody should read for long: the app is already on its
- * way to the login screen by the time it renders (TRE-63). It exists because
- * "already leaving" still takes a frame, and a frame is enough to blame the
- * listing for something the session did.
+ * No 401 arm either: a session that has ended never reaches here at all. The
+ * API client redirects on it and leaves its promise pending, so the query this
+ * would render for simply never settles (TRE-88).
  */
 function ErrorState({ error, onUp }: { error: unknown; onUp: () => void }) {
   const status = error instanceof ApiError ? error.status : 0;
   const message = error instanceof Error ? error.message : "The listing could not be loaded.";
 
   const title =
-    status === 401
-      ? "session expired"
-      : status === 403
-        ? "permission denied"
-        : status === 404
-          ? "no such directory"
-          : status === 502
-            ? "host unreachable"
-            : "listing failed";
+    status === 403
+      ? "permission denied"
+      : status === 404
+        ? "no such directory"
+        : status === 502
+          ? "host unreachable"
+          : "listing failed";
 
   return (
     <Placeholder
       title={title}
-      // Written rather than quoted, unlike every other arm: the guard's own
-      // words here are "Session required", which is addressed to a caller and
-      // not to a person.
-      detail={status === 401 ? "Returning you to the sign-in screen." : message}
+      detail={message}
       onUp={onUp}
     />
   );

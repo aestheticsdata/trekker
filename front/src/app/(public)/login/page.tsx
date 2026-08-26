@@ -1,14 +1,12 @@
 "use client";
 
 import useCredentials from "@auth/helpers/useCredentials";
-import { SESSION_EXPIRED_PARAM } from "@auth/paths";
-import { AuthCard, AuthLinks, AuthNotice } from "@components/auth/auth-card";
+import { AuthCard, AuthLinks } from "@components/auth/auth-card";
 import { AuthField } from "@components/auth/auth-field";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ApiError } from "@lib/api/client";
 import { signIn } from "@lib/api/users";
 import { signInSchema } from "@schemas/auth";
-import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 
@@ -19,11 +17,6 @@ export default function LoginPage() {
   const { setCredentials } = useCredentials();
   const [status, setStatus] = useState<AuthStatus>("IDLE");
   const [failure, setFailure] = useState<string | null>(null);
-
-  // Arriving here is not the same as being sent here (TRE-63). Someone whose
-  // session ended under a closed lid needs to be told that is what happened,
-  // or a login screen where an explorer used to be reads as a crash.
-  const expired = useSearchParams().has(SESSION_EXPIRED_PARAM);
 
   const {
     register,
@@ -56,13 +49,6 @@ export default function LoginPage() {
       subtitle="Sign in"
       status={status}
       failure={failure}
-      notice={
-        expired ? (
-          <AuthNotice tone="warning">
-            Your session expired. Sign in again — the explorer reopens where you left it.
-          </AuthNotice>
-        ) : undefined
-      }
       footer={
         <AuthLinks
           links={[

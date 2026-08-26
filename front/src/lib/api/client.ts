@@ -6,6 +6,8 @@
  * is correct. Next inlines NODE_ENV at build time, so there is nothing to
  * configure and no env file on this side.
  */
+import { LOGIN_PATH } from "@auth/paths";
+
 export const API_ORIGIN = process.env.NODE_ENV === "production" ? "" : "http://localhost:6800";
 
 /** The header Trekker's CsrfGuard reads (nest-api/src/users/csrf-token.util.ts). */
@@ -66,36 +68,30 @@ export interface RequestOptions {
 }
 
 /**
- * The one refusal no caller can answer (TRE-63).
+ * Sends the operator to the login screen when the session is gone (TRE-88).
  *
- * Every other failure belongs to whoever asked: a 403 is a permission the pane
- * names, a 502 is a host it names, and both leave the reader somewhere they can
- * act. A 401 is not about the request at all — the session ended — and the only
- * useful answer is to leave for the login screen, which no individual call site
- * is in a position to do.
+ * The same function the sibling apps carry, in the same place: inside the one
+ * door every request goes through, where the 401 is first known. Returns `true`
+ * when it navigated — the caller then leaves its promise pending, so the
+ * refusal never becomes a React Query error on a page that is already being
+ * replaced. Returns `false` when it cannot or should not navigate (a server
+ * render, or the login screen already being what is on screen), and the caller
+ * throws normally instead of hanging for ever.
  *
- * Announced from here rather than from a React Query cache handler because not
- * every call is a query: `saveLastLayout` is fire and forget and would never
- * reach one. This is the single door all of them go through, query or not, and
- * it is the earliest point at which the status is known — before any retry
- * policy, and before the caller has decided what to say about its own failure.
- *
- * One slot rather than a set: there is exactly one subscriber by construction
- * (see auth/session-expiry.tsx), and a set would quietly allow a second, which
- * means a second redirect. Unsubscribing compares identity so that React's
- * StrictMode remount — subscribe, clean up, subscribe again — ends subscribed
- * rather than cleared.
+ * The navigation is a hard one, and that is the whole mechanism: it discards
+ * the auth context, the query cache and this React tree, and re-runs the server
+ * guard in `app/(private)/layout.tsx`. Nothing is left to be cleaned up by
+ * hand, which is why there is no subscription here and no marker on the way
+ * out. The trailing-slash strip is there because a path can arrive as
+ * `/login/`.
  */
-type UnauthorizedListener = () => void;
+function redirectToLogin(): boolean {
+  if (typeof window === "undefined") return false;
 
-let unauthorizedListener: UnauthorizedListener | null = null;
+  if (window.location.pathname.replace(/\/$/, "") === LOGIN_PATH) return false;
 
-export function onUnauthorized(listener: UnauthorizedListener): () => void {
-  unauthorizedListener = listener;
-
-  return () => {
-    if (unauthorizedListener === listener) unauthorizedListener = null;
-  };
+  window.location.replace(LOGIN_PATH);
+  return true;
 }
 
 export async function apiRequest(path: string, options: RequestOptions = {}): Promise<unknown> {
@@ -119,13 +115,16 @@ export async function apiRequest(path: string, options: RequestOptions = {}): Pr
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
 
+  // Ahead of reading the body, which nothing downstream will get to look at:
+  // the navigation is already under way and this promise never settles, so the
+  // 401 reaches neither a caller's catch nor an error boundary.
+  if (response.status === 401 && !options.credentialCheck && redirectToLogin()) {
+    return new Promise<never>(() => {});
+  }
+
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
-    // Announced before the throw, so the app starts leaving while the caller is
-    // still deciding what to say about its own failed request.
-    if (response.status === 401 && !options.credentialCheck) unauthorizedListener?.();
-
     throw new ApiError(
       response.status,
       messageFrom(payload) ?? `Request failed with ${response.status}`,
