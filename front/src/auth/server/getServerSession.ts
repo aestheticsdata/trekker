@@ -11,8 +11,10 @@ import type { AuthResponse } from "@auth/interfaces/authTypes";
  * in Redis and only the API can say whether it is still valid, so a cookie
  * kept after a sign-out elsewhere does not buy a rendered app.
  *
- * `cache` is React's per-request memo, so the root layout and the private
- * layout asking in the same render cost one call rather than two.
+ * `cache` is React's per-request memo. Since TRE-89 only one layout asks per
+ * render — the seed moved out of the root layout and into the group layouts,
+ * and no route passes through both — so it is a guarantee rather than a saving
+ * now: whatever asks second in the same render is free.
  */
 export const getServerSession = cache(async (): Promise<AuthResponse | null> => {
   const cookieStore = await cookies();

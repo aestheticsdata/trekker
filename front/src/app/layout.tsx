@@ -1,6 +1,5 @@
 import "@styles/globals.css";
 import Providers from "@app/providers";
-import { getServerSession } from "@auth/server/getServerSession";
 import { UI_BASE_SCRIPT } from "@helpers/ui-scale";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 
@@ -39,13 +38,23 @@ export const viewport: Viewport = {
   themeColor: "#0c2a44",
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // Resolved on the server so the app renders already knowing who is signed in.
-  // Anonymous visitors cost nothing here: with no cookie this returns without
-  // a round trip. Memoised per request, so the private layout's own check
-  // below does not ask twice.
-  const session = await getServerSession();
-
+/**
+ * The document, and nothing in it that can fail (TRE-89).
+ *
+ * The session used to be resolved here and handed down through `Providers`,
+ * which put the whole app — the login screen included — behind one API round
+ * trip. When the API was unreachable `getServerSession` threw in this layout,
+ * and a throw in a layout is not caught by the `error.tsx` beside it: that
+ * boundary is placed *inside* this file, around `children`, so it covers
+ * everything below and nothing here. There was nothing above it either, so an
+ * outage took out the one screen an operator reaches for during an outage.
+ *
+ * The seed sits in the two group layouts now, where the sibling apps keep it.
+ * `(private)` already had to ask in order to guard, so it hands down the answer
+ * it guarded on; `(public)` asks nothing at all, which is what makes the login
+ * screen reachable while the API is down — by structure rather than by a catch.
+ */
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
@@ -58,12 +67,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: a literal string built in our own module from two integer constants, with no input from anywhere */}
         <script dangerouslySetInnerHTML={{ __html: UI_BASE_SCRIPT }} />
 
-        <Providers
-          initialUser={session?.user ?? null}
-          initialCsrfToken={session?.csrfToken ?? null}
-        >
-          {children}
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

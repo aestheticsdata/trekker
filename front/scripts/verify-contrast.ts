@@ -543,7 +543,11 @@ const ROOMS: readonly Room[] = [
   { file: "app/(public)/login/page.tsx", boxes: [{ on: [APP], inks: ["ink"] }] },
   { file: "app/(public)/recover/page.tsx", boxes: [{ on: [APP], inks: ["ink", "ink-muted"] }] },
   { file: "app/(public)/signup/page.tsx", boxes: [{ on: [APP], inks: ["ink"] }] },
-  { file: "app/error.tsx", boxes: [{ on: [APP], inks: ["ink", "ink-dim"] }] },
+  { file: "app/error.tsx", boxes: [{ on: [APP], inks: ["ink", "ink-dim", "ink-faint"] }] },
+  {
+    file: "app/global-error.tsx",
+    boxes: [{ on: [APP], inks: ["ink", "ink-dim", "ink-faint"], note: "the backstop, which paints its own document" }],
+  },
   { file: "app/layout.tsx", boxes: [{ on: [APP], inks: ["ink"] }] },
 
   {
