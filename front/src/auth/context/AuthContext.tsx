@@ -41,6 +41,16 @@ export const AuthProvider = ({ children, initialUser = null, initialCsrfToken = 
     setCsrfToken(nextCsrfToken);
   };
 
+  /**
+   * Nothing calls this, and that is the design rather than an omission (TRE-90).
+   *
+   * Both ways out of a session leave by a hard navigation — the 401 caught in
+   * `lib/api/client.ts`, and the account menu's sign-out — and that navigation
+   * takes this provider down with the document. Emptying it first would only
+   * repaint the explorer with a null account for one frame before the browser
+   * leaves. It stays because this context's shape is shared with the rest of
+   * the fleet, not because a caller is expected.
+   */
   const clearAuth = () => {
     setUser(null);
     setCsrfToken(null);

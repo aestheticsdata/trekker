@@ -708,6 +708,10 @@ const ROOMS: readonly Room[] = [
     ],
   },
 
+  {
+    file: "components/shell/account-menu.tsx",
+    boxes: [{ on: [CHROME_BG, RAISED], inks: ["ink-muted"], note: "the account chip, which raises under the pointer" }],
+  },
   { file: "components/shell/app-shell.tsx", boxes: [{ on: [APP], inks: ["ink", "ink-faint", "ink-muted"] }] },
   { file: "components/shell/disk-usage.tsx", boxes: [{ on: [STRIP], inks: ["ink"], note: "the rescan control under the pointer; the rest of the strip is declared in `disks.ts`" }] },
   { file: "components/shell/palette.tsx", boxes: [{ on: [STRIP], inks: ["ink-faint"], note: "the input's placeholder; the rest of the panel is declared in `palette.ts`" }] },

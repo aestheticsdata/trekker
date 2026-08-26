@@ -25,6 +25,7 @@ export function AppShell({
   stats = null,
   views,
   sudo,
+  account,
   selection = null,
   clipboard = null,
   onClearClipboard,
@@ -52,6 +53,8 @@ export function AppShell({
   views?: ReactNode;
   /** The top bar's sudo badge for the active host (TRE-29), passed straight through. */
   sudo?: ReactNode;
+  /** The top bar's account chip and its menu (TRE-90), passed straight through. */
+  account?: ReactNode;
   selection?: SelectionSummary | null;
   /** What the clipboard is holding (TRE-71 §3), passed straight to the status bar. */
   clipboard?: string | null;
@@ -108,6 +111,7 @@ export function AppShell({
               stats={stats}
               views={views}
               sudo={sudo}
+              account={account}
               onOpenPalette={onOpenPalette}
             />
             <Toolbar

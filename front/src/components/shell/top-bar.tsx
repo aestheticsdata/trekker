@@ -38,6 +38,7 @@ export function TopBar({
   stats,
   views,
   sudo,
+  account,
   onOpenPalette,
 }: {
   host: HostChip | null;
@@ -62,6 +63,16 @@ export function TopBar({
    * it is.
    */
   sudo?: ReactNode;
+  /**
+   * The account chip and the menu it opens (TRE-90).
+   *
+   * A slot for the reason `views` and `sudo` are slots: this file is
+   * presentational, and the chip reads the auth context, raises toasts and owns
+   * a floating panel. Handing it in as a node keeps all of that out of the one
+   * bar that is on screen at all times — and keeps the rule beside it with the
+   * chip, so the two cannot come apart.
+   */
+  account?: ReactNode;
   onOpenPalette?: () => void;
 }) {
   return (
@@ -178,6 +189,8 @@ export function TopBar({
       >
         {hintFor("palette")}
       </button>
+
+      {account}
     </header>
   );
 }

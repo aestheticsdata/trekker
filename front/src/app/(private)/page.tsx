@@ -2,6 +2,7 @@
 
 import { Explorer } from "@components/explorer/explorer";
 import { SudoBadge } from "@components/hosts/sudo-badge";
+import { AccountMenu } from "@components/shell/account-menu";
 import { isRule, resolveActions } from "@components/shell/actions";
 import { AppShell } from "@components/shell/app-shell";
 import { DiskUsage } from "@components/shell/disk-usage";
@@ -109,6 +110,15 @@ export default function HomePage() {
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   /** Which view's menu is open and where, or null for none. */
   const [viewMenu, setViewMenu] = useState<{ id: string; point: Point } | null>(null);
+  /**
+   * Whether the account menu is showing (TRE-90).
+   *
+   * Held here rather than inside the chip because the explorer's keyboard layer
+   * is what has to know: `overlayOpen` gates every shortcut, the terminal chord
+   * and the view chords, and a floating panel that did not stand them down
+   * would take ⌫ and ⌘X while it was the thing on screen.
+   */
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   /**
    * The save form: null when closed, `{ id: null }` when saving what is on
    * screen, `{ id }` when editing one that exists. A shape rather than two
@@ -406,6 +416,10 @@ export default function HomePage() {
       // badge that followed anything else would be reporting on a machine the
       // reader is not looking at (TRE-29).
       sudo={activeHost ? <SudoBadge host={activeHost} /> : null}
+      // Unconditional, unlike the two slots above it: the host chip and its
+      // sudo badge describe a machine a pane may not be bound to, and this
+      // describes the session, which always exists in here (TRE-90).
+      account={<AccountMenu onOpenChange={setAccountMenuOpen} />}
       selection={selection ? summarise(selection) : null}
       clipboard={clipboard}
       onClearClipboard={() => setClearClipboardRequested(true)}
@@ -511,7 +525,7 @@ export default function HomePage() {
         onPaletteOpenChange={setPaletteOpen}
         paletteQuery={paletteQuery}
         savedViews={savedViews}
-        viewOverlayOpen={viewForm !== null || viewRebindId !== null || viewMenu !== null}
+        viewOverlayOpen={viewForm !== null || viewRebindId !== null || viewMenu !== null || accountMenuOpen}
         onRestoreView={restoreView}
         onSaveView={() => setViewForm({ id: null })}
         onClipboardChange={setClipboard}
