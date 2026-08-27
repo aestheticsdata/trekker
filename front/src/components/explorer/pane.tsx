@@ -5,13 +5,25 @@ import { useRowWindow } from "@components/explorer/row-window";
 import { TailStrip } from "@components/explorer/tail-strip";
 import { Tooltip } from "@components/ui/tooltip";
 import { ageIndex, HEAT, HEAT_OFF_BAR, HEAT_OFF_INK } from "@helpers/heat";
-import { ageDays, breadcrumbs, formatAge, formatInstant, formatSize, formatTotal, typeTag } from "@helpers/listing";
+import {
+  ageDays,
+  breadcrumbs,
+  formatAge,
+  formatInstant,
+  formatPartialTotal,
+  formatSize,
+  formatTotal,
+  partialTotalHint,
+  spinnerFrame,
+  typeTag,
+} from "@helpers/listing";
 import { PRESS } from "@helpers/press";
 import { isLogDirectory } from "@helpers/tail";
 import { ApiError } from "@lib/api/client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { PaneView } from "@components/explorer/pane-state";
+import type { DirSize, DirSizes } from "@components/explorer/use-dir-sizes";
 import type { Crumb, SortKey } from "@helpers/listing";
 import type { DiskMount } from "@lib/api/disks";
 import type { FileRow, ListMeta } from "@lib/api/fs";
@@ -81,6 +93,7 @@ export function Pane({
   active,
   host,
   rows,
+  sizes,
   meta,
   loading,
   error,
@@ -98,6 +111,12 @@ export function Pane({
   host: HostView | null;
   /** Already filtered and sorted by the explorer. */
   rows: readonly FileRow[];
+  /**
+   * What is known about the directories' contents, and whether more is coming
+   * (TRE-107). The figures themselves are already on the rows — this is what a
+   * row with no figure needs in order to say *why*: still walking, or refused.
+   */
+  sizes: DirSizes;
   meta: ListMeta | null;
   loading: boolean;
   error: unknown;
@@ -165,12 +184,23 @@ export function Pane({
     cursor: active ? cursorIndex : -1,
   });
 
-  const selectedBytes = rows.reduce((sum, row) => (selected.has(row.name) ? sum + row.size : sum), 0);
+  // A row whose size is not known is left out of every total and every scale
+  // rather than counted as zero (TRE-107). Counted as zero it would drag a
+  // footer total downwards silently; left out, the total is over a smaller set
+  // and says so.
+  const selectedBytes = rows.reduce((sum, row) => (selected.has(row.name) ? sum + (row.size ?? 0) : sum), 0);
   const directories = rows.reduce((count, row) => (row.type === "dir" ? count + 1 : count), 0);
-  const largest = rows.reduce((max, row) => Math.max(max, row.size), 0);
+  const largest = rows.reduce((max, row) => Math.max(max, row.size ?? 0), 0);
   // Totalled over the rows on screen, not the whole directory: a count and a
   // size sitting on the same line must describe the same set of files.
-  const shownBytes = rows.reduce((sum, row) => sum + row.size, 0);
+  const shownBytes = rows.reduce((sum, row) => sum + (row.size ?? 0), 0);
+  const unknownShown = rows.reduce((count, row) => (row.size === null ? count + 1 : count), 0);
+
+  // One ticker for the whole listing, so every pending row turns in step. A
+  // timer per row would be forty of them on a full window, all drifting apart,
+  // and a table of independently-spinning dashes reads as a fault rather than
+  // as work in progress.
+  const tick = useSpinnerTick(sizes.walking && unknownShown > 0);
 
   /** Whether files are being dragged over this pane right now (TRE-65). */
   const [dropping, setDropping] = useState(false);
@@ -242,6 +272,7 @@ export function Pane({
         meta={meta}
         volume={volume}
         shownBytes={shownBytes}
+        unknownShown={unknownShown}
         callbacks={callbacks}
         onMenu={openMenu}
       />
@@ -358,6 +389,9 @@ export function Pane({
                     cursor={active && pane.cur === row.name}
                     paneActive={active}
                     largest={largest}
+                    size={sizes.known.get(row.name) ?? null}
+                    walking={sizes.walking}
+                    tick={tick}
                     heat={heat}
                     now={now}
                     onClick={callbacks.onRowClick}
@@ -493,6 +527,7 @@ function PathRow({
   meta,
   volume,
   shownBytes,
+  unknownShown,
   callbacks,
   onMenu,
 }: {
@@ -503,10 +538,11 @@ function PathRow({
   meta: ListMeta | null;
   volume: DiskMount | null;
   shownBytes: number;
+  unknownShown: number;
   callbacks: PaneCallbacks;
   onMenu: (event: React.MouseEvent) => void;
 }) {
-  const badge = badgeFor(meta, volume, shownBytes);
+  const badge = badgeFor(meta, volume, shownBytes, unknownShown);
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: see the listing's own note — the keyboard route is in the explorer
@@ -616,6 +652,8 @@ function badgeFor(
   meta: ListMeta | null,
   volume: DiskMount | null,
   shownBytes: number,
+  /** Rows on screen whose size is not known yet, which makes the total a floor. */
+  unknownShown: number,
 ): { label: string; hint?: string; alarming: boolean } | null {
   if (meta?.truncated) {
     return {
@@ -633,7 +671,17 @@ function badgeFor(
     };
   }
 
-  return meta ? { label: `${formatTotal(shownBytes)} total`, alarming: false } : null;
+  if (!meta) return null;
+
+  // `≥` while directories are still being walked, and it disappears when the
+  // last one lands. The alternative was a total that is quietly short for a few
+  // seconds and then silently grows, which is how the old 4 kB directory got
+  // away with it for as long as it did.
+  return {
+    label: `${formatPartialTotal(shownBytes, unknownShown)} total`,
+    hint: partialTotalHint(unknownShown),
+    alarming: false,
+  };
 }
 
 function NavButton({
@@ -746,6 +794,9 @@ function Row({
   cursor,
   paneActive,
   largest,
+  size,
+  walking,
+  tick,
   heat,
   now,
   onClick,
@@ -758,6 +809,12 @@ function Row({
   cursor: boolean;
   paneActive: boolean;
   largest: number;
+  /** What is known about this directory's contents, or null for nothing yet. */
+  size: DirSize | null;
+  /** Whether the feed is still running, which is what tells pending from ended. */
+  walking: boolean;
+  /** The pane's shared spinner frame. */
+  tick: number;
   heat: boolean;
   now: number;
   onClick: PaneCallbacks["onRowClick"];
@@ -770,7 +827,10 @@ function Row({
   // answers is "which of *these* is big", so the scale is the largest row in
   // the listing rather than anything absolute. Two percent minimum, or a small
   // file in a directory holding one huge one draws nothing at all.
-  const share = largest > 0 ? Math.max(2, Math.round((row.size / largest) * 100)) : 2;
+  // A row with no size yet draws the minimum rather than a share of nothing:
+  // the bar is the one column that cannot say "unknown", so it says "nothing to
+  // compare yet" and grows when the figure lands.
+  const share = largest > 0 && row.size !== null ? Math.max(2, Math.round((row.size / largest) * 100)) : 2;
   const chip = heat ? paint.chip : null;
 
   return (
@@ -821,7 +881,14 @@ function Row({
         />
       </span>
 
-      <span className="text-on-pane-data text-right">{formatSize(row.size, row.type)}</span>
+      <span className="text-on-pane-data text-right">
+        <SizeCell
+          row={row}
+          size={size}
+          walking={walking}
+          tick={tick}
+        />
+      </span>
       <span className="text-on-pane-muted">{row.mode}</span>
       <span className={`truncate ${row.ownerResolved ? "text-on-pane-muted" : "text-on-pane-faint"}`}>{row.owner}</span>
 
@@ -838,6 +905,102 @@ function Row({
     </div>
   );
 }
+
+/**
+ * The size column for one row, in whichever of its states it is (TRE-107).
+ *
+ * Only a directory has more than one. A file has bytes and a symlink has a
+ * dash, both of which `formatSize` already knows; a directory can additionally
+ * be *being measured* or *unmeasurable*, and the two must not look alike. A
+ * spinner that never stops is the worst possible rendering of "permission
+ * denied", because it invites waiting for something that is not coming.
+ */
+function SizeCell({
+  row,
+  size,
+  walking,
+  tick,
+}: {
+  row: FileRow;
+  size: DirSize | null;
+  walking: boolean;
+  tick: number;
+}) {
+  if (row.type !== "dir") return formatSize(row.size, row.type);
+
+  if (row.size !== null) {
+    // `du` walked what it could reach and was refused below. The figure is a
+    // floor, and printing it bare would be a claim the walk did not make.
+    return size?.partial === true ? (
+      <span title="Part of this directory could not be read, so the real total is larger.">
+        {`≥ ${formatSize(row.size, "dir")}`}
+      </span>
+    ) : (
+      formatSize(row.size, "dir")
+    );
+  }
+
+  if (size?.error) {
+    return (
+      <span
+        className="text-danger"
+        title={REFUSALS[size.error] ?? "This directory could not be measured."}
+      >
+        ✕
+      </span>
+    );
+  }
+
+  // Still walking. Dimmed, because a turning dash at full strength competes
+  // with the figures around it for an attention it does not deserve.
+  if (walking) {
+    return (
+      <span
+        className="text-on-pane-muted"
+        title="Measuring…"
+      >
+        {spinnerFrame(tick)}
+      </span>
+    );
+  }
+
+  // The feed ended without reaching this row — a closed stream, or a listing
+  // that outlived it. Not an error, and not still coming: simply unknown.
+  return "—";
+}
+
+const REFUSALS: Record<string, string> = {
+  EACCES: "This directory cannot be read with the account this host connects as.",
+  ENOENT: "This directory was gone by the time it was measured.",
+  ENOTDIR: "This is no longer a directory.",
+  ENOSYS: "This host cannot run a command, so its directories cannot be measured.",
+  EIO: "This directory could not be measured.",
+};
+
+/**
+ * The frame every pending row in this pane is showing.
+ *
+ * One interval for the listing rather than one per row, and stopped outright
+ * when nothing is pending: a timer left running on a settled directory is a
+ * re-render a second for no visible change.
+ */
+function useSpinnerTick(active: boolean): number {
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setTick((current) => current + 1), SPINNER_MS);
+    return () => clearInterval(timer);
+  }, [active]);
+
+  return tick;
+}
+
+/**
+ * Slow enough to read as a rhythm rather than a blur, fast enough to look
+ * alive. Four frames at this interval is a full turn every half second.
+ */
+const SPINNER_MS = 125;
 
 /** Eleven staggered rows, as the mockup does — a listing arriving, not a spinner. */
 function Skeleton() {

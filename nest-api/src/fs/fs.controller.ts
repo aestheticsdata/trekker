@@ -7,6 +7,8 @@ import { ChangeModeDto } from "@fs/dto/change-mode.dto";
 import { ChangeOwnerDto } from "@fs/dto/change-owner.dto";
 import { CreateEntryDto } from "@fs/dto/create-entry.dto";
 import { CreateService } from "@fs/create.service";
+import { DirSizesQueryDto } from "@fs/dto/dir-sizes-query.dto";
+import { type DirSizeFrame, DirSizeService } from "@fs/dir-size.service";
 import { DeleteDto, DeletePlanDto } from "@fs/dto/delete.dto";
 import { FsQueryDto } from "@fs/dto/fs-query.dto";
 import { RenameBatchDto } from "@fs/dto/rename-batch.dto";
@@ -60,6 +62,7 @@ import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/sessi
 export class FsController {
   constructor(
     private readonly fs: FsService,
+    private readonly dirSizes: DirSizeService,
     private readonly permissions: PermissionsService,
     private readonly permissionsUndo: PermissionsUndoService,
     private readonly rename: RenameService,
@@ -144,6 +147,67 @@ export class FsController {
   @Get("stat")
   stat(@Req() req: Request, @Query() query: FsQueryDto): Promise<FileRowDetail> {
     return this.fs.stat(userIdOf(req), query.hostId, query.path);
+  }
+
+  /**
+   * What the directories in a listing actually contain (TRE-107).
+   *
+   * Server-sent events, and the shape the scan feed uses rather than the tail's
+   * — one payload kind, sent bare, because this is a progress feed and has
+   * nothing to discriminate. A frame is either one directory's answer or the
+   * `{ done: true }` that says the queue drained.
+   *
+   * The ordering is `tailFile`'s, for `tailFile`'s reason: the rate limit, the
+   * roots guard and the `readdir` all run inside `open()` **before** a header
+   * is written, so a refusal is a real 403, 404 or 429. `start()` is separate
+   * from `open()` so the first frame cannot outrun `openStream` — a warm `du`
+   * answers faster than the next line of this handler runs.
+   *
+   * Closing the stream is the only way this ends early, and it is the feature:
+   * navigating away kills every `du` it started, which is what keeps a
+   * held-down arrow key from leaving a walk per directory on somebody's server.
+   *
+   * No CSRF, for `tailFile`'s reason — an `EventSource` cannot set a header.
+   * Not audited: a GET, like the five reads above it.
+   */
+  @Get("dir-sizes/stream")
+  async dirSizeStream(@Req() req: Request, @Res() res: Response, @Query() query: DirSizesQueryDto): Promise<void> {
+    const request = req as AuthenticatedRequest;
+
+    const opened = await this.dirSizes.open({
+      userId: request.user.id,
+      hostId: query.hostId,
+      path: query.path,
+      firstVisible: query.firstVisible ?? 0,
+      visibleCount: query.visibleCount ?? 0,
+    });
+
+    openStream(res);
+    const send = (payload: DirSizeFrame | { done: true }): void => {
+      if (!res.writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    const run = opened.start(send);
+    const ping = heartbeat(res);
+
+    let closed = false;
+    const close = (): void => {
+      if (closed) return;
+      closed = true;
+      clearInterval(ping);
+      run.cancel();
+    };
+
+    // `error` as well as `close`, for the reason `tailFile` gives: a socket
+    // reset surfaces as `error` and does not always bring a `close` with it,
+    // and a run left behind is a `du` nobody is waiting for.
+    req.on("close", close);
+    res.on("error", close);
+
+    await run.done;
+    close();
+    send({ done: true });
+    res.end();
   }
 
   /**

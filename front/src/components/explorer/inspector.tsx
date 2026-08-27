@@ -8,10 +8,12 @@ import {
   formatAge,
   formatExactBytes,
   formatInstant,
+  formatPartialTotal,
   formatSize,
   formatTotal,
   joinPath,
   onDiskBytes,
+  partialTotalHint,
   typeTag,
 } from "@helpers/listing";
 import { describeMode, permissionRows } from "@helpers/permissions";
@@ -243,7 +245,10 @@ function DirectoryPanel({
   now: number;
 }) {
   const folders = rows.filter((row) => row.type === "dir").length;
-  const bytes = rows.reduce((sum, row) => sum + row.size, 0);
+  // Directories still being walked are left out rather than counted as zero
+  // (TRE-107); `unsized` is what turns the total into a floor below.
+  const bytes = rows.reduce((sum, row) => sum + (row.size ?? 0), 0);
+  const unsized = rows.reduce((count, row) => (row.size === null ? count + 1 : count), 0);
   const newest = rows.reduce<FileRow | null>(
     (best, row) => (best === null || Date.parse(row.mtime) > Date.parse(best.mtime) ? row : best),
     null,
@@ -257,7 +262,7 @@ function DirectoryPanel({
       <Stats
         cells={[
           { label: "ITEMS", value: String(rows.length) },
-          { label: "SIZE", value: formatTotal(bytes) },
+          { label: "SIZE", value: formatPartialTotal(bytes, unsized), hint: partialTotalHint(unsized) },
           { label: "FOLDERS", value: String(folders) },
           {
             label: "NEWEST",
@@ -323,9 +328,15 @@ function EntryPanel({
           cells={[
             { label: "SIZE", value: formatSize(entry.size, entry.type) },
             {
+              // A directory's own size is not carried (TRE-107), and rounding
+              // an unknown up to a block would invent the very 4 KiB this
+              // ticket removed.
               label: "ON DISK",
-              value: isLink ? "—" : formatTotal(onDiskBytes(entry.size)),
-              hint: isLink ? undefined : "Rounded up to a 4 KiB block — an estimate, not a measurement",
+              value: isLink || entry.size === null ? "—" : formatTotal(onDiskBytes(entry.size)),
+              hint:
+                isLink || entry.size === null
+                  ? undefined
+                  : "Rounded up to a 4 KiB block — an estimate, not a measurement",
             },
             { label: "MODE", value: entry.mode },
             {
@@ -344,7 +355,7 @@ function EntryPanel({
             {TYPE_LABEL[entry.type]}
             {entry.linkTarget ? ` → ${entry.linkTarget}` : ""}
           </MetaRow>
-          <MetaRow label="bytes">{formatExactBytes(entry.size)}</MetaRow>
+          <MetaRow label="bytes">{entry.size === null ? "—" : formatExactBytes(entry.size)}</MetaRow>
           <MetaRow label="modified">{formatInstant(entry.mtime)}</MetaRow>
           <MetaRow label="accessed">{detail?.atime ? formatInstant(detail.atime) : "—"}</MetaRow>
           <MetaRow label="owner">
@@ -391,7 +402,8 @@ function SelectionPanel({
   onEditPermissions: () => void;
 }) {
   const folders = selected.filter((row) => row.type === "dir").length;
-  const bytes = selected.reduce((sum, row) => sum + row.size, 0);
+  const bytes = selected.reduce((sum, row) => sum + (row.size ?? 0), 0);
+  const unsized = selected.reduce((count, row) => (row.size === null ? count + 1 : count), 0);
   const modes = [...new Set(selected.map((row) => row.mode))].sort();
   const listed = selected.slice(0, NAMES_SHOWN);
 
@@ -402,7 +414,11 @@ function SelectionPanel({
 
       <Stats
         cells={[
-          { label: "TOTAL SIZE", value: formatTotal(bytes) },
+          {
+            label: "TOTAL SIZE",
+            value: formatPartialTotal(bytes, unsized),
+            hint: partialTotalHint(unsized),
+          },
           { label: "MODES", value: String(modes.length), quiet: modes.length === 1 },
           { label: "FILES", value: String(selected.length - folders) },
           { label: "FOLDERS", value: String(folders) },

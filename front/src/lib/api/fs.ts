@@ -1,4 +1,4 @@
-import { apiRequest } from "@lib/api/client";
+import { API_ORIGIN, apiRequest } from "@lib/api/client";
 
 /**
  * The listing endpoints (TRE-13), typed for the explorer (TRE-16).
@@ -14,7 +14,16 @@ export type RowType = "dir" | "file" | "link" | "other";
 export interface FileRow {
   name: string;
   type: RowType;
-  size: number;
+  /**
+   * Bytes, and `null` for a directory (TRE-107).
+   *
+   * The API does not know what a directory contains at listing time and does
+   * not guess: `stat` reports the directory's own 4096-byte block, which is the
+   * same figure for an empty folder and for one holding a hundred gigabytes.
+   * The real total arrives afterwards on `/fs/dir-sizes/stream`; until it does,
+   * this is `null` and every total and scale over the listing has to say so.
+   */
+  size: number | null;
   /** Octal, zero-padded to four digits: "0755". */
   mode: string;
   /** The `ls` rendering of the same bits: "rwxr-xr-x". */
@@ -52,7 +61,10 @@ export interface FileRowDetail extends FileRow {
 
 export interface ListMeta {
   count: number;
+  /** The files' bytes. Directories are not in it — their size is not known yet. */
   totalBytes: number;
+  /** How many rows are directories with no size, so a total can mark itself partial. */
+  unknownDirs: number;
   truncated: boolean;
   totalEntries: number;
   tookMs: number;
@@ -71,4 +83,46 @@ export async function fetchListing(hostId: string, path: string): Promise<ListRe
 export async function fetchStat(hostId: string, path: string): Promise<FileRowDetail> {
   const query = new URLSearchParams({ hostId, path });
   return (await apiRequest(`/fs/stat?${query}`)) as FileRowDetail;
+}
+
+/**
+ * One directory's total, as it arrives (TRE-107).
+ *
+ * Exactly one of `bytes` and `error` is present, and `partial` qualifies
+ * `bytes`: `du` walked what it could and was refused somewhere below, so the
+ * figure is a floor rather than the total.
+ */
+
+/**
+ * One directory's total, as it arrives (TRE-107).
+ *
+ * Exactly one of `bytes` and `error` is present, and `partial` qualifies
+ * `bytes`: `du` walked what it could and was refused somewhere below, so the
+ * figure is a floor rather than the total.
+ */
+export interface DirSizeFrame {
+  name: string;
+  bytes?: number;
+  partial?: boolean;
+  error?: string;
+}
+
+/** The `{ done: true }` that says the queue drained, on the same channel. */
+export interface DirSizesDone {
+  done: true;
+}
+
+/**
+ * `firstVisible` and `visibleCount` say which rows to walk first. They do not
+ * bound the work: the server walks every directory either way, because sorting
+ * by size and the footer total both need every row.
+ */
+export function dirSizesStreamUrl(hostId: string, path: string, firstVisible: number, visibleCount: number): string {
+  const query = new URLSearchParams({
+    hostId,
+    path,
+    firstVisible: String(firstVisible),
+    visibleCount: String(visibleCount),
+  });
+  return `${API_ORIGIN}/api/fs/dir-sizes/stream?${query.toString()}`;
 }

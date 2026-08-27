@@ -14,7 +14,21 @@ export type RowType = "dir" | "file" | "link" | "other";
 export interface FileRow {
   name: string;
   type: RowType;
-  size: number;
+  /**
+   * Bytes, and `null` for a directory (TRE-107).
+   *
+   * `stat` on a directory reports the block its own entries occupy — 4096 on
+   * every filesystem this app is likely to meet — which is the same number for
+   * an empty directory and for one holding a hundred gigabytes. It is a true
+   * syscall result and a useless column, so it is not carried: what a directory
+   * contains is a `du` walk, it arrives later over `/fs/dir-sizes/stream`, and
+   * until it does this field says it does not know.
+   *
+   * Nullable rather than absent, and that is the point of it. Every total and
+   * every scale over a listing has to decide what to do with a directory, and a
+   * `number` let all six of them quietly add 4096. `null` makes each one say so.
+   */
+  size: number | null;
   /** Octal, zero-padded to four digits: "0755". */
   mode: string;
   /** The `ls` rendering of the same bits: "rwxr-xr-x". */
@@ -108,7 +122,7 @@ export function toRow(entry: FileEntry, names: OwnerNames): FileRow {
   const row: FileRow = {
     name: entry.name,
     type: rowTypeOf(entry.kind),
-    size: entry.size,
+    size: entry.kind === "directory" ? null : entry.size,
     mode: octalMode(entry.mode),
     modeText: modeText(entry.mode),
     owner: names.owner ?? String(entry.uid),

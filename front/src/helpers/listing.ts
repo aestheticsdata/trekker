@@ -12,9 +12,17 @@ import type { FileRow, RowType } from "@lib/api/fs";
 
 /* ---- formatting ------------------------------------------------------- */
 
-/** The mockup's ladder: two decimals from a GB up, one below, bytes exact. */
-export function formatSize(bytes: number, type: RowType): string {
-  if (type === "link") return "—";
+/**
+ * The mockup's ladder: two decimals from a GB up, one below, bytes exact.
+ *
+ * `null` is a size nobody knows — a directory whose `du` has not answered yet,
+ * or was refused (TRE-107) — and prints as the same dash a symlink gets. The
+ * pane draws a spinner over the pending case instead of calling this; every
+ * other caller wants the dash, because "we do not know" and "not applicable"
+ * are the same sentence to a reader.
+ */
+export function formatSize(bytes: number | null, type: RowType): string {
+  if (type === "link" || bytes === null) return "—";
   if (bytes >= 1_099_511_627_776) return `${(bytes / 1_099_511_627_776).toFixed(2)} TB`;
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
   if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
@@ -22,9 +30,45 @@ export function formatSize(bytes: number, type: RowType): string {
   return `${Math.round(bytes)} B`;
 }
 
+/**
+ * The size cell for a directory that is still being walked (TRE-107).
+ *
+ * A dash turning on its own axis, which is the same character the column would
+ * otherwise be showing — so a pending row reads as "this figure is coming"
+ * rather than as a different kind of row. Four frames, advanced by one ticker
+ * the pane owns: every spinner in the listing therefore turns in step, which in
+ * a monospace table looks deliberate where a hundred independent animations
+ * would look like a fault.
+ */
+export const SPINNER_FRAMES = ["-", "\\", "|", "/"] as const;
+
+export function spinnerFrame(tick: number): string {
+  return SPINNER_FRAMES[tick % SPINNER_FRAMES.length] as string;
+}
+
 /** Bytes for the pane footer, where a directory total has no type to speak of. */
 export function formatTotal(bytes: number): string {
   return formatSize(bytes, "file");
+}
+
+/**
+ * A total over rows, some of which have no size yet (TRE-107).
+ *
+ * `≥`, because that is precisely what the figure is: the sum of what is known,
+ * with some directories still being walked or refused outright. Printed bare it
+ * would be a claim about rows nothing has counted — which is the habit this
+ * ticket exists to break, one 4 kB directory at a time.
+ */
+export function formatPartialTotal(bytes: number, unknown: number): string {
+  return unknown > 0 ? `≥ ${formatTotal(bytes)}` : formatTotal(bytes);
+}
+
+/** Why a total carries the `≥`, or nothing when it does not. */
+export function partialTotalHint(unknown: number): string | undefined {
+  if (unknown <= 0) return undefined;
+  return unknown === 1
+    ? "One directory has no size yet, so this total is a floor."
+    : `${unknown} directories have no size yet, so this total is a floor.`;
 }
 
 /**
@@ -216,8 +260,14 @@ export function sortRows(rows: readonly FileRow[], key: SortKey, direction: Sort
   return rows.slice().sort((a, b) => {
     if ((a.type === "dir") !== (b.type === "dir")) return a.type === "dir" ? -1 : 1;
 
+    // A size still being computed sorts after every known one, in **both**
+    // directions — outside the multiplication below, exactly as the
+    // directories-first rule is. A row must not leap to the top of the pane
+    // because its `du` has not finished, and must not leap again when it does.
+    if (key === "size" && (a.size === null) !== (b.size === null)) return a.size === null ? 1 : -1;
+
     let comparison = 0;
-    if (key === "size") comparison = a.size - b.size;
+    if (key === "size") comparison = (a.size ?? 0) - (b.size ?? 0);
     // The column shows an age, so ascending means youngest first — which is
     // the newest mtime, not the oldest. Sorting the timestamps the obvious way
     // round would contradict the values printed in the column.

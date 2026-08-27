@@ -19,6 +19,7 @@ import { PermissionsModal } from "@components/explorer/permissions-modal";
 import { RenameModal } from "@components/explorer/rename-modal";
 import { TerminalPanel } from "@components/explorer/terminal-panel";
 import { TransferModal } from "@components/explorer/transfer-modal";
+import { useDirSizes, withDirSizes } from "@components/explorer/use-dir-sizes";
 import { HostManager } from "@components/hosts/host-manager";
 import { isRule, resolveActions } from "@components/shell/actions";
 import { Palette } from "@components/shell/palette";
@@ -55,6 +56,7 @@ import type { PermissionsTarget } from "@components/explorer/permissions-modal";
 import type { RenameMode, RenameTarget } from "@components/explorer/rename-modal";
 import type { TerminalDelete, TerminalPermissions, TerminalWorld } from "@components/explorer/terminal-runner";
 import type { TransferTarget } from "@components/explorer/transfer-modal";
+import type { DirSizes } from "@components/explorer/use-dir-sizes";
 import type { HostsMode } from "@components/hosts/host-manager";
 import type { ActionContext, ActionId, TargetKind } from "@components/shell/actions";
 import type { PaletteEntry } from "@components/shell/palette";
@@ -426,19 +428,46 @@ export function Explorer({
   const listings = [useListing(views[0]), useListing(views[1])] as const;
   const volumes = [useVolumeWarning(views[0]), useVolumeWarning(views[1])] as const;
 
+  /**
+   * What the directories in each listing contain (TRE-107).
+   *
+   * Here rather than in the pane because the figures have to be folded into the
+   * rows *before* they are sorted: a size that has arrived must sort, total and
+   * scale like any other, and a pane that received them separately would be a
+   * pane whose size column and size sort disagreed.
+   */
+  const dirSizes = [
+    useDirSizes({
+      hostId: views[0].hostId,
+      path: views[0].path,
+      ready: listings[0].data !== undefined,
+      firstVisible: cursorIndexOf(listings[0].data?.entries, views[0].cur),
+    }),
+    useDirSizes({
+      hostId: views[1].hostId,
+      path: views[1].path,
+      ready: listings[1].data !== undefined,
+      firstVisible: cursorIndexOf(listings[1].data?.entries, views[1].cur),
+    }),
+  ] as const;
+
   // Every row in a paint ages against one instant, so two rows a millisecond
   // apart never render as "59min" and "1h".
   const now = Date.now();
 
   const rendered = [0, 1].map((index) => {
     const listing = listings[index];
-    const entries = listing.data?.entries ?? [];
+    const sizes = dirSizes[index] as DirSizes;
+    // Folded in before the glob and the sort, so a directory whose `du` has
+    // answered is an ordinary row from here on.
+    const entries = withDirSizes(listing.data?.entries ?? [], sizes);
     // The glob is the active pane's filter, exactly as the mockup has it.
     const filtered = glob.trim() && index === active ? entries.filter(matcher(glob)) : entries;
     return {
       rows: sortRows(filtered, views[index].sort, views[index].dir),
       hiddenByGlob: entries.length - filtered.length,
       listing,
+      sizes,
     };
   });
 
@@ -1997,6 +2026,7 @@ export function Explorer({
                     active={active === index}
                     host={hosts.find((host) => host.id === pane.hostId) ?? null}
                     rows={view.rows}
+                    sizes={view.sizes}
                     meta={view.listing.data?.meta ?? null}
                     // A disabled query never leaves `isPending`, so an unbound pane
                     // would shimmer for ever if that alone drove the skeleton.
@@ -2278,6 +2308,18 @@ export function Explorer({
       />
     </div>
   );
+}
+
+/**
+ * Where in the listing the cursor is standing, as an index.
+ *
+ * The directory-size queue walks outwards from here, so the rows a person is
+ * looking at answer first. `-1` for a cursor on `..` or on nothing, which
+ * `useDirSizes` clamps to the top of the listing.
+ */
+function cursorIndexOf(entries: readonly FileRow[] | undefined, cursor: string | null): number {
+  if (entries === undefined || cursor === null) return 0;
+  return entries.findIndex((entry) => entry.name === cursor);
 }
 
 function useListing(pane: PaneView) {

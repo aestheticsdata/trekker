@@ -17,7 +17,19 @@ import { IdResolverService } from "@fs/id-resolver.service";
 
 export interface ListMeta {
   count: number;
+  /**
+   * The files' bytes, and only theirs (TRE-107).
+   *
+   * A directory's size is not known at listing time and is not guessed here.
+   * Summing `stat`'s 4096 was what made a directory of fifteen subdirectories
+   * report `60.0 kB` — a number that described nothing that existed.
+   */
   totalBytes: number;
+  /**
+   * How many rows are directories whose size is still unknown, so a client can
+   * mark the total as partial rather than presenting it as complete.
+   */
+  unknownDirs: number;
   truncated: boolean;
   /** How many entries the directory actually holds, when truncation applied. */
   totalEntries: number;
@@ -75,7 +87,8 @@ export class FsService {
       entries: rows,
       meta: {
         count: rows.length,
-        totalBytes: rows.reduce((sum, row) => sum + row.size, 0),
+        totalBytes: rows.reduce((sum, row) => sum + (row.size ?? 0), 0),
+        unknownDirs: rows.reduce((count, row) => (row.size === null ? count + 1 : count), 0),
         truncated: totalEntries > kept.length,
         totalEntries,
         tookMs: Date.now() - started,

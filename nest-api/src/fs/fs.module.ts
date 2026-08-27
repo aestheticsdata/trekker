@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { CreateService } from "@fs/create.service";
 import { DeleteService } from "@fs/delete.service";
+import { DirSizeService } from "@fs/dir-size.service";
 import { DownloadService } from "@fs/download.service";
 import { FsController } from "@fs/fs.controller";
 import { FsService } from "@fs/fs.service";
@@ -29,6 +30,7 @@ import { UploadService } from "@fs/upload.service";
   controllers: [FsController, LinkController],
   providers: [
     FsService,
+    DirSizeService,
     IdResolverService,
     PermissionsService,
     PermissionSnapshotService,
@@ -44,6 +46,7 @@ import { UploadService } from "@fs/upload.service";
   ],
   exports: [
     FsService,
+    DirSizeService,
     IdResolverService,
     PermissionsService,
     PermissionSnapshotService,

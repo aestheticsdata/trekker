@@ -345,6 +345,18 @@ export const LIMITS = {
    * which refuse the fifth simultaneous tail whatever rate it arrived at.
    */
   tail: rule("limit:tail", "live tails", 60, 60, "TREKKER_LIMIT_TAILS_PER_MIN"),
+
+  /**
+   * Directory-size streams opened (TRE-107), per minute.
+   *
+   * An opening rate, like `tail`, and generous for the same reason: the client
+   * opens one per navigation, so a person walking a tree spends this fast
+   * without doing anything unusual. What actually needs bounding is the walk,
+   * and that is bounded elsewhere — `DIR_SIZE_CONCURRENCY` caps how many `du`
+   * processes one stream may have running, and leaving a directory ends the
+   * stream and kills them.
+   */
+  dirSizes: rule("limit:dirsize", "directory size streams", 120, 60, "TREKKER_LIMIT_DIR_SIZES_PER_MIN"),
 } as const satisfies Record<string, LimitRule>;
 
 /**

@@ -88,6 +88,45 @@ export const DU_RUNGS: readonly DuRung[] = Object.freeze([
 ]);
 
 /**
+ * The same question for one directory's total (TRE-107).
+ *
+ * Two rungs where the walk has four, and the two that vanish say something
+ * about what `-s` is. `--time` and `-a` exist so a scan can gather facts about
+ * individual files; a size column wants one number. `-0` exists so a filename
+ * containing a newline cannot corrupt the record it sits in; here the record is
+ * `<bytes>\t<path>` for a single directory named on the command line, so the
+ * number is already complete before any part of the name is read, and nothing a
+ * name can contain reaches it.
+ *
+ * **`-x` is deliberately absent**, and this is the one place these rungs
+ * disagree with the walk's. A scan asks what is on *this disk* and stops at a
+ * mount point, which is why `DU_RUNGS` carries it. This column answers "what is
+ * inside this directory", and a subtree that happens to live on another
+ * filesystem is still inside it — stopping there would report a folder as
+ * nearly empty for a reason invisible to the person reading the number.
+ */
+export interface DuSizeRung {
+  flavour: ScanFlavour;
+  /** Argv after the program, with the one directory appended by the caller. */
+  args: readonly string[];
+  /** Multiply the reported figure by this to get bytes. */
+  unitBytes: number;
+}
+
+export const DU_SIZE_RUNGS: readonly DuSizeRung[] = Object.freeze([
+  // GNU coreutils: bytes, exactly.
+  { flavour: "GNU", args: ["-s", "-B1", "--"], unitBytes: 1 },
+  // BSD and busybox, which accept `-B 1` and answer in 512-byte blocks anyway.
+  // `-k` and a multiplication, for the reason the file opens with.
+  { flavour: "PORTABLE", args: ["-s", "-k", "--"], unitBytes: 1024 },
+]);
+
+/** The `-s` rung index to start from, given a probe. */
+export function firstSizeRung(probe: Probe): number {
+  return probe.gnu ? 0 : 1;
+}
+
+/**
  * Whether a rung's failure means "this host does not understand that flag".
  *
  * **Never on exit 1.** GNU `du` exits 1 when it could not read some subtree and
