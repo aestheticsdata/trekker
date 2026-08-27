@@ -55,7 +55,12 @@ export function onDiskBytes(bytes: number): number {
 }
 
 /**
- * "2026-08-07 04:20:11" — the ISO instant, made readable, still UTC.
+ * "2026-08-07 / 04:20:11" — the ISO instant, made readable, still UTC.
+ *
+ * The separator does the work the `T` was doing and does it visibly: a lone
+ * space between two groups of digits leaves one long number that the eye has to
+ * cut in half for itself, which is the whole of what made the raw value hard to
+ * read (TRE-103). A slash with air on both sides says where the date stops.
  *
  * Sliced rather than stripped of its `T` and `Z`, because `toISOString()` — how
  * the API builds every timestamp — always emits a milliseconds field, even
@@ -63,9 +68,14 @@ export function onDiskBytes(bytes: number): number {
  * only the two letters leaves a `.000` on every file in the app: three digits of
  * precision that were thrown away upstream, wide enough to push the inspector's
  * `modified` row into its own ellipsis.
+ *
+ * That ellipsis is the constraint the slash had to clear, and it does, with a
+ * character to spare: the inspector gives its values 133px, Plex Mono advances
+ * 0.6em, and at `text-2xs` this is 21 characters of the ~22 that fit. Anything
+ * added here after this is not free — measure it.
  */
 export function formatInstant(iso: string): string {
-  return iso.slice(0, 19).replace("T", " ");
+  return iso.slice(0, 19).replace("T", " / ");
 }
 
 export function ageDays(mtime: string, now: number): number {
