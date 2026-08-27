@@ -479,8 +479,7 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
         // this component already knows how to draw: no target. Everything below
         // — the guarded click, `aria-disabled`, the cursor — then needs no case
         // of its own, and only the tooltip has to tell the two apart.
-        const target =
-          band.path === null || band.denied ? null : band.isDirectory ? band.path : parentPath(band.path);
+        const target = band.path === null || band.denied ? null : band.isDirectory ? band.path : parentPath(band.path);
 
         return (
           // ⚠️ The tooltip wraps the button and adds no element of its own,
@@ -491,7 +490,9 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
             key={band.path ?? "rest"}
             content={
               <TooltipBlock
-                note={band.denied ? BAND_DENIED_NOTE : target === null ? undefined : "Click to open it in the active pane."}
+                note={
+                  band.denied ? BAND_DENIED_NOTE : target === null ? undefined : "Click to open it in the active pane."
+                }
                 rows={[
                   { label: "size", value: formatTotal(band.bytes) },
                   { label: "share", value: `${percent}%` },
