@@ -176,6 +176,9 @@ export class FsController {
 
     const opened = await this.dirSizes.open({
       userId: request.user.id,
+      // An open sudo window makes the difference between a directory's real
+      // total and the part of it this account happens to be able to read.
+      sessionId: req.sessionID,
       hostId: query.hostId,
       path: query.path,
       firstVisible: query.firstVisible ?? 0,

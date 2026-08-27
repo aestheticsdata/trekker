@@ -41,12 +41,23 @@ export function useDirSizes({
   hostId,
   path,
   ready,
+  elevated,
   firstVisible,
 }: {
   hostId: string | null;
   path: string;
   /** False while the listing is still in flight — there is nothing to walk yet. */
   ready: boolean;
+  /**
+   * Whether this host has an open sudo window (TRE-111).
+   *
+   * Not passed to the server — it reads the window itself, and a client claiming
+   * to be elevated would be a client deciding it. It is here so that *opening*
+   * one restarts the walks: a figure measured as the login user is a floor, and
+   * the point of opening the window is to stop it being one. Nothing restarts
+   * when the window expires — what has already been measured stays measured.
+   */
+  elevated: boolean;
   /**
    * Which row to walk outwards from.
    *
@@ -125,7 +136,7 @@ export function useDirSizes({
     // which kills the walks — without it, a held-down arrow key would leave a
     // `du` running per directory passed through.
     return close;
-  }, [hostId, path, ready, firstVisible]);
+  }, [hostId, path, ready, elevated, firstVisible]);
 
   return sizes;
 }

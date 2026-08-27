@@ -441,12 +441,14 @@ export function Explorer({
       hostId: views[0].hostId,
       path: views[0].path,
       ready: listings[0].data !== undefined,
+      elevated: hasSudoWindow(hosts, views[0].hostId),
       firstVisible: cursorIndexOf(listings[0].data?.entries, views[0].cur),
     }),
     useDirSizes({
       hostId: views[1].hostId,
       path: views[1].path,
       ready: listings[1].data !== undefined,
+      elevated: hasSudoWindow(hosts, views[1].hostId),
       firstVisible: cursorIndexOf(listings[1].data?.entries, views[1].cur),
     }),
   ] as const;
@@ -2308,6 +2310,20 @@ export function Explorer({
       />
     </div>
   );
+}
+
+/**
+ * Whether this host has a sudo window open, read off the hosts query.
+ *
+ * Deliberately not `useSudoWindow`, which interpolates a countdown and re-renders
+ * every second while a window is open — a cost worth paying for a badge that
+ * shows the time remaining, and not for a boolean. Only the *opening* edge
+ * matters here, and the modal invalidates the hosts query when it opens one, so
+ * the flip arrives without a clock.
+ */
+function hasSudoWindow(hosts: readonly HostView[], hostId: string | null): boolean {
+  if (hostId === null) return false;
+  return (hosts.find((host) => host.id === hostId)?.sudoRemainingMs ?? 0) > 0;
 }
 
 /**

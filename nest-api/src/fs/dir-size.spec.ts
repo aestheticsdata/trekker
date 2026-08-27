@@ -1,4 +1,4 @@
-import { leadingInteger, refusalOf, visibleFirst } from "@fs/dir-size.service";
+import { isSudoRefusal, leadingInteger, refusalOf, visibleFirst } from "@fs/dir-size.service";
 
 /**
  * The three decisions in a directory-size walk that do not need a host (TRE-107).
@@ -77,5 +77,47 @@ describe("refusalOf", () => {
   it("falls back rather than inventing a cause", () => {
     expect(refusalOf("du: something nobody has seen before")).toBe("EIO");
     expect(refusalOf("")).toBe("EIO");
+  });
+});
+
+describe("isSudoRefusal", () => {
+  /**
+   * The distinction this has to make, and why it matters more than it looks.
+   *
+   * `sudo` refusing means elevation is off for the rest of the listing — asking
+   * a host with no sudoers entry once per directory would be a hundred pointless
+   * prompts. `du` refusing means one subtree could not be read, which is the
+   * ordinary case and must change nothing: getting it wrong the other way would
+   * drop elevation at the first unreadable subdirectory and make every figure
+   * after it a floor, which is precisely what opening the window was for.
+   */
+  it("recognises sudo refusing on its own behalf", () => {
+    expect(isSudoRefusal("sudo: no tty present and no askpass program specified")).toBe(true);
+    expect(isSudoRefusal("Sorry, user deploy is not in the sudoers file.")).toBe(true);
+    expect(isSudoRefusal("sudo: 1 incorrect password attempt")).toBe(true);
+  });
+
+  it("does not mistake du's own refusal for sudo's", () => {
+    expect(isSudoRefusal("du: cannot read directory '/root': Permission denied")).toBe(false);
+    expect(isSudoRefusal("du: cannot access '/proc/1/fd/5': No such file or directory")).toBe(false);
+  });
+
+  /**
+   * A directory named after the error message is still just a directory — and
+   * `/tmp` is world-writable, so this name is something anyone with an account
+   * on the host can create. Only the first line is read, and when sudo refuses,
+   * `du` never ran to print one.
+   */
+  it("is not fooled by a path that quotes one", () => {
+    expect(isSudoRefusal("du: cannot read directory '/tmp/sudo: incorrect password': Permission denied")).toBe(false);
+    expect(isSudoRefusal("du: cannot read directory '/tmp/x\nsudo: 1 incorrect password attempt'")).toBe(false);
+  });
+
+  it("still sees sudo when du managed to print afterwards", () => {
+    expect(isSudoRefusal("sudo: a terminal is required to read the password\ndu: /x: Permission denied")).toBe(true);
+  });
+
+  it("treats silence as nothing to react to", () => {
+    expect(isSudoRefusal("")).toBe(false);
   });
 });

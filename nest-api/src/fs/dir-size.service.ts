@@ -6,6 +6,7 @@ import { RateLimitService } from "@audit/rate-limit.service";
 import type { HostDriver } from "@hosts/drivers/host-driver";
 import { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
 import { PathGuardService } from "@hosts/path-guard/path-guard.service";
+import { SudoService } from "@hosts/sudo/sudo.service";
 import { DU_SIZE_RUNGS, firstSizeRung, isNiceFailure, probeFlavour, shouldDemote } from "@scans/du-flavour";
 import { SCAN_NICE } from "@scans/scan-limits";
 
@@ -40,6 +41,14 @@ export interface DirSizeFrame {
 
 export interface OpenDirSizesArgs {
   userId: string;
+  /**
+   * The browser session, so an open sudo window can be found (TRE-111).
+   *
+   * Without one the walk runs as the login user and reports a floor for every
+   * directory holding something that account cannot read — which on `/` is most
+   * of them.
+   */
+  sessionId: string | undefined;
   hostId: string;
   path: string;
   /** Index of the first row the client has on screen, and how many. */
@@ -92,6 +101,14 @@ const MAX_STDERR_BYTES = 8 * 1024;
 interface RungState {
   index: number;
   niced: boolean;
+  /**
+   * Whether to keep trying to elevate.
+   *
+   * Cleared for the rest of the listing the first time `sudo` itself refuses —
+   * a host with no sudoers entry for this account would otherwise be asked once
+   * per directory, and answer the same way every time.
+   */
+  elevate: boolean;
 }
 
 @Injectable()
@@ -102,6 +119,11 @@ export class DirSizeService {
     private readonly factory: HostDriverFactory,
     private readonly guard: PathGuardService,
     private readonly limits: RateLimitService,
+    // `SudoService` rather than `SudoRunnerService`, which is the wrapper the
+    // write paths use: its `run` and `stream` are typed to `SUDO_ONLY_PROGRAMS`
+    // and offer neither `nice` nor an `AbortSignal`, both of which a walk needs.
+    // `du` is an ordinary allowlisted program that happens to see more as root.
+    private readonly sudo: SudoService,
   ) {}
 
   /**
@@ -150,7 +172,12 @@ export class DirSizeService {
       start: (emit) => {
         const controller = new AbortController();
         return {
-          done: this.drain(driver, validated.realPath, ordered, emit, controller.signal),
+          done: this.drain(
+            { driver, hostId: args.hostId, sessionId: args.sessionId, realPath: validated.realPath },
+            ordered,
+            emit,
+            controller.signal,
+          ),
           cancel: () => controller.abort(),
         };
       },
@@ -159,16 +186,16 @@ export class DirSizeService {
 
   /** A fixed pool pulling from one shared cursor. */
   private async drain(
-    driver: HostDriver,
-    realPath: string,
+    target: WalkTarget,
     names: readonly string[],
     emit: (frame: DirSizeFrame) => void,
     signal: AbortSignal,
   ): Promise<void> {
     if (names.length === 0) return;
 
+    const { driver, realPath } = target;
     const probe = await probeFlavour(driver);
-    const rungs: RungState = { index: firstSizeRung(probe), niced: true };
+    const rungs: RungState = { index: firstSizeRung(probe), niced: true, elevate: true };
     let cursor = 0;
 
     const worker = async (): Promise<void> => {
@@ -179,7 +206,7 @@ export class DirSizeService {
 
         const name = names[index];
         try {
-          const frame = await this.sizeOf(driver, posix.join(realPath, name), rungs, signal);
+          const frame = await this.sizeOf(target, posix.join(realPath, name), rungs, signal);
           if (signal.aborted) return;
           emit({ name, ...frame });
         } catch (error) {
@@ -216,11 +243,13 @@ export class DirSizeService {
    * figure is an error. Nothing here has to guess from the wording of stderr.
    */
   private async sizeOf(
-    driver: HostDriver,
-    target: string,
+    walk: WalkTarget,
+    path: string,
     rungs: RungState,
     signal: AbortSignal,
   ): Promise<Omit<DirSizeFrame, "name">> {
+    const { driver } = walk;
+
     for (;;) {
       const rung = DU_SIZE_RUNGS[rungs.index];
 
@@ -228,10 +257,20 @@ export class DirSizeService {
       // assertion here would be a claim about a caller this method cannot see.
       if (!driver.execStream) return { error: "ENOSYS" };
 
-      const running = await driver.execStream("du", [...rung.args, target], {
+      // Read per walk, never once for the listing: a window lasts fifteen
+      // minutes and a walk of `/` can outlive it. Finding it gone here means the
+      // directories after this one report floors, which is correct — it must not
+      // mean the listing fails halfway through.
+      const password =
+        rungs.elevate && walk.sessionId !== undefined ? this.sudo.passwordFor(walk.sessionId, walk.hostId) : null;
+
+      const running = await driver.execStream("du", [...rung.args, path], {
         signal,
         nice: rungs.niced ? SCAN_NICE : undefined,
         maxStderrBytes: MAX_STDERR_BYTES,
+        // The password goes to stdin, never to argv, which every account on the
+        // host can read. See `ExecOptions.stdin`.
+        ...(password === null ? {} : { sudo: "password" as const, stdin: `${password}\n` }),
       });
 
       const stdout = await collect(running.stdout);
@@ -242,6 +281,16 @@ export class DirSizeService {
       // prefix for every walk on this stream and run this one again.
       if (stdout.trim() === "" && rungs.niced && isNiceFailure(result.code)) {
         rungs.niced = false;
+        continue;
+      }
+
+      // `sudo` refusing on its own behalf — no sudoers entry, or a password
+      // that has stopped working. Same shape as the `nice` fallback and for the
+      // same reason: stop asking for the rest of the listing, and walk this one
+      // unelevated rather than reporting a directory as unmeasurable when it is
+      // merely unreadable.
+      if (password !== null && stdout.trim() === "" && isSudoRefusal(result.stderr)) {
+        rungs.elevate = false;
         continue;
       }
 
@@ -260,6 +309,37 @@ export class DirSizeService {
       return result.code === 0 ? { bytes } : { bytes, partial: true };
     }
   }
+}
+
+/** Everything one walk needs about where it is running. */
+interface WalkTarget {
+  driver: HostDriver;
+  hostId: string;
+  sessionId: string | undefined;
+  realPath: string;
+}
+
+/**
+ * `sudo` complaining about `sudo`, as opposed to `du` complaining about a path.
+ *
+ * Deliberately narrow, twice over.
+ *
+ * **The wording must be sudo's own.** `du`'s refusal — "Permission denied" on a
+ * subtree — is the ordinary case and must change nothing; matching it would
+ * switch elevation off at the first unreadable subdirectory and make every
+ * figure after it a floor, which is exactly what opening the window was meant
+ * to prevent.
+ *
+ * **And only the first line is read.** Everything after it can contain a path,
+ * and a path is somebody else's text: `/tmp` is world-writable, so a directory
+ * named `sudo: incorrect password` would otherwise appear inside `du`'s own
+ * complaint and quietly degrade every size in the listing. When sudo refuses,
+ * `du` never runs and never prints, so sudo's line is the first one — which
+ * makes "the first line" both the correct rule and the one nobody can write to.
+ */
+export function isSudoRefusal(stderr: string): boolean {
+  const first = stderr.split("\n", 1)[0] ?? "";
+  return /^(?:sudo:|sorry, user\b|\S+ is not (?:in the sudoers|allowed to run sudo))/i.test(first.trim());
 }
 
 /**
