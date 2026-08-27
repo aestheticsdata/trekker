@@ -7,10 +7,10 @@ import { AuthCard, AuthLinks } from "@components/auth/auth-card";
  * reason to ship it as JavaScript.
  */
 const NOTICE = [
-  "Trekker — a file explorer for the servers you actually run.",
-  "Published as free software; the source is public on GitHub.",
-  "No analytics, no third-party requests, no data leaves the host it runs on.",
-  "Provided as is, without warranty of any kind.",
+  "Website hosted by OVH SAS",
+  "Registered office: 2 rue Kellermann — 59100 Roubaix — France",
+  "APE code 2620Z",
+  "VAT no.: FR 22 424 761 419",
 ] as const;
 
 export default function AboutPage() {
