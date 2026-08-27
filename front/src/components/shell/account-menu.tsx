@@ -64,9 +64,11 @@ export function AccountMenu({ onOpenChange }: { onOpenChange?: (open: boolean) =
   const close = () => {
     closedAt.current = performance.now();
     open(null);
-    // `ContextMenu` takes focus into its own panel and never gives it back.
-    // Its usual trigger is a right-click, which has nowhere to return to; this
-    // one is a Tab stop, so ⎋ has to land back on it rather than on the body.
+    // `ContextMenu` gives focus back to whatever held it when it opened
+    // (TRE-109), which here is the chip — in the browsers that focus a button
+    // when it is clicked. Still named, because the ones that do not would drop
+    // a Tab stop on every open and close, and because the menu's usual trigger
+    // is a right-click with nothing to return to at all.
     trigger.current?.focus();
   };
 

@@ -107,10 +107,55 @@ export function ContextMenu({ point, label, rows, onChoose, onClose }: ContextMe
     );
   }, [point, canExplain]);
 
-  /** Focus lands on the panel, so `↓` belongs to the menu from the first key. */
-  useEffect(() => {
-    panel.current?.focus();
+  /**
+   * Whatever held focus when the menu opened, so it can be handed back on the
+   * way out (TRE-70 §6).
+   *
+   * Read in a layout effect on mount, which is before the panel takes focus
+   * below — that one waits for the placement and lands a commit later.
+   *
+   * `body` is stored as nothing rather than as itself: it is what
+   * `document.activeElement` reports when nothing is focused at all, which in a
+   * listing is the usual case, and `body.focus()` would be a blur dressed up as
+   * a restoration.
+   */
+  const returnTo = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const held = document.activeElement;
+    returnTo.current = held instanceof HTMLElement && held !== document.body ? held : null;
+    const node = panel.current;
+
+    return () => {
+      const back = returnTo.current;
+      // Still in the document: the menu's own `rm` can delete the row that
+      // opened it, and a logout takes the whole tree with it.
+      if (!back?.isConnected) return;
+      // And only if the menu still had the focus it is handing back. An outside
+      // click is one of the ways this menu closes, and if that click landed in
+      // the glob field or the terminal's input, the browser has already focused
+      // it — restoring here would yank the caret out of a field somebody just
+      // aimed at. `body` is nobody, and counts as still ours.
+      const now = document.activeElement;
+      if (now !== null && now !== document.body && !node?.contains(now)) return;
+      back.focus();
+    };
   }, []);
+
+  /**
+   * Focus lands on the panel, so `↓` belongs to the menu from the first key —
+   * but only once it has been placed (TRE-109).
+   *
+   * On the first commit the panel is `visibility: hidden` to be measured, and a
+   * hidden element cannot be focused: the call is not deferred there, it is
+   * dropped. That is what it did from TRE-70 until this ticket — mounted,
+   * focused nothing, and left `aria-activedescendant` below pointing at a row
+   * no screen reader was following, since that attribute is only ever read off
+   * the focused element.
+   */
+  useLayoutEffect(() => {
+    if (box === null) return;
+    panel.current?.focus();
+  }, [box]);
 
   /**
    * Everything that dismisses it (§5).
@@ -157,62 +202,101 @@ export function ContextMenu({ point, label, rows, onChoose, onClose }: ContextMe
     onChoose(row.id);
   };
 
-  const onKeyDown = (event: React.KeyboardEvent) => {
-    switch (event.key) {
-      case "Escape":
+  /**
+   * The menu's keyboard, on the window (TRE-109).
+   *
+   * It was on the panel, where it could only ever fire while the panel held
+   * focus — and the panel took none, for the reason written above the placement
+   * effect. So `⎋` did nothing, and neither did any other key here, on a menu
+   * the explorer had already stood down for: the keyboard was dead for as long
+   * as the menu was up, and `⇧F10` opened one that the keyboard which opened it
+   * could not walk or dismiss.
+   *
+   * The window is where this app's other two layers listen, for the reason
+   * `useKeyboard` states in `explorer.tsx`: nothing underneath them holds a
+   * focus to hang a handler off. Focus is still taken, and still matters — it
+   * is what makes `aria-activedescendant` mean anything — but no key depends on
+   * it any more.
+   *
+   * Capture, and propagation stopped on every key the menu takes, because a
+   * menu is a mode: a letter typed at it must not also reach whatever had focus
+   * when it opened. The terminal's input and the glob field are both plausible
+   * holders, and a type-ahead landing in one of them is worse than the dead key
+   * it replaces. Anything the menu has no use for is left alone and travels on
+   * — `⌘X` over an open menu is still the clipboard's.
+   *
+   * Subscribed on every render on purpose, with no dependency list. The handler
+   * closes over the active row, the rows themselves and both callbacks; a pair
+   * of `addEventListener` calls is cheaper than a rule about which of those
+   * identities is stable, and nothing here should rest on the compiler holding
+   * one still.
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      /** This key is the menu's: nothing behind it hears about it. */
+      const take = () => {
         event.preventDefault();
         event.stopPropagation();
-        onClose();
-        return;
-      case "ArrowDown":
-        event.preventDefault();
-        step(1);
-        return;
-      case "ArrowUp":
-        event.preventDefault();
-        step(-1);
-        return;
-      case "Home":
-        event.preventDefault();
-        if (live.length > 0) setActive(live[0]);
-        return;
-      case "End":
-        event.preventDefault();
-        if (live.length > 0) setActive(live[live.length - 1]);
-        return;
-      case "Enter":
-      case " ":
-        event.preventDefault();
-        if (active !== null) choose(active);
-        return;
-      case "Tab":
-        // A menu is a mode, not a stop on the way to something else.
-        event.preventDefault();
-        onClose();
-        return;
-      default:
-        break;
-    }
+      };
 
-    // Type-ahead. One letter jumps to the next entry starting with it, and a
-    // second letter within the window extends the search rather than starting a
-    // new one — so `co` reaches `copy path` past `copy`.
-    if (event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey) return;
-    const now = event.timeStamp;
-    const text = (now - typed.current.at < TYPEAHEAD_MS ? typed.current.text : "") + event.key.toLowerCase();
-    typed.current = { text, at: now };
-
-    const from = active === null ? 0 : live.indexOf(active) + (text.length === 1 ? 1 : 0);
-    for (let offset = 0; offset < live.length; offset += 1) {
-      const index = live[(from + offset + live.length) % live.length];
-      const row = rows[index];
-      if (!isRule(row) && row.label.toLowerCase().startsWith(text)) {
-        event.preventDefault();
-        setActive(index);
-        return;
+      switch (event.key) {
+        case "Escape":
+          take();
+          onClose();
+          return;
+        case "ArrowDown":
+          take();
+          step(1);
+          return;
+        case "ArrowUp":
+          take();
+          step(-1);
+          return;
+        case "Home":
+          take();
+          if (live.length > 0) setActive(live[0]);
+          return;
+        case "End":
+          take();
+          if (live.length > 0) setActive(live[live.length - 1]);
+          return;
+        case "Enter":
+        case " ":
+          take();
+          if (active !== null) choose(active);
+          return;
+        case "Tab":
+          // A menu is a mode, not a stop on the way to something else.
+          take();
+          onClose();
+          return;
+        default:
+          break;
       }
-    }
-  };
+
+      // Type-ahead. One letter jumps to the next entry starting with it, and a
+      // second letter within the window extends the search rather than starting
+      // a new one — so `co` reaches `copy path` past `copy`.
+      if (event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey) return;
+      const now = event.timeStamp;
+      const text = (now - typed.current.at < TYPEAHEAD_MS ? typed.current.text : "") + event.key.toLowerCase();
+      typed.current = { text, at: now };
+
+      const from = active === null ? 0 : live.indexOf(active) + (text.length === 1 ? 1 : 0);
+      for (let offset = 0; offset < live.length; offset += 1) {
+        const index = live[(from + offset + live.length) % live.length];
+        const row = rows[index];
+        if (!isRule(row) && row.label.toLowerCase().startsWith(text)) {
+          take();
+          setActive(index);
+          return;
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
 
   return createPortal(
     <div
@@ -224,7 +308,6 @@ export function ContextMenu({ point, label, rows, onChoose, onClose }: ContextMe
       // handler serve every entry instead of one per row.
       aria-activedescendant={active === null ? undefined : `${id}-${active}`}
       tabIndex={-1}
-      onKeyDown={onKeyDown}
       // Hidden rather than absent until placed: it has to be in the document to
       // be measured, and on screen at 0,0 for one frame is a flash in the corner.
       style={
