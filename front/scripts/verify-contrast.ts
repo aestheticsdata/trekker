@@ -35,6 +35,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WARN_CHIP_FILL, WARN_CHIP_INK } from "../src/helpers/disks.ts";
 import { AGE_BUCKETS, HEAT, HEAT_OFF_INK, PANE_SURFACES } from "../src/helpers/heat.ts";
+import { MARK_ON_PANE, MARK_ON_PANEL } from "../src/helpers/listing.ts";
 import {
   DANGER_FILL,
   DANGER_INK,
@@ -130,6 +131,17 @@ import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK } from "../s
 
 /** WCAG 2.1 AA for text below 18.66px bold / 24px regular, which is all of it. */
 const AA = 4.5;
+
+/**
+ * 1.4.11, for the things in this app that are a shape rather than a string.
+ *
+ * There is exactly one set of them and it arrived with TRE-108: the folder
+ * silhouette in the listing's gutter, and the 1px edge that is the whole of a
+ * file's hollow pastille. They carry meaning — which of these can I walk into —
+ * and they carry it with no text at all, which is the case 1.4.11 is written
+ * for. Every other pair in this file is text and is measured at `AA`.
+ */
+const GRAPHIC = 3;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tokens = readTokens(join(here, "..", "styles", "globals.css"));
@@ -613,19 +625,11 @@ const ROOMS: readonly Room[] = [
       { on: ["bg-on-pane-muted"], inks: ["ink"], note: "the badge that says a mount is nearly full" },
       {
         on: ["bg-pane", "bg-pane-active"],
-        inks: [
-          "danger",
-          "on-pane",
-          "on-pane-data",
-          "on-pane-faint",
-          "on-pane-label",
-          "on-pane-muted",
-          "on-pane-strong",
-        ],
+        inks: ["danger", "on-pane", "on-pane-data", "on-pane-faint", "on-pane-label", "on-pane-muted"],
       },
       {
         on: ["bg-pane-hover", "bg-pane-sel", "bg-pane-sel-idle"],
-        inks: ["danger", "on-pane", "on-pane-data", "on-pane-faint", "on-pane-muted", "on-pane-strong"],
+        inks: ["danger", "on-pane", "on-pane-data", "on-pane-faint", "on-pane-muted"],
         note: "the same row, hovered and selected",
       },
       {
@@ -638,7 +642,6 @@ const ROOMS: readonly Room[] = [
     exempt: {
       "pane-line": INACTIVE,
       "ink-faint": "the dot beside an inactive tab, which is a graphic — 1.4.11 wants 3:1 of it and it has 3.62",
-      "on-pane-bright": "the type tag, whose fills are one-offs in `listing.ts` and are measured from there",
     },
   },
   {
@@ -869,8 +872,56 @@ const CORRECTED: readonly (readonly [string, string, string, string, string])[] 
   ["a symlink out of the root", "#7f2f2f", "#9bbcd7", "text-danger", "bg-pane"],
 ];
 
-console.log("\n--- and the type tag, whose fills are one-offs rather than tokens ---");
-for (const fill of tagFills()) check(`a tag on ${fill}`, "text-on-pane-bright", fill);
+/*
+ * The type mark, which replaced the type tag (TRE-108).
+ *
+ * What was measured here before was twenty one-off fills carrying white
+ * letters, and all twenty passed — 6.92:1 to 10.89:1. They were dropped anyway,
+ * because the thing that failed was never the contrast: every row in the gutter
+ * drew the same 14px box and only the tint said which was a directory, and a
+ * tint is not perceivable at that size whatever it measures. Shape replaced it.
+ *
+ * So the pairs are different in kind, and so is the threshold. The folder body,
+ * its tab and the hollow pastille's edge are graphics — they say what a row is
+ * with no text at all — and 1.4.11 asks 3:1 of them. The letters inside the
+ * pastille are text and are held at AA like everything else.
+ *
+ * The edge is the one translucent colour in the app, and the reason is that it
+ * has to sit on five row colours: solid, it would shout on `pane-sel` and
+ * disappear on nothing. `.65` rather than the `.55` the design asked for —
+ * `.55` composites to 2.78:1 on `bg-pane`, which is under 3:1 on the default
+ * ground and on the active one, and this edge is the entire shape.
+ */
+console.log(`\n--- the type mark, on the light panes (graphics at ${GRAPHIC}:1) ---`);
+for (const surface of PANE_SURFACES) {
+  const on = surface.replace("bg-", "");
+  check(`a folder on ${on}`, MARK_ON_PANE.folder, surface, GRAPHIC);
+  check(`a symlink on ${on}`, MARK_ON_PANE.link, surface, GRAPHIC);
+  check(`the pastille's edge on ${on}`, blend(MARK_ON_PANE.edge, surface), surface, GRAPHIC);
+  check(`its letters on ${on}`, MARK_ON_PANE.letters, surface);
+}
+
+console.log("\n--- and on the two panels that list entries: the copy plan, the delete confirmation ---");
+for (const surface of PANEL) {
+  const on = surface.replace("bg-", "");
+  check(`a folder on ${on}`, MARK_ON_PANEL.folder, surface, GRAPHIC);
+  check(`a symlink on ${on}`, MARK_ON_PANEL.link, surface, GRAPHIC);
+  check(`the pastille's edge on ${on}`, blend(MARK_ON_PANEL.edge, surface), surface, GRAPHIC);
+  check(`its letters on ${on}`, MARK_ON_PANEL.letters, surface);
+}
+
+/*
+ * What it replaced, kept as a measurement rather than a memory — the same
+ * reason `--color-accent` still has its number printed above.
+ */
+const wasTint = ratio(hexOf("#1d5230"), hexOf("bg-pane-active"));
+const isNeutral = ratio(hexOf(MARK_ON_PANE.letters), hexOf("bg-pane-active"));
+console.log(
+  `  --   a type tint as ink, which is what a colour code costs  ${wasTint.toFixed(2).padStart(5)}:1  ${verdict(wasTint)}`,
+);
+console.log(
+  `  --   the one neutral that replaced all twenty             ${isNeutral.toFixed(2).padStart(5)}:1  ${verdict(isNeutral)}`,
+);
 
 /*
  * The sweep prints only what fails. Five hundred `ok` lines would bury the
@@ -939,12 +990,12 @@ for (const [what, wasInk, wasGround, ink, ground] of CORRECTED) {
   );
 }
 
-console.log(`\n${checked - failures}/${checked} pairs pass AA at ${AA}:1.`);
+console.log(`\n${checked - failures}/${checked} pairs pass — text at ${AA}:1, the type mark's shapes at ${GRAPHIC}:1.`);
 process.exit(failures === 0 ? 0 : 1);
 
 /* ---- the checks -------------------------------------------------------- */
 
-function check(what: string, inkClass: string, backgroundClass: string): void {
+function check(what: string, inkClass: string, backgroundClass: string, threshold: number = AA): void {
   checked += 1;
 
   const ink = hexOf(inkClass);
@@ -952,13 +1003,39 @@ function check(what: string, inkClass: string, backgroundClass: string): void {
   const measured = ratio(ink, background);
   const line = `${what.padEnd(34)} ${ink} on ${background}  ${measured.toFixed(2).padStart(5)}:1`;
 
-  if (measured >= AA) {
+  if (measured >= threshold) {
     console.log(`  ok   ${line}`);
     return;
   }
 
   failures += 1;
-  console.log(`  FAIL ${line}  — needs ${AA}:1`);
+  console.log(`  FAIL ${line}  — needs ${threshold}:1`);
+}
+
+/**
+ * A colour with an opacity modifier, resolved against what it is drawn on.
+ *
+ * The note at the top of this file said such a pair "has to be composited
+ * against its backdrop first, which is why none are here". One is here now: the
+ * hollow pastille's edge is deliberately translucent so that it keeps the same
+ * relationship to all five row colours instead of shouting on the two light
+ * ones. Tailwind writes `border-x/65` as a `color-mix` with `transparent`,
+ * which leaves the colour where it was and takes the alpha to 0.65, so what
+ * lands on screen is the straight sRGB blend this computes.
+ */
+function blend(utility: string, groundClass: string): string {
+  const [name, percent] = utility.split("/");
+  const alpha = Number(percent) / 100;
+  const ink = hexOf(name);
+  const ground = hexOf(groundClass);
+
+  const channel = (offset: number) => {
+    const front = (Number.parseInt(ink.slice(1), 16) >> offset) & 255;
+    const back = (Number.parseInt(ground.slice(1), 16) >> offset) & 255;
+    return Math.round(front * alpha + back * (1 - alpha));
+  };
+
+  return `#${[16, 8, 0].map((offset) => channel(offset).toString(16).padStart(2, "0")).join("")}`;
 }
 
 /**
@@ -971,7 +1048,12 @@ function check(what: string, inkClass: string, backgroundClass: string): void {
 function hexOf(utility: string): string {
   if (utility.startsWith("#")) return utility.toLowerCase();
 
-  const token = `--color-${utility.replace(/^(bg|text)-/, "")}`;
+  // `bg-[#4d7f99]` — a colour with no token, which is a literal wearing a
+  // utility's clothes. Two of them ship, both the mockup's own.
+  const arbitrary = utility.match(/^[a-z-]+-\[(#[0-9a-f]{6})\]$/i);
+  if (arbitrary) return arbitrary[1].toLowerCase();
+
+  const token = `--color-${utility.replace(/^(bg|text|border)-/, "")}`;
   const hex = tokens.get(token);
   if (!hex) {
     // A missing token is a failure of this script's assumptions, not a colour
@@ -1061,19 +1143,4 @@ function componentFiles(): readonly string[] {
     }
   }
   return found.sort();
-}
-
-/**
- * The type tag's fills, read out of `listing.ts`.
- *
- * Twenty one-off hexes rather than tokens, and deliberately so — they belong to
- * that badge and nothing else. That does not exempt them from being measured;
- * it only means the ground is a literal instead of a name.
- */
-function tagFills(): readonly string[] {
-  const source = readFileSync(join(SRC, "helpers", "listing.ts"), "utf8");
-  const found = new Set<string>();
-  for (const [, fill] of source.matchAll(/className: "bg-(?:\[(#[0-9a-f]{6})\])"/g)) found.add(fill);
-  for (const [, fill] of source.matchAll(/className: "(bg-[a-z-]+)"/g)) found.add(fill);
-  return [...found].sort();
 }

@@ -1,10 +1,11 @@
 "use client";
 
 import { useAuth } from "@auth/context/AuthContext";
+import { FileMark } from "@components/explorer/file-mark";
 import { CommandLine } from "@components/ui/command-line";
 import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
-import { formatSize } from "@helpers/listing";
+import { extensionOf, formatSize, MARK_ON_PANEL, rowTypeOf } from "@helpers/listing";
 import { DANGER_FILL, DANGER_INK } from "@helpers/press";
 import { ApiError } from "@lib/api/client";
 import { deletePaths, planDelete } from "@lib/api/delete";
@@ -169,8 +170,13 @@ function DeletePanel({
         {plan.data?.targets.map((row) => (
           <div
             key={row.path}
-            className="border-raised grid grid-cols-[1fr_auto_auto] items-center gap-2.5 border-t px-3.5 py-1.5"
+            className="border-raised grid grid-cols-[auto_1fr_auto_auto] items-center gap-2.5 border-t px-3.5 py-1.5"
           >
+            <FileMark
+              type={rowTypeOf(row.kind)}
+              extension={extensionOf(row.name)}
+              ink={MARK_ON_PANEL}
+            />
             <span className="text-ink-muted truncate font-mono text-xs/[1.3]">{row.name}</span>
             <span className="text-ink-dim font-mono text-2xs/none">
               {row.kind === "directory" ? `recursive · ${count(row.entries, "entry", "entries")}` : row.kind}

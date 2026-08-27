@@ -1,5 +1,6 @@
 "use client";
 
+import { FileMark } from "@components/explorer/file-mark";
 import { cursorWindowIndex, PARENT_NAME, pathOf } from "@components/explorer/pane-state";
 import { useRowWindow } from "@components/explorer/row-window";
 import { TailStrip } from "@components/explorer/tail-strip";
@@ -12,8 +13,8 @@ import {
   formatInstant,
   formatSize,
   formatTotal,
+  MARK_ON_PANE,
   partialTotalHint,
-  typeTag,
 } from "@helpers/listing";
 import { PRESS } from "@helpers/press";
 import { isLogDirectory } from "@helpers/tail";
@@ -807,7 +808,6 @@ function Row({
   onClick: PaneCallbacks["onRowClick"];
   onOpen: PaneCallbacks["onOpen"];
 }) {
-  const tag = typeTag(row);
   const days = ageDays(row.mtime, now);
   const paint = HEAT[ageIndex(days)];
   // Relative, unlike the heat map, and deliberately: the question this column
@@ -837,20 +837,32 @@ function Row({
         cut ? "opacity-50" : ""
       }`}
     >
-      <span
-        className={`text-on-pane-bright rounded-[1.5px] py-0.5 text-center font-mono text-tag font-bold tracking-normal ${tag.className}`}
-      >
-        {tag.label}
-      </span>
+      <FileMark
+        type={row.type}
+        extension={row.extension}
+        ink={MARK_ON_PANE}
+      />
 
+      {/* Weight, not hue, now that the gutter carries the type: a directory and
+          a symlink are the heavy names in the column and everything else steps
+          back one. `on-pane-strong` was the pane's signature blue and is not
+          missed here — it moved to the symlink's mark, where it is the whole
+          of the difference between the two silhouettes.
+
+          The `/` is inside the truncating box on purpose. Outside it, a name
+          long enough to ellipse would leave its slash sitting after the `…`,
+          which reads as a directory called something-dot-dot-dot-slash. It is
+          a directory's suffix and not a symlink's: `ls -F` marks a link `@`,
+          and the listing has no idea what the target is. */}
       <span
         className={`truncate ${
-          row.type === "dir" ? "text-on-pane-strong" : row.type === "link" ? "text-on-pane-muted" : "text-on-pane"
+          row.type === "dir" || row.type === "link" ? "text-on-pane font-semibold" : "text-on-pane-muted"
         }`}
       >
         {row.name}
+        {row.type === "dir" && <span className="text-on-pane-faint font-normal">/</span>}
         {row.linkTarget && (
-          <span className={row.linkInsideRoot === false ? "text-danger" : "text-on-pane-faint"}>
+          <span className={`font-normal ${row.linkInsideRoot === false ? "text-danger" : "text-on-pane-faint"}`}>
             {" "}
             → {row.linkTarget}
           </span>

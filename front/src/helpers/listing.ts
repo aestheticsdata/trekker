@@ -152,37 +152,99 @@ export function formatAge(days: number): string {
 /* The seven age buckets moved to `@helpers/heat` with TRE-33, where the ramp
  * they index and the contrast check that verifies it live beside them. */
 
-/* ---- the type tag ------------------------------------------------------ */
+/* ---- the type mark ------------------------------------------------------ */
 
-/** Label and background for the 14px tag in the first column. */
-export interface TypeTag {
-  label: string;
-  className: string;
+/**
+ * Which silhouette a row draws in the 14px gutter (TRE-108).
+ *
+ * Shape, not tint. Until this ticket every row in that column drew the same
+ * object — one filled pastille, three letters at 5.8px — and the only thing
+ * that told a directory from a `.log` was the fill behind letters nobody reads
+ * at that size. A colour code has to be learnt; an outline does not. So the
+ * folder is the one solid form in the gutter and every file is hollow, and the
+ * question the pane is asked most often is answered without reading a name.
+ *
+ * A symlink keeps the folder's silhouette in the lighter ink: it is walked
+ * through, but it points elsewhere.
+ */
+export type MarkShape = "folder" | "link" | "file";
+
+export function markShape(type: RowType): MarkShape {
+  if (type === "dir") return "folder";
+  if (type === "link") return "link";
+  return "file";
 }
 
 /**
- * Extension groups, from the mockup's own table. The colours are one-offs
- * belonging to this tag and nothing else, so they stay here as classes rather
- * than becoming twenty design tokens the rest of the app would never use.
+ * The four colours the mark is made of, on one ground.
+ *
+ * Named here rather than written into the component for the reason `press.ts`,
+ * `tooltip.ts` and `disks.ts` exist, and which `verify-contrast.ts` states in
+ * its own words: a class written straight into a component is a pair no check
+ * can see. `verify:contrast` imports both sets and measures every one of them —
+ * the two fills and the edge against 1.4.11's 3:1, because a shape carrying
+ * meaning is a graphic, and the letters against AA, because they are text.
  */
-const TAGS: Record<string, TypeTag> = {
-  js: { label: "JS", className: "bg-[#4a3f8f]" },
-  ts: { label: "TS", className: "bg-[#35306e]" },
-  json: { label: "{}", className: "bg-[#33495c]" },
-  yml: { label: "YML", className: "bg-[#33495c]" },
-  cfg: { label: "CFG", className: "bg-[#33495c]" },
-  sql: { label: "SQL", className: "bg-[#0f3f6b]" },
-  db: { label: "DB", className: "bg-[#0f3f6b]" },
-  log: { label: "LOG", className: "bg-[#2c5a76]" },
-  md: { label: "MD", className: "bg-[#2c5a76]" },
-  htm: { label: "HTM", className: "bg-[#14456b]" },
-  css: { label: "CSS", className: "bg-[#4a2f6b]" },
-  img: { label: "IMG", className: "bg-[#1d5230]" },
-  mp4: { label: "MP4", className: "bg-[#1d5230]" },
-  sh: { label: "SH", className: "bg-[#1d5230]" },
-  key: { label: "KEY", className: "bg-[#5f2f7a]" },
-  pem: { label: "PEM", className: "bg-[#5f2f7a]" },
-  gz: { label: "GZ", className: "bg-[#12545a]" },
+export interface MarkInk {
+  /** The solid folder body, and the tab above it. */
+  readonly folder: string;
+  /** The same silhouette for a symlink, one step lighter. */
+  readonly link: string;
+  /** The hollow pastille's 1px edge, which is the whole of its shape. */
+  readonly edge: string;
+  /** The letters inside it. */
+  readonly letters: string;
+}
+
+/** A pane row: dark ink on the app's one light surface. */
+export const MARK_ON_PANE: MarkInk = {
+  folder: "bg-on-pane",
+  link: "bg-on-pane-strong",
+  edge: "border-on-pane/65",
+  letters: "text-on-pane-label",
+};
+
+/**
+ * The copy plan and the delete confirmation: light ink on a panel.
+ *
+ * `#4d7f99` is the one value here with no token, and stays a literal for the
+ * reason it is already one in `disks.ts` — it is the mockup's own quiet blue,
+ * belonging to that strip and to this mark rather than to the palette.
+ */
+export const MARK_ON_PANEL: MarkInk = {
+  folder: "bg-brand",
+  link: "bg-[#4d7f99]",
+  edge: "border-brand/50",
+  letters: "text-brand",
+};
+
+/**
+ * Extension groups, from the mockup's own table.
+ *
+ * The letters, and nothing else now: the twenty one-off fills that used to sit
+ * beside them came off with TRE-108. They were never perceivable at this size —
+ * measured as ink on a pane they land between 4.3 and 5.5:1, against 6.2 for
+ * the one neutral the letters now wear — and a badge that has to be read to be
+ * understood is a badge that has already failed at 6.4px.
+ */
+const TAGS: Record<string, string> = {
+  js: "JS",
+  ts: "TS",
+  json: "{}",
+  yml: "YML",
+  cfg: "CFG",
+  sql: "SQL",
+  db: "DB",
+  log: "LOG",
+  md: "MD",
+  htm: "HTM",
+  css: "CSS",
+  img: "IMG",
+  mp4: "MP4",
+  sh: "SH",
+  key: "KEY",
+  pem: "PEM",
+  gz: "GZ",
 };
 
 /** Extensions that mean the same thing as one of the groups above. */
@@ -221,15 +283,49 @@ const ALIASES: Record<string, keyof typeof TAGS> = {
   zip: "gz",
 };
 
-export function typeTag(row: FileRow): TypeTag {
-  if (row.type === "dir") return { label: "DIR", className: "bg-on-pane-strong" };
-  if (row.type === "link") return { label: "↗", className: "bg-on-pane-strong" };
-
+/**
+ * The letters on a hollow pastille.
+ *
+ * Only ever asked about a file: a folder and a symlink are a shape and carry
+ * none. An extension nothing here names falls back to `{}`, which is what the
+ * mockup draws over anything it has no group for.
+ */
+export function typeLetters(extension: string): string {
   // hasOwn, not `in`: a file called `x.constructor` is a filename, not a
   // lookup into Object.prototype.
-  const extension = row.extension;
   const key = Object.hasOwn(TAGS, extension) ? extension : ALIASES[extension];
-  return key && Object.hasOwn(TAGS, key) ? TAGS[key] : { label: "{}", className: "bg-[#33495c]" };
+  return key && Object.hasOwn(TAGS, key) ? TAGS[key] : "{}";
+}
+
+/**
+ * The driver's own word for a kind, narrowed to a row type.
+ *
+ * The pane is handed a `RowType` already. The copy plan and the delete
+ * confirmation are not — they carry the string the driver reported, which is
+ * `"directory"`, `"symlink"`, `"file"` or one of five words for a special file
+ * — so the mark repeats the collapse the API makes on its way to a listing
+ * rather than growing a second idea of what a directory is called.
+ */
+export function rowTypeOf(kind: string): RowType {
+  if (kind === "directory") return "dir";
+  if (kind === "file") return "file";
+  if (kind === "symlink") return "link";
+  return "other";
+}
+
+/**
+ * The extension a name ends in, lowercased and without its dot.
+ *
+ * The API sends `extension` on a listing row and this repeats its rule, for the
+ * same two modals: they are given a name and a kind and nothing else, because
+ * until the mark existed neither had anything to draw with it. A leading dot is
+ * not a separator — `.env` is a name, not an extension — and a trailing one is
+ * not either.
+ */
+export function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || dot === name.length - 1) return "";
+  return name.slice(dot + 1).toLowerCase();
 }
 
 /* ---- filtering --------------------------------------------------------- */

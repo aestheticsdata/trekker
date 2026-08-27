@@ -188,9 +188,16 @@
    * wearing two names again — but one is a saturated blue and the other is
    * red, and nobody has ever had to tell those apart by their lightness. It
    * leaves `strong` as the thinnest margin on the surface, three hundredths
-   * over the line, and it stays there because it is 2a's own and because the
-   * directory name is the pane's signature. `verify:contrast` is what stands
-   * between that margin and the next person who nudges `--color-pane`.
+   * over the line, and it stays there because it is 2a's own.
+   *
+   * It is no longer the directory name, though: TRE-108 gave that job to
+   * weight and moved this blue into the gutter, where it is the symlink's mark
+   * and so the whole of the difference between the two solid silhouettes. That
+   * makes it a graphic rather than text, which 1.4.11 measures at 3:1 — but it
+   * is still checked at AA here, because a colour that clears the higher bar
+   * cannot fail the lower one and because the margin is the interesting number.
+   * `verify:contrast` is what stands between it and the next person who nudges
+   * `--color-pane`.
    */
   --color-on-pane: #0c2a44;
   --color-on-pane-strong: #0f4d74;
@@ -346,9 +353,13 @@
    * Every step is `rem`, which is what makes `--ui-base` below work: change
    * the root font size and the whole scale moves with it, in proportion.
    *
-   * `tag` is the type badge and nothing else, and deliberately has no
-   * line-height of its own: the badge is a filled chip whose height comes from
-   * the row it sits in, and giving it one shrinks it to the glyph.
+   * `tag` is the type mark's letters and nothing else. It has no line-height of
+   * its own because the badge no longer takes its height from the row it sits
+   * in: since TRE-108 it is a hollow box of a stated size that centres its
+   * glyph, so the step it needs is a size and the line-height would only fight
+   * the centring. 6.4px rather than 5.8 for the same reason the fills came off
+   * — three letters have to be read to mean anything, and at 5.8 they were a
+   * texture.
    *
    * The three half-steps come from the inspector (TRE-17), where the mockup
    * draws a caption, a command label and an entry's name half a pixel apart
@@ -361,7 +372,7 @@
    * falls through to preflight's 1.5, which is how a 10.5px button ends up in a
    * 16px line box — so a bare `--text-*` is a half-finished step, not a default.
    */
-  --text-tag: 0.3625rem; /* 5.8px */
+  --text-tag: 0.4rem; /* 6.4px */
   --text-3xs: 0.53125rem; /* 8.5px */
   --text-caps: 0.5625rem; /* 9px — the sidebar's section headers and row hints */
   --text-3xs--line-height: 1rem;

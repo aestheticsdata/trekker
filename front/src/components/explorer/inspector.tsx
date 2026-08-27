@@ -13,7 +13,7 @@ import {
   joinPath,
   onDiskBytes,
   partialTotalHint,
-  typeTag,
+  typeLetters,
 } from "@helpers/listing";
 import { describeMode, permissionRows } from "@helpers/permissions";
 import { ON_FILL, PRESS } from "@helpers/press";
@@ -951,7 +951,7 @@ function previewCaption(row: FileRow, items: number | null): string {
   if (row.type === "link") return "symlink";
   if (row.type === "other") return "special file";
 
-  const tag = typeTag(row).label;
+  const tag = typeLetters(row.extension);
   if (tag === "IMG") return "image preview";
   if (tag === "MP4") return "preview · video";
   if (tag === "GZ") return `preview · ${ARCHIVE_NAMES[row.extension] ?? row.extension} archive`;

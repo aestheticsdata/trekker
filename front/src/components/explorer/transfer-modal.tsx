@@ -1,9 +1,10 @@
 "use client";
 
 import { useAuth } from "@auth/context/AuthContext";
+import { FileMark } from "@components/explorer/file-mark";
 import { Overlay } from "@components/ui/overlay";
 import { Tooltip } from "@components/ui/tooltip";
-import { formatSize } from "@helpers/listing";
+import { extensionOf, formatSize, MARK_ON_PANEL, rowTypeOf } from "@helpers/listing";
 import { PRESS, SELECTED } from "@helpers/press";
 import { ApiError } from "@lib/api/client";
 import { planTransfer, startTransfer } from "@lib/api/transfers";
@@ -364,7 +365,17 @@ function Row({
   onAnswer: (choice: ConflictStrategy) => void;
 }) {
   return (
-    <div className="border-raised grid grid-cols-[auto_1fr_auto_auto] items-center gap-2.5 border-t px-3.5 py-1.5">
+    <div className="border-raised grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-2.5 border-t px-3.5 py-1.5">
+      <FileMark
+        type={rowTypeOf(item.kind)}
+        extension={extensionOf(item.name)}
+        ink={MARK_ON_PANEL}
+      />
+      {/* The word stays beside the mark rather than being replaced by it. A
+          silhouette is what makes a hundred rows countable at a glance; on a
+          screen deciding what happens to each of eight, the difference between
+          a symlink and the directory it looks like is worth a word as well as
+          an ink. */}
       <span className="text-ink-faint w-14 font-mono text-2xs/none">
         {item.kind === "directory" ? "dir" : item.kind}
       </span>
