@@ -35,7 +35,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WARN_CHIP_FILL, WARN_CHIP_INK } from "../src/helpers/disks.ts";
 import { AGE_BUCKETS, HEAT, HEAT_OFF_INK, PANE_SURFACES } from "../src/helpers/heat.ts";
-import { MARK_ON_PANE, MARK_ON_PANEL } from "../src/helpers/listing.ts";
+import { MARK_ON_PANE, MARK_ON_PANEL, MOCKUP_LINK_HEX } from "../src/helpers/listing.ts";
 import {
   DANGER_FILL,
   DANGER_INK,
@@ -922,6 +922,31 @@ console.log(
 console.log(
   `  --   the one neutral that replaced all twenty             ${isNeutral.toFixed(2).padStart(5)}:1  ${verdict(isNeutral)}`,
 );
+
+/*
+ * And 2a's own symlink blue, which is why ours differs (TRE-108).
+ *
+ * The same treatment every corrected mockup colour in this file gets: their
+ * number beside ours, so the correction stays reviewable rather than becoming a
+ * colour somebody once changed. Only the lightness moved — 44.7% to 36% — which
+ * is the least that clears 1.4.11 on all five row colours.
+ *
+ * The third number is the one that decided it. This mark's job is to be a
+ * folder that is not the folder beside it, so what it has to hold is a ratio to
+ * `on-pane`, not only to the ground: 2.33:1, against 1.63 for the token this
+ * first shipped as — two solids nobody could tell apart.
+ */
+console.log("\n--- for the record: 2a's own symlink blue, which is why ours differs ---");
+{
+  const theirs = ratio(MOCKUP_LINK_HEX, hexOf("bg-pane"));
+  const mine = ratio(hexOf(MARK_ON_PANE.link), hexOf("bg-pane"));
+  const apart = ratio(hexOf(MARK_ON_PANE.link), hexOf(MARK_ON_PANE.folder));
+  console.log(
+    `  the symlink's mark, on bg-pane  ${MOCKUP_LINK_HEX}  ${theirs.toFixed(2).padStart(5)} ${verdict(theirs).padEnd(15)}` +
+      `→ ours ${mine.toFixed(2).padStart(5)} ${verdict(mine)}`,
+  );
+  console.log(`  and away from the folder beside it                 ${apart.toFixed(2).padStart(5)}:1`);
+}
 
 /*
  * The sweep prints only what fails. Five hundred `ok` lines would bury the

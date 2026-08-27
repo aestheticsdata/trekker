@@ -196,10 +196,35 @@ export interface MarkInk {
   readonly letters: string;
 }
 
-/** A pane row: dark ink on the app's one light surface. */
+/**
+ * 2a's own symlink blue, kept for the record beside the one that ships.
+ *
+ * It measures 2.21:1 on `bg-pane` — the mark is a shape carrying meaning, which
+ * 1.4.11 asks 3:1 of — so it could not ship as drawn. `verify:contrast` prints
+ * both numbers, which is TRE-33's rule for every mockup colour this app has had
+ * to correct: the hue is the mockup's, the ground is the mockup's, and only the
+ * lightness moves.
+ */
+export const MOCKUP_LINK_HEX = "#3e7fa6";
+
+/**
+ * A pane row: dark ink on the app's one light surface.
+ *
+ * The symlink is `#326585`, which is `MOCKUP_LINK_HEX` at the same hue (202.5°)
+ * and the same saturation (45.6%) with its lightness taken from 44.7% to 36% —
+ * the least that clears 3:1 on all five row colours, and no further.
+ *
+ * "No further" is the whole of it. The first attempt reached for
+ * `on-pane-strong`, an existing token that clears with room to spare, and that
+ * was the wrong number to optimise: it sits **1.63:1** from the folder's own
+ * ink, so the two silhouettes this mark exists to tell apart became two solids
+ * nobody could tell apart. `#326585` is 2.33:1 from it, against 3.35:1 for the
+ * mockup's. The ratio that matters for this one colour is the one to the mark
+ * beside it, not the one to the ground under it.
+ */
 export const MARK_ON_PANE: MarkInk = {
   folder: "bg-on-pane",
-  link: "bg-on-pane-strong",
+  link: "bg-[#326585]",
   edge: "border-on-pane/65",
   letters: "text-on-pane-label",
 };

@@ -846,8 +846,8 @@ function Row({
       {/* Weight, not hue, now that the gutter carries the type: a directory and
           a symlink are the heavy names in the column and everything else steps
           back one. `on-pane-strong` was the pane's signature blue and is not
-          missed here — it moved to the symlink's mark, where it is the whole
-          of the difference between the two silhouettes.
+          missed here — the gutter says what the blue used to say, and says it
+          without spending the surface's thinnest contrast margin on a name.
 
           The `/` is inside the truncating box on purpose. Outside it, a name
           long enough to ellipse would leave its slash sitting after the `…`,

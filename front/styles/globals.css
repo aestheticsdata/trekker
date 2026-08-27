@@ -190,14 +190,13 @@
    * leaves `strong` as the thinnest margin on the surface, three hundredths
    * over the line, and it stays there because it is 2a's own.
    *
-   * It is no longer the directory name, though: TRE-108 gave that job to
-   * weight and moved this blue into the gutter, where it is the symlink's mark
-   * and so the whole of the difference between the two solid silhouettes. That
-   * makes it a graphic rather than text, which 1.4.11 measures at 3:1 — but it
-   * is still checked at AA here, because a colour that clears the higher bar
-   * cannot fail the lower one and because the margin is the interesting number.
-   * `verify:contrast` is what stands between it and the next person who nudges
-   * `--color-pane`.
+   * It is no longer the directory name, though. TRE-108 gave that job to
+   * weight, and what is left of this blue in the pane is the selected row's
+   * left border and the dotted cursor outline — both graphics, which 1.4.11
+   * measures at 3:1. It is still checked at AA here: a colour that clears the
+   * higher bar cannot fail the lower one, and the margin is the interesting
+   * number. `verify:contrast` is what stands between it and the next person who
+   * nudges `--color-pane`.
    */
   --color-on-pane: #0c2a44;
   --color-on-pane-strong: #0f4d74;
