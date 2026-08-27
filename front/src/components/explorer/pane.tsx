@@ -5,7 +5,7 @@ import { useRowWindow } from "@components/explorer/row-window";
 import { TailStrip } from "@components/explorer/tail-strip";
 import { Tooltip } from "@components/ui/tooltip";
 import { ageIndex, HEAT, HEAT_OFF_BAR, HEAT_OFF_INK } from "@helpers/heat";
-import { ageDays, breadcrumbs, formatAge, formatSize, formatTotal, typeTag } from "@helpers/listing";
+import { ageDays, breadcrumbs, formatAge, formatInstant, formatSize, formatTotal, typeTag } from "@helpers/listing";
 import { PRESS } from "@helpers/press";
 import { isLogDirectory } from "@helpers/tail";
 import { ApiError } from "@lib/api/client";
@@ -827,7 +827,10 @@ function Row({
 
       {/* The padding is unconditional, so turning the heat map off removes a
           fill and never a pixel — the column keeps its width and no row moves. */}
-      <Tooltip content={row.mtime}>
+      {/* The exact instant behind the rounding, in the app's own reading of it
+          rather than the API's — `formatInstant` is what the inspector's
+          modified/accessed rows already print (TRE-103). */}
+      <Tooltip content={formatInstant(row.mtime)}>
         <span className={`px-1 py-0.5 text-right text-2xs ${chip ?? ""} ${heat ? paint.ink : HEAT_OFF_INK}`}>
           {formatAge(days)}
         </span>

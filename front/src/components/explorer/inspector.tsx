@@ -328,7 +328,12 @@ function EntryPanel({
               hint: isLink ? undefined : "Rounded up to a 4 KiB block — an estimate, not a measurement",
             },
             { label: "MODE", value: entry.mode },
-            { label: "AGE", value: formatAge(ageDays(entry.mtime, now)), hint: entry.mtime, quiet: true },
+            {
+              label: "AGE",
+              value: formatAge(ageDays(entry.mtime, now)),
+              hint: formatInstant(entry.mtime),
+              quiet: true,
+            },
           ]}
         />
 
