@@ -751,12 +751,8 @@ const ROOMS: readonly Room[] = [
   {
     file: "components/sidebar/sidebar.tsx",
     boxes: [
-      { on: [CHROME_BG], inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-label", "ink-muted", "ink-soft"] },
-      {
-        on: [RAISED],
-        inks: ["danger-soft", "ink", "ink-dim", "ink-muted", "ink-soft"],
-        note: "a host row, a favourite and the ＋ new host… button, which raise under the pointer",
-      },
+      { on: [CHROME_BG], inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-label", "ink-soft"] },
+      { on: [RAISED], inks: ["danger-soft", "ink", "ink-dim", "ink-soft"], note: "a host row and a favourite, which raise under the pointer" },
     ],
   },
   {
@@ -767,6 +763,16 @@ const ROOMS: readonly Room[] = [
     ],
   },
 
+  {
+    file: "components/ui/add-button.tsx",
+    boxes: [
+      {
+        on: [CHROME_BG, RAISED],
+        inks: ["ink", "ink-muted"],
+        note: "the dashed ＋ at the foot of a rail section, which raises under the pointer",
+      },
+    ],
+  },
   { file: "components/ui/command-line.tsx", boxes: [{ on: [CHROME_BG], inks: ["ink-muted"] }] },
   {
     file: "components/ui/context-menu.tsx",
@@ -804,7 +810,7 @@ const ROOMS: readonly Room[] = [
   },
   {
     file: "components/views/view-list.tsx",
-    boxes: [{ on: [CHROME_BG, RAISED], inks: ["ink", "ink-dim", "ink-muted", "warning"] }],
+    boxes: [{ on: [CHROME_BG, RAISED], inks: ["ink", "ink-dim", "warning"] }],
   },
   {
     file: "components/views/view-rebind.tsx",

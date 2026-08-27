@@ -1,5 +1,6 @@
 "use client";
 
+import { AddButton } from "@components/ui/add-button";
 import { Tooltip } from "@components/ui/tooltip";
 import { writeViewSlot } from "@helpers/keys";
 import { DIRTY_DOT, describeHosts, ROW_INK, ROW_KEY_INK, ROW_ON_INK } from "@helpers/views";
@@ -119,15 +120,10 @@ export function ViewList({
         </p>
       )}
 
-      <div className="mt-1.5 px-2.5">
-        <button
-          type="button"
-          onClick={onSave}
-          className="border-line-strong text-ink-muted hover:bg-raised hover:border-accent hover:text-ink flex w-full justify-center border border-dashed py-1.5 font-mono text-2xs"
-        >
-          ＋ save current view…
-        </button>
-      </div>
+      <AddButton
+        label="＋ save current view…"
+        onClick={onSave}
+      />
     </>
   );
 }
