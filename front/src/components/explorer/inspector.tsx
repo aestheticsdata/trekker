@@ -8,7 +8,6 @@ import {
   formatAge,
   formatExactBytes,
   formatInstant,
-  formatPartialTotal,
   formatSize,
   formatTotal,
   joinPath,
@@ -262,7 +261,7 @@ function DirectoryPanel({
       <Stats
         cells={[
           { label: "ITEMS", value: String(rows.length) },
-          { label: "SIZE", value: formatPartialTotal(bytes, unsized), hint: partialTotalHint(unsized) },
+          { label: "SIZE", value: formatTotal(bytes), hint: partialTotalHint(unsized), quiet: unsized > 0 },
           { label: "FOLDERS", value: String(folders) },
           {
             label: "NEWEST",
@@ -416,8 +415,12 @@ function SelectionPanel({
         cells={[
           {
             label: "TOTAL SIZE",
-            value: formatPartialTotal(bytes, unsized),
+            value: formatTotal(bytes),
             hint: partialTotalHint(unsized),
+            // Dimmed while directories are still being walked (TRE-110): the
+            // number is a floor, and `quiet` is what this panel already means
+            // by "true, but do not read it as the headline".
+            quiet: unsized > 0,
           },
           { label: "MODES", value: String(modes.length), quiet: modes.length === 1 },
           { label: "FILES", value: String(selected.length - folders) },

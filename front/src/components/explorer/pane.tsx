@@ -10,17 +10,15 @@ import {
   breadcrumbs,
   formatAge,
   formatInstant,
-  formatPartialTotal,
   formatSize,
   formatTotal,
   partialTotalHint,
-  spinnerFrame,
   typeTag,
 } from "@helpers/listing";
 import { PRESS } from "@helpers/press";
 import { isLogDirectory } from "@helpers/tail";
 import { ApiError } from "@lib/api/client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import type { PaneView } from "@components/explorer/pane-state";
 import type { DirSize, DirSizes } from "@components/explorer/use-dir-sizes";
@@ -195,12 +193,6 @@ export function Pane({
   // size sitting on the same line must describe the same set of files.
   const shownBytes = rows.reduce((sum, row) => sum + (row.size ?? 0), 0);
   const unknownShown = rows.reduce((count, row) => (row.size === null ? count + 1 : count), 0);
-
-  // One ticker for the whole listing, so every pending row turns in step. A
-  // timer per row would be forty of them on a full window, all drifting apart,
-  // and a table of independently-spinning dashes reads as a fault rather than
-  // as work in progress.
-  const tick = useSpinnerTick(sizes.walking && unknownShown > 0);
 
   /** Whether files are being dragged over this pane right now (TRE-65). */
   const [dropping, setDropping] = useState(false);
@@ -391,7 +383,6 @@ export function Pane({
                     largest={largest}
                     size={sizes.known.get(row.name) ?? null}
                     walking={sizes.walking}
-                    tick={tick}
                     heat={heat}
                     now={now}
                     onClick={callbacks.onRowClick}
@@ -673,12 +664,11 @@ function badgeFor(
 
   if (!meta) return null;
 
-  // `≥` while directories are still being walked, and it disappears when the
-  // last one lands. The alternative was a total that is quietly short for a few
-  // seconds and then silently grows, which is how the old 4 kB directory got
-  // away with it for as long as it did.
+  // The figure grows as directories land, and says why on hover while any are
+  // still outstanding. No marker on the number itself (TRE-110) — this badge
+  // shares a fixed box with two warnings, and a wider label moves them.
   return {
-    label: `${formatPartialTotal(shownBytes, unknownShown)} total`,
+    label: `${formatTotal(shownBytes)} total`,
     hint: partialTotalHint(unknownShown),
     alarming: false,
   };
@@ -796,7 +786,6 @@ function Row({
   largest,
   size,
   walking,
-  tick,
   heat,
   now,
   onClick,
@@ -813,8 +802,6 @@ function Row({
   size: DirSize | null;
   /** Whether the feed is still running, which is what tells pending from ended. */
   walking: boolean;
-  /** The pane's shared spinner frame. */
-  tick: number;
   heat: boolean;
   now: number;
   onClick: PaneCallbacks["onRowClick"];
@@ -881,12 +868,16 @@ function Row({
         />
       </span>
 
-      <span className="text-on-pane-data text-right">
+      {/* `whitespace-nowrap` is a guard rather than a style (TRE-110): the column
+          is 62px and the row height is fixed, so a figure two characters wider
+          than expected does not narrow the cell — it wraps, spills out of
+          `h-row` and lands on the row below. Nothing here may wrap, whatever a
+          future format decides to put in it. */}
+      <span className="text-on-pane-data text-right whitespace-nowrap">
         <SizeCell
           row={row}
           size={size}
           walking={walking}
-          tick={tick}
         />
       </span>
       <span className="text-on-pane-muted">{row.mode}</span>
@@ -915,25 +906,20 @@ function Row({
  * spinner that never stops is the worst possible rendering of "permission
  * denied", because it invites waiting for something that is not coming.
  */
-function SizeCell({
-  row,
-  size,
-  walking,
-  tick,
-}: {
-  row: FileRow;
-  size: DirSize | null;
-  walking: boolean;
-  tick: number;
-}) {
+function SizeCell({ row, size, walking }: { row: FileRow; size: DirSize | null; walking: boolean }) {
   if (row.type !== "dir") return formatSize(row.size, row.type);
 
   if (row.size !== null) {
-    // `du` walked what it could reach and was refused below. The figure is a
-    // floor, and printing it bare would be a claim the walk did not make.
+    // `du` walked what it could reach and was refused below, so the figure is a
+    // floor. Said with ink rather than with a symbol (TRE-110): on `/` almost
+    // every directory hides something from the account, so almost every row
+    // would carry the mark — and a mark on almost every row is furniture.
     return size?.partial === true ? (
-      <span title="Part of this directory could not be read, so the real total is larger.">
-        {`≥ ${formatSize(row.size, "dir")}`}
+      <span
+        className="text-on-pane-muted"
+        title="Part of this directory could not be read, so the real total is larger."
+      >
+        {formatSize(row.size, "dir")}
       </span>
     ) : (
       formatSize(row.size, "dir")
@@ -951,15 +937,15 @@ function SizeCell({
     );
   }
 
-  // Still walking. Dimmed, because a turning dash at full strength competes
-  // with the figures around it for an attention it does not deserve.
+  // Still walking. Dimmed, because a spinner at full strength competes with the
+  // figures around it for an attention it does not deserve.
   if (walking) {
     return (
       <span
-        className="text-on-pane-muted"
+        className="text-on-pane-muted inline-flex h-full items-center justify-end"
         title="Measuring…"
       >
-        {spinnerFrame(tick)}
+        <MeasuringRing />
       </span>
     );
   }
@@ -978,29 +964,52 @@ const REFUSALS: Record<string, string> = {
 };
 
 /**
- * The frame every pending row in this pane is showing.
+ * A directory being measured (TRE-110).
  *
- * One interval for the listing rather than one per row, and stopped outright
- * when nothing is pending: a timer left running on a settled directory is a
- * re-render a second for no visible change.
+ * Drawn rather than typed, and that is the point of it. The first attempt
+ * animated a character — a dash through `- \ | /`, advanced by an interval the
+ * pane owned — which failed twice over. It collided with the two dashes this
+ * column already prints, for a symlink and for a size nobody knows; and it
+ * re-rendered the pane eight times a second to move one glyph, on a table whose
+ * whole design is about not re-rendering rows.
+ *
+ * A ring costs neither. It is not a character, so it cannot be misread as one,
+ * and the rotation is a compositor transform: forty of these turning is no
+ * main-thread work at all.
+ *
+ * `currentColor`, so the wrapper's ink governs it and the muted tone applies
+ * without this knowing what muted means. `aria-hidden`, because the cell it
+ * sits in already says "Measuring…".
  */
-function useSpinnerTick(active: boolean): number {
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setTick((current) => current + 1), SPINNER_MS);
-    return () => clearInterval(timer);
-  }, [active]);
-
-  return tick;
+function MeasuringRing() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+      className="size-2.5 animate-measuring"
+    >
+      {/* The track, faint: without it a lone arc reads as a fragment rather
+          than as something going round. */}
+      <circle
+        cx="8"
+        cy="8"
+        r="6"
+        fill="none"
+        stroke="currentColor"
+        strokeOpacity="0.3"
+        strokeWidth="2"
+      />
+      {/* A quarter turn of it, solid — the part that is visibly moving. */}
+      <path
+        d="M8 2a6 6 0 0 1 6 6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
-
-/**
- * Slow enough to read as a rhythm rather than a blur, fast enough to look
- * alive. Four frames at this interval is a full turn every half second.
- */
-const SPINNER_MS = 125;
 
 /** Eleven staggered rows, as the mockup does — a listing arriving, not a spinner. */
 function Skeleton() {

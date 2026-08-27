@@ -23,27 +23,35 @@ import type { FileRow, RowType } from "@lib/api/fs";
  */
 export function formatSize(bytes: number | null, type: RowType): string {
   if (type === "link" || bytes === null) return "—";
-  if (bytes >= 1_099_511_627_776) return `${(bytes / 1_099_511_627_776).toFixed(2)} TB`;
-  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
-  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} kB`;
+  if (bytes >= 1_099_511_627_776) return `${decimals(bytes / 1_099_511_627_776, 2)} TB`;
+  if (bytes >= 1_073_741_824) return `${decimals(bytes / 1_073_741_824, 2)} GB`;
+  if (bytes >= 1_048_576) return `${decimals(bytes / 1_048_576, 1)} MB`;
+  if (bytes >= 1024) return `${decimals(bytes / 1024, 1)} kB`;
   return `${Math.round(bytes)} B`;
 }
 
 /**
- * The size cell for a directory that is still being walked (TRE-107).
+ * The ladder's precision, capped so a figure is never wider than eight
+ * characters (TRE-110).
  *
- * A dash turning on its own axis, which is the same character the column would
- * otherwise be showing — so a pending row reads as "this figure is coming"
- * rather than as a different kind of row. Four frames, advanced by one ticker
- * the pane owns: every spinner in the listing therefore turns in step, which in
- * a monospace table looks deliberate where a hundred independent animations
- * would look like a fault.
+ * The mockup shows `1.24 GB` and never a three-digit one, so it does not say
+ * what `411.61 GB` should look like — but the column is 62px, about nine
+ * monospace characters, and that figure needs nine. Directories only began
+ * reporting real totals in TRE-107, which is what turned three-digit gigabytes
+ * from a curiosity into an everyday value.
+ *
+ * A digit before the point is worth more than one after it: at 411 GB the
+ * second decimal is ten megabytes, below anything anyone reads this column to
+ * decide. So precision is given up from the right, one place at a time, and
+ * only once the integer part has grown enough to need the room:
+ *
+ *   4.0 kB   28.55 GB   992.0 kB   127.1 MB   411.6 GB   1023 kB
+ *
+ * Every value the mockup does show keeps exactly the shape it has there.
  */
-export const SPINNER_FRAMES = ["-", "\\", "|", "/"] as const;
-
-export function spinnerFrame(tick: number): string {
-  return SPINNER_FRAMES[tick % SPINNER_FRAMES.length] as string;
+function decimals(value: number, places: number): string {
+  if (value >= 1000) return value.toFixed(0);
+  return value.toFixed(value >= 100 ? Math.min(places, 1) : places);
 }
 
 /** Bytes for the pane footer, where a directory total has no type to speak of. */
@@ -52,18 +60,19 @@ export function formatTotal(bytes: number): string {
 }
 
 /**
- * A total over rows, some of which have no size yet (TRE-107).
+ * Why a total or a figure is less than it should be, or nothing when it is not
+ * (TRE-107, reworked by TRE-110).
  *
- * `≥`, because that is precisely what the figure is: the sum of what is known,
- * with some directories still being walked or refused outright. Printed bare it
- * would be a claim about rows nothing has counted — which is the habit this
- * ticket exists to break, one 4 kB directory at a time.
+ * There is deliberately no marker to go with it. `≥` was tried and removed: on
+ * `/` nearly every directory has a subtree the account cannot read, so nearly
+ * every row carried the symbol, and a qualifier that is almost always present
+ * qualifies nothing — while costing two characters the column did not have,
+ * which wrapped the cell and broke the row.
+ *
+ * Uncertainty is an ink instead. The figure renders dimmed and explains itself
+ * on hover, which reads as "less sure" at a glance, costs no width, and needs
+ * nobody to have learnt a symbol.
  */
-export function formatPartialTotal(bytes: number, unknown: number): string {
-  return unknown > 0 ? `≥ ${formatTotal(bytes)}` : formatTotal(bytes);
-}
-
-/** Why a total carries the `≥`, or nothing when it does not. */
 export function partialTotalHint(unknown: number): string | undefined {
   if (unknown <= 0) return undefined;
   return unknown === 1

@@ -429,6 +429,11 @@
   --animate-panel-in: panel-in 0.14s ease-out;
   --animate-panel-out: panel-out 0.11s ease-in forwards;
   --animate-toast-in: toast-in 0.18s ease-out;
+  /*
+   * A directory being measured (TRE-110). Linear, because a spinner that eases
+   * appears to stall twice a turn, and a stalled spinner is read as a hung one.
+   */
+  --animate-measuring: measuring 0.8s linear infinite;
 
   /* A pane is not one of those. It does not float above the layout, it *is*
    * layout — it takes its width from the panes beside it — so fading one in
@@ -674,6 +679,22 @@ body {
    * session — arrives at its size rather than assembling itself on screen. */
   .pane-collapse[data-animate="false"] {
     transition-property: none;
+  }
+}
+
+/*
+ * Rotation only, and nothing else in the frame: the arc is drawn once and the
+ * compositor turns it, so a listing with forty directories still being walked
+ * costs no main-thread work at all. The ticker this replaced re-rendered the
+ * whole pane eight times a second to advance one character.
+ *
+ * The global `prefers-reduced-motion` rule below stops this dead after one
+ * turn, which leaves a static ring — the right answer for someone who asked
+ * for less motion, and still visibly not a number.
+ */
+@keyframes measuring {
+  to {
+    transform: rotate(1turn);
   }
 }
 
