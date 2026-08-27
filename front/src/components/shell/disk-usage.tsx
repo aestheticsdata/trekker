@@ -16,6 +16,7 @@ import {
 } from "@helpers/disks";
 import { formatTotal, parentPath } from "@helpers/listing";
 import { PRESS } from "@helpers/press";
+import { TOOLTIP_WARNING_INK } from "@helpers/tooltip";
 import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK, treemapBands } from "@helpers/treemap";
 import { ApiError } from "@lib/api/client";
 import { fetchDisks } from "@lib/api/disks";
@@ -446,6 +447,21 @@ function Summary({
 }
 
 /**
+ * The mark the closed band wears, on the strip and again in its tooltip.
+ *
+ * The app's existing glyph for *stop and look* — the stale chip one row up is
+ * already `⚠ stale`. Reusing it means the strip has one such vocabulary rather
+ * than two, and it needs no icon set to render at 9px in a mono column.
+ *
+ * On the band it is the whole signal, because a rectangle that looks exactly
+ * like the four beside it is a rectangle that reads as a door. The cursor and
+ * the tooltip only answer once the pointer is already on it, which is a second
+ * too late — TRE-105's goal line is that the strip *stops inviting the click*,
+ * and an invitation is declined before it is accepted, not after.
+ */
+const BAND_DENIED_MARK = "⚠";
+
+/**
  * Why the one band that never opens never opens (TRE-105).
  *
  * The front's words rather than the API's, following `linkInsideRoot`: the 403
@@ -453,9 +469,25 @@ function Summary({
  * a pointer resting on a rectangle. One fact, two registers — and the server
  * sends a boolean, so there is only ever one fact to keep straight.
  */
-const BAND_DENIED_NOTE =
-  "Trekker's own install. It holds the master key that decrypts every stored credential, " +
-  "so it stays closed to the browser — reach it over SSH.";
+const BAND_DENIED_NOTE = (
+  // `TooltipBlock` takes a ReactNode and deliberately has no variants — the
+  // caller styles its own note, which is how this gets a second colour without
+  // the shape growing a `kind` prop it promised never to have.
+  <span className={`${TOOLTIP_WARNING_INK} flex gap-1.5`}>
+    {/* Hidden from the reader that speaks it aloud: the sentence beside it
+        already says the whole thing, and "warning warning" is not a reading. */}
+    <span
+      aria-hidden="true"
+      className="flex-none"
+    >
+      {BAND_DENIED_MARK}
+    </span>
+    <span>
+      Trekker's own install. It holds the master key that decrypts every stored credential, so it stays closed to the
+      browser — reach it over SSH.
+    </span>
+  </span>
+);
 
 /**
  * The bands.
@@ -522,8 +554,27 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
                 band.path === null ? BAND_REST_CLASS : BAND_CLASS[Math.min(index, BAND_CLASS.length - 1)]
               } ${target === null ? "cursor-default" : ""}`}
             >
-              <span className={`${BAND_LABEL_INK} truncate font-mono text-caption leading-tight font-medium`}>
-                {band.label}
+              {/* `truncate` moved onto the child: it is `text-overflow`, which
+                  does nothing on a flex container, and the child needs `min-w-0`
+                  or it refuses to shrink below its own text and overflows the
+                  band instead of ellipsing — the same reason the button itself
+                  carries `min-w-0` above. */}
+              <span
+                className={`${BAND_LABEL_INK} flex items-baseline gap-1 font-mono text-caption leading-tight font-medium`}
+              >
+                {/* In the label's own ink, not amber: the band fills are the one
+                    ramp `verify:contrast` measures per step, and a second colour
+                    on them would be five new pairs to keep above AA for a glyph.
+                    The shape is the signal here; the tooltip carries the colour. */}
+                {band.denied && (
+                  <span
+                    aria-hidden="true"
+                    className="flex-none"
+                  >
+                    {BAND_DENIED_MARK}
+                  </span>
+                )}
+                <span className="min-w-0 truncate">{band.label}</span>
               </span>
               <span className={`${BAND_SIZE_INK} truncate font-mono text-caps leading-tight`}>
                 {formatTotal(band.bytes)} · {percent}%

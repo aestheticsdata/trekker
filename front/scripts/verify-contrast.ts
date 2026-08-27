@@ -99,7 +99,13 @@ import {
   TERMINAL_TABLE_INK,
   TERMINAL_TITLE_INK,
 } from "../src/helpers/terminal.ts";
-import { TOOLTIP_INK, TOOLTIP_LABEL_INK, TOOLTIP_SUBJECT_INK, TOOLTIP_SURFACE } from "../src/helpers/tooltip.ts";
+import {
+  TOOLTIP_INK,
+  TOOLTIP_LABEL_INK,
+  TOOLTIP_SUBJECT_INK,
+  TOOLTIP_SURFACE,
+  TOOLTIP_WARNING_INK,
+} from "../src/helpers/tooltip.ts";
 import {
   CHIP_HOVER_FILL,
   CHIP_INK,
@@ -338,6 +344,7 @@ console.log("\n--- the tooltip bubble (TRE-76) ---");
 check("subject", TOOLTIP_SUBJECT_INK, TOOLTIP_SURFACE);
 check("value", TOOLTIP_INK, TOOLTIP_SURFACE);
 check("label and note", TOOLTIP_LABEL_INK, TOOLTIP_SURFACE);
+check("a note that refuses", TOOLTIP_WARNING_INK, TOOLTIP_SURFACE);
 
 /*
  * Saved views (TRE-37 §4). Two surfaces, and the chrome is the ground for both:

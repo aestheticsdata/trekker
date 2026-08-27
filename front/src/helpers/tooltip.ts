@@ -25,3 +25,13 @@ export const TOOLTIP_INK = "text-ink-soft";
 export const TOOLTIP_SUBJECT_INK = "text-ink";
 /** Row labels, and the note under them. */
 export const TOOLTIP_LABEL_INK = "text-ink-muted";
+/**
+ * A note that is a refusal rather than a hint (TRE-105).
+ *
+ * The quiet `ink-muted` above is right for "here is what clicking would do" and
+ * wrong for "this will not open" — read at a glance they are the same grey, so
+ * the one sentence that has to land reads as the one that never mattered. Amber
+ * is what this app already means by *stop and look*: it is the stale marker's
+ * colour, one row up in the same strip.
+ */
+export const TOOLTIP_WARNING_INK = "text-warning";
