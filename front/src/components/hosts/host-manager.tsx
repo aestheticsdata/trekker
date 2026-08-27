@@ -20,18 +20,32 @@ import type { HostView } from "@lib/api/hosts";
  *
  * Hosts are listed on the left and edited on the right, because the list is
  * also the picker: the pane that opened the dialog binds to whatever is chosen.
+ * That is true of the sidebar's opener too (TRE-102) — it carries the active
+ * pane, so a host saved from there has somewhere to go.
  */
 
 type Mode = { kind: "idle" } | { kind: "edit"; host: HostView } | { kind: "create" };
 
+/**
+ * What the dialog opens on (TRE-102).
+ *
+ * The chip in a pane's path row opens the list, because the question it asks is
+ * which host that pane shows. The sidebar's `＋ new host…` opens the form: a
+ * button that names what it makes and then asks for a second press has not done
+ * its job.
+ */
+export type HostsMode = "list" | "create";
+
 export function HostManager({
   hosts,
+  initialMode,
   boundHostId,
   onPick,
   onChanged,
   onClose,
 }: {
   hosts: readonly HostView[];
+  initialMode: HostsMode;
   /** What the pane that opened this is currently showing, if anything. */
   boundHostId: string | null;
   onPick: (host: HostView) => void;
@@ -40,8 +54,11 @@ export function HostManager({
   onClose: () => void;
 }) {
   const { push } = useToast();
-  // A deployment with no hosts has exactly one useful thing to show.
-  const [mode, setMode] = useState<Mode>(() => (hosts.length === 0 ? { kind: "create" } : { kind: "idle" }));
+  // What the caller asked for — except on a deployment with no hosts, which has
+  // exactly one useful thing to show whichever door was used to get here.
+  const [mode, setMode] = useState<Mode>(() =>
+    initialMode === "create" || hosts.length === 0 ? { kind: "create" } : { kind: "idle" },
+  );
 
   const localTaken = hosts.some(
     (host) => host.transport === "LOCAL" && !(mode.kind === "edit" && mode.host.id === host.id),

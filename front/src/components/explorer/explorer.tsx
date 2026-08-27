@@ -55,6 +55,7 @@ import type { PermissionsTarget } from "@components/explorer/permissions-modal";
 import type { RenameMode, RenameTarget } from "@components/explorer/rename-modal";
 import type { TerminalDelete, TerminalPermissions, TerminalWorld } from "@components/explorer/terminal-runner";
 import type { TransferTarget } from "@components/explorer/transfer-modal";
+import type { HostsMode } from "@components/hosts/host-manager";
 import type { ActionContext, ActionId, TargetKind } from "@components/shell/actions";
 import type { PaletteEntry } from "@components/shell/palette";
 import type { SplitMode } from "@components/shell/toolbar";
@@ -117,6 +118,13 @@ export interface PaneUrl {
   tail: string | null;
 }
 
+/** An open host manager: which pane it answers to, and what it opened on. */
+export interface HostsTarget {
+  /** The pane that binds whatever gets picked, and whose host is shown bound. */
+  pane: PaneIndex;
+  mode: HostsMode;
+}
+
 /** A paste that has become a transfer (TRE-71 §4). */
 interface PasteInFlight {
   target: TransferTarget;
@@ -145,7 +153,7 @@ export function Explorer({
   onInspectorChange,
   animate,
   onSelectionChange,
-  manageHostsFor,
+  manageHosts,
   onManageHosts,
   permissionsOpen,
   onPermissionsOpenChange,
@@ -203,10 +211,10 @@ export function Explorer({
    * and so worth animating (TRE-62 §4). False until the first one. */
   animate: boolean;
   onSelectionChange: (selection: { row: FileRow; path: string } | null) => void;
-  /** Which pane opened the host manager, if any — owned by the page so the
-   * sidebar can open it too. */
-  manageHostsFor: PaneIndex | null;
-  onManageHosts: (pane: PaneIndex | null) => void;
+  /** The open host manager, if any — owned by the page so the sidebar can open
+   * it too, which since TRE-102 it does. */
+  manageHosts: HostsTarget | null;
+  onManageHosts: (target: HostsTarget | null) => void;
   /** The toolbar's `permissions` button, owned by the page for the same reason
    * the host manager is: the button lives up there, the selection lives here. */
   permissionsOpen: boolean;
@@ -483,7 +491,7 @@ export function Explorer({
    * out of a dialog would be two things happening on one keypress.
    */
   const overlayOpen =
-    manageHostsFor !== null ||
+    manageHosts !== null ||
     permissionsOpen ||
     renameMode !== null ||
     createMode !== null ||
@@ -1528,7 +1536,7 @@ export function Explorer({
   useKeyboard({
     // The manager is a modal: ↓ over it belongs to nothing behind it. So is an
     // open menu — `↓` over one belongs to the menu (TRE-70 §6).
-    enabled: manageHostsFor === null && menu === null,
+    enabled: manageHosts === null && menu === null,
     onKey: (event) => {
       const index = active;
       const up = upTarget(views[index].path);
@@ -1755,7 +1763,7 @@ export function Explorer({
   // both of which are correct for ⌫ and the arrow keys and wrong for a chord
   // nothing else in the browser is going to want.
   useShortcut({
-    enabled: manageHostsFor === null,
+    enabled: manageHosts === null,
     chord: KEYS.inspector,
     inFields: true,
     onPress: () => onInspectorChange(!inspector),
@@ -1782,7 +1790,7 @@ export function Explorer({
   // as a selection of ten — but inside the glob field ⌘A still means "select
   // this text", which is why this one stands down there and ⌘I does not.
   useShortcut({
-    enabled: manageHostsFor === null,
+    enabled: manageHosts === null,
     chord: KEYS.selectAll,
     inFields: false,
     onPress: () => dispatch({ type: "selectAll", pane: active, names: rendered[active].rows.map((row) => row.name) }),
@@ -1792,7 +1800,7 @@ export function Explorer({
   // browser's own ⌘D is "bookmark this page", which nobody wants from a file
   // manager, but inside a text field the chord is not ours to take.
   useShortcut({
-    enabled: manageHostsFor === null,
+    enabled: manageHosts === null,
     chord: KEYS.duplicate,
     inFields: false,
     onPress: () => onDuplicateRequestedChange(true),
@@ -1872,7 +1880,7 @@ export function Explorer({
           extend: modifiers.extend,
           toggle: modifiers.toggle,
         }),
-      onHostMenu: () => onManageHosts(index),
+      onHostMenu: () => onManageHosts({ pane: index, mode: "list" }),
       onClearGlob: () => onGlobChange(""),
       onTail: (path) => onPaneChange(index, { tail: path }),
       onFilesDropped: (files) => uploadInto(index, files),
@@ -2242,11 +2250,12 @@ export function Explorer({
         />
       )}
 
-      {manageHostsFor !== null && (
+      {manageHosts !== null && (
         <HostManager
           hosts={hosts}
-          boundHostId={panes[manageHostsFor].host}
-          onPick={(host) => onPaneChange(manageHostsFor, { host: host.id, path: host.homePath })}
+          initialMode={manageHosts.mode}
+          boundHostId={panes[manageHosts.pane].host}
+          onPick={(host) => onPaneChange(manageHosts.pane, { host: host.id, path: host.homePath })}
           onChanged={onHostsChanged}
           onClose={() => onManageHosts(null)}
         />

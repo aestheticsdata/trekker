@@ -751,8 +751,12 @@ const ROOMS: readonly Room[] = [
   {
     file: "components/sidebar/sidebar.tsx",
     boxes: [
-      { on: [CHROME_BG], inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-label", "ink-soft"] },
-      { on: [RAISED], inks: ["danger-soft", "ink", "ink-dim", "ink-soft"], note: "a host row and a favourite, which raise under the pointer" },
+      { on: [CHROME_BG], inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-label", "ink-muted", "ink-soft"] },
+      {
+        on: [RAISED],
+        inks: ["danger-soft", "ink", "ink-dim", "ink-muted", "ink-soft"],
+        note: "a host row, a favourite and the ＋ new host… button, which raise under the pointer",
+      },
     ],
   },
   {

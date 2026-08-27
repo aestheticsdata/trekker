@@ -39,6 +39,7 @@ export function Sidebar({
   views,
   onBindHost,
   onNavigate,
+  onNewHost,
 }: {
   hosts: readonly HostView[];
   /** What each pane is showing, so a row can draw its A and B badges. */
@@ -54,6 +55,8 @@ export function Sidebar({
   views?: ReactNode;
   onBindHost: (pane: 0 | 1, host: HostView) => void;
   onNavigate: (host: HostView, path: string) => void;
+  /** Opens the host manager on a blank form, bound to the active pane (TRE-102). */
+  onNewHost: () => void;
 }) {
   const { data: bookmarks } = useQuery({
     queryKey: [QUERY_KEYS.BOOKMARKS],
@@ -96,6 +99,26 @@ export function Sidebar({
             />
           ))}
           {hosts.length === 0 && <Empty>No hosts yet.</Empty>}
+
+          {/* Not in the mockup, which ends this section at the last row and
+              rules off into VOLUMES (TRE-102). It is here because the pane's
+              `This machine ▾` chip was the only way to reach the host manager,
+              and nobody looking for "where do I add a server" reads a pane's
+              path row — they read this list, find no way to add to it, and
+              conclude there is none.
+
+              The markup is VIEWS' `＋ save current view…` verbatim rather than
+              a near copy: two dashed buttons in one 176px rail that differ by a
+              pixel read as a mistake, and that one was ported from 2a. */}
+          <div className="mt-1.5 px-2.5">
+            <button
+              type="button"
+              onClick={onNewHost}
+              className="border-line-strong text-ink-muted hover:bg-raised hover:border-accent hover:text-ink flex w-full justify-center border border-dashed py-1.5 font-mono text-2xs"
+            >
+              ＋ new host…
+            </button>
+          </div>
         </Section>
 
         <Rule />

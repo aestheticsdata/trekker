@@ -24,7 +24,7 @@ import { useQueryStates } from "nuqs";
 import { useState } from "react";
 
 import type { CreateMode } from "@components/explorer/create-modal";
-import type { PaneUrl } from "@components/explorer/explorer";
+import type { HostsTarget, PaneUrl } from "@components/explorer/explorer";
 import type { PaneIndex } from "@components/explorer/pane-state";
 import type { RenameMode } from "@components/explorer/rename-modal";
 import type { ActionContext, ActionId } from "@components/shell/actions";
@@ -56,7 +56,7 @@ export default function HomePage() {
   // keyboard cursor.
   const [globMatches, setGlobMatches] = useState<number | null>(null);
   const [selection, setSelection] = useState<{ row: FileRow; path: string } | null>(null);
-  const [manageHostsFor, setManageHostsFor] = useState<PaneIndex | null>(null);
+  const [manageHosts, setManageHosts] = useState<HostsTarget | null>(null);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [renameMode, setRenameMode] = useState<RenameMode | null>(null);
   /**
@@ -455,6 +455,9 @@ export default function HomePage() {
           }
           onBindHost={(pane, host) => bind(pane, host)}
           onNavigate={(host, path) => bind(active, host, path)}
+          // The active pane, because that is the one a host saved from here
+          // should open in — the same pane the chip would have used.
+          onNewHost={() => setManageHosts({ pane: active, mode: "create" })}
         />
       }
       strip={
@@ -499,8 +502,8 @@ export default function HomePage() {
         onInspectorChange={(insp) => changeLayout({ insp })}
         animate={moved}
         onSelectionChange={setSelection}
-        manageHostsFor={manageHostsFor}
-        onManageHosts={setManageHostsFor}
+        manageHosts={manageHosts}
+        onManageHosts={setManageHosts}
         permissionsOpen={permissionsOpen}
         onPermissionsOpenChange={setPermissionsOpen}
         renameMode={renameMode}
