@@ -446,6 +446,18 @@ function Summary({
 }
 
 /**
+ * Why the one band that never opens never opens (TRE-105).
+ *
+ * The front's words rather than the API's, following `linkInsideRoot`: the 403
+ * body is written for a request that has already been made, this is written for
+ * a pointer resting on a rectangle. One fact, two registers — and the server
+ * sends a boolean, so there is only ever one fact to keep straight.
+ */
+const BAND_DENIED_NOTE =
+  "Trekker's own install. It holds the master key that decrypts every stored credential, " +
+  "so it stays closed to the browser — reach it over SSH.";
+
+/**
  * The bands.
  *
  * Widths are flex shares of the level's own total, which is what makes them sum
@@ -461,7 +473,14 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
         const percent = Math.round(band.share * 100);
         // A pane cannot be pointed at a file, so a band standing for one takes
         // you to the directory holding it — which is the place you can act on it.
-        const target = band.path === null ? null : band.isDirectory ? band.path : parentPath(band.path);
+        //
+        // A denied band resolves to nothing at all (TRE-105). It has a path and
+        // a size and still goes nowhere, so it joins the tail in the one state
+        // this component already knows how to draw: no target. Everything below
+        // — the guarded click, `aria-disabled`, the cursor — then needs no case
+        // of its own, and only the tooltip has to tell the two apart.
+        const target =
+          band.path === null || band.denied ? null : band.isDirectory ? band.path : parentPath(band.path);
 
         return (
           // ⚠️ The tooltip wraps the button and adds no element of its own,
@@ -472,7 +491,7 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
             key={band.path ?? "rest"}
             content={
               <TooltipBlock
-                note={target === null ? undefined : "Click to open it in the active pane."}
+                note={band.denied ? BAND_DENIED_NOTE : target === null ? undefined : "Click to open it in the active pane."}
                 rows={[
                   { label: "size", value: formatTotal(band.bytes) },
                   { label: "share", value: `${percent}%` },

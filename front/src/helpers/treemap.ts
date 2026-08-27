@@ -76,6 +76,16 @@ export interface TreemapBand {
    * the tail, which is a sum and not anywhere.
    */
   isDirectory: boolean;
+  /**
+   * The API refuses this path however a pane reaches it (TRE-105) — Trekker's
+   * own install, on the local denylist because the master key sits in it.
+   *
+   * A separate flag from `isDirectory` because it says something different: the
+   * band has a real path and a real size, and still goes nowhere. False when
+   * the server said nothing, which includes every account that is not the
+   * owner and every host that is not the local one.
+   */
+  denied: boolean;
   /** What to print: the last segment for a child, "rest" for the tail. */
   label: string;
   bytes: number;
@@ -111,6 +121,7 @@ export function treemapBands(level: ScanLevel): TreemapBand[] {
   const bands: TreemapBand[] = named.map((entry) => ({
     path: entry.path,
     isDirectory: entry.kind === "DIRECTORY",
+    denied: entry.denied === true,
     label: lastSegment(entry.path),
     bytes: Number(entry.bytes),
     share: shareOf(toBytes(entry.bytes), total),
@@ -120,7 +131,14 @@ export function treemapBands(level: ScanLevel): TreemapBand[] {
   // Strictly positive: a level whose children already fill it has no tail, and a
   // zero-width band with a label is a sliver nobody can read or click.
   if (rest > 0n) {
-    bands.push({ path: null, isDirectory: false, label: "rest", bytes: Number(rest), share: shareOf(rest, total) });
+    bands.push({
+      path: null,
+      isDirectory: false,
+      denied: false,
+      label: "rest",
+      bytes: Number(rest),
+      share: shareOf(rest, total),
+    });
   }
 
   return bands;

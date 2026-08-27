@@ -54,6 +54,14 @@ interface Fixture {
   running?: ScanRow | null;
   entries?: Array<Record<string, unknown>>;
   createThrows?: boolean;
+  /**
+   * What `disclosableDenial` is willing to tell *this* account (TRE-105).
+   *
+   * An empty list means both "nothing here is denied" and "this account is not
+   * the owner, so it is told nothing either way" — the service cannot tell the
+   * two apart, which is exactly the property being tested.
+   */
+  denied?: string[];
 }
 
 class FakePrisma {
@@ -106,8 +114,14 @@ function build(fixture: Fixture = {}, queueOver: Partial<ScanQueueService> = {})
 
   const driver = { hostId: HOST, dispose: () => Promise.resolve() };
   const factory = { forHost: () => Promise.resolve(driver) } as unknown as HostDriverFactory;
+  const denialAsks: string[] = [];
   const guard = {
     validate: ({ path }: { path: string }) => Promise.resolve({ realPath: path }),
+    disclosableDenial: (hostId: string) => {
+      denialAsks.push(hostId);
+      const denied = fixture.denied ?? [];
+      return Promise.resolve((realPath: string) => denied.includes(realPath));
+    },
   } as unknown as PathGuardService;
   const queue = {
     enqueue: (scan: unknown) => enqueued.push(scan),
@@ -119,6 +133,7 @@ function build(fixture: Fixture = {}, queueOver: Partial<ScanQueueService> = {})
   return {
     prisma,
     enqueued,
+    denialAsks,
     service: new ScanService(prisma as unknown as PrismaService, factory, guard, queue),
   };
 }
@@ -258,6 +273,60 @@ describe("serving", () => {
   it("is a 404 for another account's host", async () => {
     const { service } = build({ done: row() });
     await expect(service.state("someone-else", HOST, "/srv")).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+/**
+ * The band that cannot be opened (TRE-105).
+ *
+ * The wrong answer that looks reasonable here is `denied: false` on everything
+ * else. It reads as tidier and it is a disclosure: for anyone but the owner the
+ * refusal is meant to be indistinguishable from every other refusal, so the
+ * only safe payload is the one that says nothing at all.
+ */
+describe("the entry that refuses", () => {
+  const entries = [
+    { path: "/srv/install", bytes: 6_000n, percent: 60, kind: "DIRECTORY", depth: 1 },
+    { path: "/srv/data", bytes: 4_000n, percent: 40, kind: "DIRECTORY", depth: 1 },
+  ];
+
+  it("flags the path the guard is willing to name", async () => {
+    const { service } = build({ done: row(), entries, denied: ["/srv/install"] });
+
+    const { level } = await service.state(USER, HOST, "/srv");
+
+    expect(level?.entries.map((entry) => [entry.path, entry.denied])).toEqual([
+      ["/srv/install", true],
+      ["/srv/data", undefined],
+    ]);
+  });
+
+  it("carries no such field when the guard discloses nothing", async () => {
+    const { service } = build({ done: row(), entries, denied: [] });
+
+    const { level } = await service.state(USER, HOST, "/srv");
+
+    // Absent, not `false` — the payload is the bytes it was before the field
+    // existed, so a member cannot read the denylist off the shape of the answer.
+    for (const entry of level?.entries ?? []) {
+      expect(Object.hasOwn(entry, "denied")).toBe(false);
+    }
+  });
+
+  it("asks once for the whole level, not once per entry", async () => {
+    const { service, denialAsks } = build({ done: row(), entries, denied: ["/srv/install"] });
+
+    await service.state(USER, HOST, "/srv");
+
+    expect(denialAsks).toEqual([HOST]);
+  });
+
+  it("does not ask at all when there is no level to draw", async () => {
+    const { service, denialAsks } = build({ done: null });
+
+    await service.state(USER, HOST, "/srv");
+
+    expect(denialAsks).toEqual([]);
   });
 });
 

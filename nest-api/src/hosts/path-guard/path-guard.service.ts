@@ -240,6 +240,33 @@ export class PathGuardService {
   }
 
   /**
+   * The denylist as a predicate a client may be *told* about (TRE-105).
+   *
+   * The same set of paths as `localDenial`, and deliberately not the same
+   * method. That one answers "must this walk skip the path", which is true for
+   * every account because the walk has to skip it either way. This one answers
+   * "may this account be shown, before it asks, that the path will refuse" —
+   * and that is a disclosure rather than an enforcement.
+   *
+   * Only the owner gets a `true` out of it, for the reason
+   * `PATH_DENYLISTED_MESSAGE` exists at all: for a member every refusal reads
+   * one identical line, so that a response never says which of the four rules
+   * refused. A flag riding along inside a listing says exactly that, and says
+   * it before the member has asked for the path — which is a worse leak than
+   * the message it was written to avoid, not a smaller one.
+   *
+   * Takes a host id rather than a driver, unlike `localDenial`, because the
+   * caller here is a read with no driver in hand. Building one to learn that
+   * the answer is `false` would open an SSH connection per poll for the one
+   * transport whose answer can never be anything else.
+   */
+  async disclosableDenial(hostId: string, userId: string): Promise<(realPath: string) => boolean> {
+    const host = await this.loadHost(hostId, userId);
+    if (host.transport !== "LOCAL" || host.user.role !== "OWNER") return () => false;
+    return (realPath: string) => this.isDeniedLocally(realPath);
+  }
+
+  /**
    * The host's roots, resolved on the host — TRE-13 calls this once per
    * listing and then uses `withinRoots` per symlink.
    */

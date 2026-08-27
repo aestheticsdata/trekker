@@ -62,6 +62,14 @@ export interface ScanEntry {
   percent: number;
   kind: ScanEntryKind;
   depth: number;
+  /**
+   * The API refuses this path outright, however a pane reaches it (TRE-105).
+   *
+   * Sent only to the owner, and only where it is true — so absent means "no
+   * statement was made", which for every account that is not the owner is the
+   * only thing this field ever says.
+   */
+  denied?: boolean;
 }
 
 export interface ScanLevel {

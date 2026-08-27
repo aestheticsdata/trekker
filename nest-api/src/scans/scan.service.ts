@@ -23,6 +23,15 @@ export interface ScanEntryView {
   percent: number;
   kind: "DIRECTORY" | "FILE" | "OTHER";
   depth: number;
+  /**
+   * On the local denylist, and so refused however it is reached (TRE-105).
+   *
+   * Present only where it is true, and only for the owner — see
+   * `PathGuardService.disclosableDenial` for why a member is told nothing.
+   * Omitted rather than sent as `false`, so a member's payload is exactly the
+   * bytes it was before this field existed.
+   */
+  denied?: boolean;
 }
 
 export interface ScanFactsView {
@@ -160,10 +169,21 @@ export class ScanService {
       orderBy: { startedAt: "desc" },
     });
 
+    // Asked once and handed down, rather than per row: the predicate closes
+    // over a single host lookup, and a level is a few dozen entries.
+    const level = scan
+      ? await this.level(
+          scan.id,
+          at ?? scan.root,
+          scan.totalBytes ?? 0n,
+          await this.guard.disclosableDenial(hostId, userId),
+        )
+      : null;
+
     return {
       scan: scan ? this.view(scan) : null,
       running: running ? this.view(running) : null,
-      level: scan ? await this.level(scan.id, at ?? scan.root, scan.totalBytes ?? 0n) : null,
+      level,
     };
   }
 
@@ -194,7 +214,12 @@ export class ScanService {
   }
 
   /** One treemap level, straight off its index. */
-  private async level(scanId: string, at: string, total: bigint): Promise<ScanLevelView> {
+  private async level(
+    scanId: string,
+    at: string,
+    total: bigint,
+    denied: (realPath: string) => boolean,
+  ): Promise<ScanLevelView> {
     const rows = await this.prisma.diskScanEntries.findMany({
       where: { scanId, parentPath: at },
       orderBy: { bytes: "desc" },
@@ -210,13 +235,20 @@ export class ScanService {
     return {
       at,
       parentBytes: (parent?.bytes ?? total).toString(),
-      entries: rows.map((row) => ({
-        path: row.path,
-        bytes: row.bytes.toString(),
-        percent: Number(row.percent),
-        kind: row.kind,
-        depth: row.depth,
-      })),
+      entries: rows.map((row) => {
+        const entry: ScanEntryView = {
+          path: row.path,
+          bytes: row.bytes.toString(),
+          percent: Number(row.percent),
+          kind: row.kind,
+          depth: row.depth,
+        };
+        // The stored path is already the resolved one — a scan is enqueued
+        // with `realPath` — which is what the denylist is written in terms of.
+        // Nothing to resolve here, and nothing to ask the host.
+        if (denied(row.path)) entry.denied = true;
+        return entry;
+      }),
     };
   }
 
