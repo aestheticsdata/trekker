@@ -406,6 +406,48 @@ describe("owner bypass", () => {
   // of it, under "the refusal counter" and "the path.refused activity row".
 });
 
+// ------------------------------- what a listing may say out loud (TRE-105)
+
+describe("the denial a client may be shown", () => {
+  const narrow = (): RootFixture[] => [{ path: join(base, "allowed"), access: "WRITE" }];
+  const denied = (): string => join(base, "install", "ecosystem.config.js");
+
+  it("names the denylist to the owner", async () => {
+    // What lets the disk-usage strip stop offering to open the one band that
+    // never opens, instead of finding out by being clicked.
+    const guard = guardFor(narrow(), { role: "OWNER" });
+    const shown = await guard.disclosableDenial(HOST_ID, USER_ID);
+
+    expect(shown(denied())).toBe(true);
+    expect(shown(join(base, "allowed", "file.txt"))).toBe(false);
+  });
+
+  it("names it to nobody else, which is the whole point", async () => {
+    // The pair below is the distinction: `localDenial` must still answer true,
+    // because a walk has to skip the path whoever is walking it. What a member
+    // may be *told* is a different question, and the answer is always no — a
+    // flag in a listing names the rule that refuses, before they have even
+    // asked for the path.
+    const guard = guardFor(narrow(), { role: "MEMBER" });
+
+    const shown = await guard.disclosableDenial(HOST_ID, USER_ID);
+    expect(shown(denied())).toBe(false);
+
+    const walk = await guard.localDenial(driver(), USER_ID);
+    expect(walk(denied())).toBe(true);
+  });
+
+  it("says nothing about a host that holds no install tree of ours", async () => {
+    // Same reason `validate()` only consults the denylist for LOCAL: the paths
+    // in it are this machine's, and a remote host that happens to have one at
+    // the same place is not ours to talk about.
+    const guard = guardFor(narrow(), { role: "OWNER", transport: "SSH" });
+    const shown = await guard.disclosableDenial(HOST_ID, USER_ID);
+
+    expect(shown(denied())).toBe(false);
+  });
+});
+
 // ------------------------------------------------ refused-path limit (TRE-30)
 
 /** A path that is always outside the roots, and never the same one twice. */
