@@ -85,7 +85,7 @@ export function AccountMenu({ onOpenChange }: { onOpenChange?: (open: boolean) =
    * A failure keeps us here, with the door still offered. Most of the fleet
    * leaves regardless, because stranding someone on a screen they asked to
    * leave is worse — but this app holds SSH credentials for a fleet, and a
-   * failed logout leaves both the session (rolling, an hour) and any sudo
+   * failed logout leaves both the session (rolling, twelve hours) and any sudo
    * window open on it. Saying so is the honest answer; the toast's own action
    * is how somebody who wants out anyway still gets out.
    */
