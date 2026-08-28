@@ -455,7 +455,17 @@ export function Explorer({
 
   // Every row in a paint ages against one instant, so two rows a millisecond
   // apart never render as "59min" and "1h".
-  const now = Date.now();
+  //
+  // Quantized to ten seconds, and that is a performance decision, not a
+  // display one (TRE-113). A fresh `Date.now()` every render made this prop a
+  // new value every render, which unpicked the compiler's memoization of both
+  // panes and the inspector — so any re-render of Explorer (a `du` frame, an
+  // upload's progress, a disks poll) became a re-render of every mounted row,
+  // 5-15ms a time. Nothing on screen can tell: `now` only ever advanced when
+  // something re-rendered anyway, so ages were already stale between renders,
+  // and the finest bucket `formatAge` draws is seconds on a column read as
+  // "roughly how stale".
+  const now = Math.trunc(Date.now() / 10_000) * 10_000;
 
   const rendered = [0, 1].map((index) => {
     const listing = listings[index];

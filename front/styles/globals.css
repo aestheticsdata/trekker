@@ -774,18 +774,121 @@ body {
   }
 }
 
-/* The panes are the only scrolling surface, and the default macOS overlay bar
- * disappears over a light pane exactly when a long listing needs it.
+/* The panes are not the only scrolling surface any more, and the default macOS
+ * overlay bar disappears over a light pane exactly when a long listing needs
+ * it. So the bar is drawn rather than left to the platform.
+ *
+ * **Half the mockup's width, deliberately (TRE-113).** 2a draws 9px and this
+ * app ports 2a's geometry rather than deriving it (TRE-42) — but 9px was set
+ * when the panes were the only thing that scrolled, and the terminal's
+ * scrollback put a bar inside a 148px box where 9px reads as furniture. 4px is
+ * a bar you can see and grab and stop noticing, which is what this one is for.
+ *
+ * **Why not the standard properties.** `scrollbar-width` and `scrollbar-color`
+ * are composited, and a `::-webkit-scrollbar` thumb is not — it is painted on
+ * the main thread, so it can only move on the next commit and therefore trails
+ * the content it describes. That is a real cost and it is paid here on purpose:
+ * `scrollbar-width` takes a keyword, not a length, and its keywords measure
+ *
+ *     ::-webkit-scrollbar     any width — 4px here
+ *     scrollbar-width: thin   11px, and no way to ask for less
+ *
+ * so the composited route is the *wider* one, in the direction this rule is
+ * trying to go. The trailing thumb shrinks with the thumb, which is the nearest
+ * thing to having both. A rem width also keeps the bar following `--ui-base`,
+ * which a keyword cannot do.
  */
 @supports selector(::-webkit-scrollbar) {
   ::-webkit-scrollbar {
-    width: 0.5625rem; /* 9px */
-    height: 0.5625rem;
+    width: 0.28125rem; /* 4.5px — half of 2a's 9px, and 4px of gutter */
+    height: 0.28125rem;
   }
   ::-webkit-scrollbar-thumb {
     background: var(--color-pane-line);
   }
   ::-webkit-scrollbar-track {
     background: transparent;
+  }
+}
+
+/* ---- the composited scrollbar (TRE-113) ---------------------------------
+ *
+ * Styling `::-webkit-scrollbar` above opts a scroller out of Chrome's
+ * composited scrollbars: the thumb becomes a main-thread paint, and during a
+ * wheel scroll the compositor moves the content immediately while the thumb
+ * waits for the next main-frame commit — which Chrome defers behind the
+ * scroll. So a custom thumb trails the content it describes, on every
+ * scroller the rule touches, however idle the page is.
+ *
+ * This block is the way out for the scroller where that showed: an overlay
+ * thumb whose position is a scroll-driven transform animation, which Chrome
+ * runs on the compositor. Both the content and the thumb then move on the
+ * same thread, at any width — the 4.5px above included — which the native
+ * route cannot do (`scrollbar-width` takes only keywords, and `thin` is
+ * 11px).
+ *
+ * The scroller hides its native bars and carries the rail as its first
+ * child: a 0×0 `sticky` box pinned to the scrollport's corner, with the two
+ * thumbs positioned absolutely inside it. The thumb lengths are the one part
+ * CSS cannot derive (client²/scroll per axis), so the component writes them
+ * as `--sb-vh`/`--sb-hw` when its content changes — content changes, not
+ * scroll: nothing here touches the main thread while scrolling.
+ *
+ * Guarded on scroll-timeline support; without it the native 4.5px bar above
+ * stays, trailing as before, which is the state every browser was in.
+ */
+.scroll-thumb-rail {
+  display: none;
+}
+
+@supports (animation-timeline: scroll()) {
+  .scroll-composited {
+    scrollbar-width: none;
+    container-type: size;
+  }
+  .scroll-composited::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scroll-thumb-rail {
+    display: block;
+    position: sticky;
+    top: 0;
+    left: 0;
+    height: 0;
+    width: 0;
+    overflow: visible;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .scroll-thumb-rail > span {
+    position: absolute;
+    background: var(--color-pane-line);
+  }
+  .scroll-thumb-y {
+    top: 0;
+    left: calc(100cqw - 0.28125rem);
+    width: 0.28125rem;
+    height: var(--sb-vh, 0px);
+    animation: sb-y linear both;
+    animation-timeline: scroll(nearest block);
+  }
+  .scroll-thumb-x {
+    left: 0;
+    top: calc(100cqh - 0.28125rem);
+    height: 0.28125rem;
+    width: var(--sb-hw, 0px);
+    animation: sb-x linear both;
+    animation-timeline: scroll(nearest inline);
+  }
+  @keyframes sb-y {
+    to {
+      transform: translateY(calc(100cqh - var(--sb-vh, 0px)));
+    }
+  }
+  @keyframes sb-x {
+    to {
+      transform: translateX(calc(100cqw - var(--sb-hw, 0px)));
+    }
   }
 }

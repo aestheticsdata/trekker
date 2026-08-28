@@ -181,6 +181,35 @@ export function TerminalPanel({
     if (body) body.scrollTop = body.scrollHeight;
   }, [lines, open]);
 
+  // The overlay thumbs' two lengths (TRE-113): client²/scroll per axis, the
+  // one part of the composited scrollbar CSS cannot derive itself. Written
+  // when the content or the box changes — never per scroll frame, which is
+  // the entire point of that scrollbar: while the wheel turns, the thumb is a
+  // compositor animation and the main thread is not consulted. Pixels rather
+  // than rem because these are measurements of live boxes that already follow
+  // `--ui-base`; the floor keeps a 500-line buffer's thumb graspable.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (body === null) return;
+    const measure = () => {
+      const floor = 1.5 * Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+      const vertical =
+        body.scrollHeight > body.clientHeight
+          ? Math.max(floor, (body.clientHeight * body.clientHeight) / body.scrollHeight)
+          : 0;
+      const horizontal =
+        body.scrollWidth > body.clientWidth
+          ? Math.max(floor, (body.clientWidth * body.clientWidth) / body.scrollWidth)
+          : 0;
+      body.style.setProperty("--sb-vh", `${vertical}px`);
+      body.style.setProperty("--sb-hw", `${horizontal}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [lines, open]);
+
   const write = (written: readonly Written[]) => {
     if (written.length === 0) return;
     // Keyed out here, not inside the updater. An updater is not a place to have
@@ -374,8 +403,19 @@ export function TerminalPanel({
           aria-label="Terminal output"
           // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box with no other keyboard route has to be focusable, or its content is reachable by pointer alone
           tabIndex={0}
-          className={`${TERMINAL_OUTPUT_INK} min-h-0 flex-1 overflow-x-auto overflow-y-auto px-2.5 py-1.75 font-mono text-xs leading-term whitespace-pre`}
+          className={`${TERMINAL_OUTPUT_INK} scroll-composited min-h-0 flex-1 overflow-x-auto overflow-y-auto px-2.5 py-1.75 font-mono text-xs leading-term whitespace-pre`}
         >
+          {/* The composited scrollbar's rail (TRE-113): a 0×0 sticky box the
+              two thumbs hang off, drawn by the compositor as the content
+              scrolls. Hidden entirely where scroll-timelines are not
+              supported — the native bar takes over there. */}
+          <div
+            aria-hidden
+            className="scroll-thumb-rail"
+          >
+            <span className="scroll-thumb-y" />
+            <span className="scroll-thumb-x" />
+          </div>
           {lines.length === 0 ? (
             <p className={LINE_INK.quiet}>{EMPTY_SCROLLBACK}</p>
           ) : (
