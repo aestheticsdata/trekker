@@ -2,6 +2,7 @@
 
 import { promptFor, run, who } from "@components/explorer/terminal-runner";
 import { useFootSlot } from "@components/shell/foot-slot";
+import { ScrollThumbRail, useScrollThumbs } from "@components/ui/scroll-thumbs";
 import { PROMPT_ELEVATED_INK } from "@helpers/sudo";
 import {
   EMPTY_SCROLLBACK,
@@ -182,34 +183,12 @@ export function TerminalPanel({
     if (body) body.scrollTop = body.scrollHeight;
   }, [lines, open]);
 
-  // The overlay thumbs' two lengths (TRE-113): client²/scroll per axis, the
-  // one part of the composited scrollbar CSS cannot derive itself. Written
-  // when the content or the box changes — never per scroll frame, which is
-  // the entire point of that scrollbar: while the wheel turns, the thumb is a
-  // compositor animation and the main thread is not consulted. Pixels rather
-  // than rem because these are measurements of live boxes that already follow
-  // `--ui-base`; the floor keeps a 500-line buffer's thumb graspable.
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (body === null) return;
-    const measure = () => {
-      const floor = 1.5 * Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
-      const vertical =
-        body.scrollHeight > body.clientHeight
-          ? Math.max(floor, (body.clientHeight * body.clientHeight) / body.scrollHeight)
-          : 0;
-      const horizontal =
-        body.scrollWidth > body.clientWidth
-          ? Math.max(floor, (body.clientWidth * body.clientWidth) / body.scrollWidth)
-          : 0;
-      body.style.setProperty("--sb-vh", `${vertical}px`);
-      body.style.setProperty("--sb-hw", `${horizontal}px`);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(body);
-    return () => observer.disconnect();
-  }, [lines, open]);
+  // The composited scrollbar's measured half (TRE-113, shared out to every
+  // long scroller by TRE-117 — the mechanism is explained where it now
+  // lives). The key names what the scrollback's size is a function of: the
+  // lines while it is up, nothing while it is down — so reopening measures
+  // the fresh element the conditional just mounted.
+  useScrollThumbs(bodyRef, open ? lines : null);
 
   const write = (written: readonly Written[]) => {
     if (written.length === 0) return;
@@ -403,17 +382,7 @@ export function TerminalPanel({
           tabIndex={0}
           className={`${TERMINAL_OUTPUT_INK} scroll-composited min-h-0 flex-1 overflow-x-auto overflow-y-auto px-2.5 py-1.75 font-mono text-xs leading-term whitespace-pre`}
         >
-          {/* The composited scrollbar's rail (TRE-113): a 0×0 sticky box the
-              two thumbs hang off, drawn by the compositor as the content
-              scrolls. Hidden entirely where scroll-timelines are not
-              supported — the native bar takes over there. */}
-          <div
-            aria-hidden
-            className="scroll-thumb-rail"
-          >
-            <span className="scroll-thumb-y" />
-            <span className="scroll-thumb-x" />
-          </div>
+          <ScrollThumbRail />
           {lines.length === 0 ? (
             <p className={LINE_INK.quiet}>{EMPTY_SCROLLBACK}</p>
           ) : (

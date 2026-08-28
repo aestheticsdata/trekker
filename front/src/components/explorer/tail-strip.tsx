@@ -1,6 +1,7 @@
 "use client";
 
 import { useTail } from "@components/explorer/use-tail";
+import { ScrollThumbRail, useScrollThumbs } from "@components/ui/scroll-thumbs";
 import { Tooltip, TooltipBlock } from "@components/ui/tooltip";
 import { joinPath } from "@helpers/listing";
 import {
@@ -111,6 +112,13 @@ function TailFeedView({
   const feed = useTail(hostId, path, attempt);
   const bodyRef = useRef<HTMLDivElement>(null);
 
+  // The composited scrollbar's measured half (TRE-117). `received` rather
+  // than the ring or its length: the ring's identity churns on frames that
+  // changed nothing, and its length parks at the cap while wrapped lines
+  // keep rotating through — which changes the height with the count frozen.
+  // The total received is the one number that moves on every append.
+  useScrollThumbs(bodyRef, feed.received);
+
   /**
    * The line count at the moment the reader scrolled away, or null while the
    * strip is following the end.
@@ -219,8 +227,9 @@ function TailFeedView({
         aria-label={`Live tail of ${path}`}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box with no other keyboard route has to be focusable, or its content is reachable by pointer alone
         tabIndex={0}
-        className={`${TAIL_BODY_INK} h-tailbody overflow-x-hidden overflow-y-auto font-mono text-caption leading-log`}
+        className={`${TAIL_BODY_INK} scroll-composited h-tailbody overflow-x-hidden overflow-y-auto font-mono text-caption leading-log`}
       >
+        <ScrollThumbRail />
         {feed.entries.length === 0 ? (
           <p className={TAIL_NOTE_INK}>
             {feed.status === "ended" ? (feed.ended ?? "The tail ended.") : "waiting for the first line…"}

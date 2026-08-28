@@ -4,6 +4,7 @@ import { FileMark } from "@components/explorer/file-mark";
 import { cursorWindowIndex, PARENT_NAME, pathOf } from "@components/explorer/pane-state";
 import { useRowWindow } from "@components/explorer/row-window";
 import { TailStrip } from "@components/explorer/tail-strip";
+import { ScrollThumbRail, useScrollThumbs } from "@components/ui/scroll-thumbs";
 import { Tooltip } from "@components/ui/tooltip";
 import { ageIndex, HEAT, HEAT_OFF_BAR, HEAT_OFF_INK } from "@helpers/heat";
 import {
@@ -183,6 +184,17 @@ export function Pane({
     cursor: active ? cursorIndex : -1,
   });
 
+  // The composited scrollbar's measured half (TRE-117). The key is what the
+  // listing's scrollable height is a function of: the virtualiser's spacer
+  // while rows are up — which folds in the row count, `..`, and a `--ui-base`
+  // rescale of the row height — and otherwise which placeholder is standing
+  // in for them. The stage name rather than one shared "nothing": a skeleton
+  // and the error state that replaces it are different heights, and in a pane
+  // squeezed to its floor both can overflow — a shared key would leave the
+  // thumb describing content no longer in the DOM.
+  const stage = loading ? "loading" : host === null ? "unbound" : error ? "error" : rows.length === 0 ? "empty" : null;
+  useScrollThumbs(list.scrollRef, stage ?? list.total);
+
   // A row whose size is not known is left out of every total and every scale
   // rather than counted as zero (TRE-107). Counted as zero it would drag a
   // footer total downwards silently; left out, the total is over a smaller set
@@ -280,8 +292,9 @@ export function Pane({
       <div
         ref={list.scrollRef}
         onContextMenu={openMenu}
-        className="relative min-h-16.5 flex-auto overflow-x-hidden overflow-y-auto"
+        className="scroll-composited relative min-h-16.5 flex-auto overflow-x-hidden overflow-y-auto"
       >
+        <ScrollThumbRail />
         {/* The row height, asked of the browser rather than written down here.
             `--ui-base` (TRE-44) rescales it at runtime and the virtualiser has
             to follow; zero width and absolute, so it is only ever a height. */}

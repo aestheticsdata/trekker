@@ -836,7 +836,9 @@ body {
  * scroll. So a custom thumb trails the content it describes, on every
  * scroller the rule touches, however idle the page is.
  *
- * This block is the way out for the scroller where that showed: an overlay
+ * This block is the way out, first for the terminal scrollback where it
+ * showed and, since TRE-117, for every scroller a person actually travels —
+ * the pane listing, the sidebar, the live tail: an overlay
  * thumb whose position is a scroll-driven transform animation, which Chrome
  * runs on the compositor. Both the content and the thumb then move on the
  * same thread, at any width — the 4.5px above included — which the native
@@ -846,9 +848,16 @@ body {
  * The scroller hides its native bars and carries the rail as its first
  * child: a 0×0 `sticky` box pinned to the scrollport's corner, with the two
  * thumbs positioned absolutely inside it. The thumb lengths are the one part
- * CSS cannot derive (client²/scroll per axis), so the component writes them
- * as `--sb-vh`/`--sb-hw` when its content changes — content changes, not
- * scroll: nothing here touches the main thread while scrolling.
+ * CSS cannot derive (client²/scroll per axis), so `useScrollThumbs`
+ * (components/ui/scroll-thumbs.tsx) writes them as `--sb-vh`/`--sb-hw` when
+ * the content changes — content changes, not scroll: nothing here touches
+ * the main thread while scrolling.
+ *
+ * Not worn by the content-sized boxes, deliberately: `container-type: size`
+ * below means `contain: size`, and a menu or a modal list that takes its
+ * height from its rows would collapse to nothing. Those keep the native bar
+ * above — they are scrolled three rows at a time, where a trailing thumb is
+ * invisible.
  *
  * Guarded on scroll-timeline support; without it the native 4.5px bar above
  * stays, trailing as before, which is the state every browser was in.

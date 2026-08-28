@@ -4,6 +4,7 @@ import { useAuth } from "@auth/context/AuthContext";
 import { ActivityStrip } from "@components/sidebar/activity-strip";
 import { Volumes } from "@components/sidebar/volumes";
 import { AddButton } from "@components/ui/add-button";
+import { ScrollThumbRail, useScrollThumbs } from "@components/ui/scroll-thumbs";
 import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import { TransferQueue } from "@components/ui/transfers";
@@ -12,6 +13,7 @@ import { deleteBookmark, fetchBookmarks } from "@lib/api/bookmarks";
 import { fetchHostSummary } from "@lib/api/hosts";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRef } from "react";
 
 import type { BookmarkView } from "@lib/api/bookmarks";
 import type { HostView } from "@lib/api/hosts";
@@ -66,42 +68,65 @@ export function Sidebar({
     throwOnError: false,
   });
 
+  // The composited scrollbar's measured half (TRE-117), with a twist the
+  // other scrollers do not need: this box's height grows inside children it
+  // cannot see — Volumes, the transfer queue and the activity strip all own
+  // their queries — so no key named here could cover them. The wrapper below
+  // is one in-flow block whose height *is* the content's, and observing it is
+  // what catches a transfer arriving three components down.
+  const body = useRef<HTMLDivElement>(null);
+  const grows = useRef<HTMLDivElement>(null);
+  useScrollThumbs(body, null, grows);
+
   return (
     <aside className="bg-chrome border-line flex w-44 flex-none flex-col border-r">
-      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-1.75">
-        {views && (
-          <>
-            {/* The range is spelled by the keymap rather than written here, the
+      <div
+        ref={body}
+        className="scroll-composited min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
+      >
+        <ScrollThumbRail />
+        {/* The padding rides the wrapper, not the scroller: the thumb's travel
+            is spanned in `cqh`, which measures the container's content box,
+            while the thumb's length is measured from `clientHeight` — padding
+            on the scroller makes those two boxes differ and parks the thumb
+            7px short of the foot of its rail. */}
+        <div
+          ref={grows}
+          className="pt-1.75"
+        >
+          {views && (
+            <>
+              {/* The range is spelled by the keymap rather than written here, the
                 same rule the ⌘K chip follows: a chord moved in `helpers/keys.ts`
                 while this said ⌥1–9 would advertise a key that fires nothing. */}
-            <Section
-              title="VIEWS"
-              counter={`${writeViewSlot(VIEW_SLOTS[0])}–${VIEW_SLOTS[VIEW_SLOTS.length - 1]}`}
-            >
-              {views}
-            </Section>
+              <Section
+                title="VIEWS"
+                counter={`${writeViewSlot(VIEW_SLOTS[0])}–${VIEW_SLOTS[VIEW_SLOTS.length - 1]}`}
+              >
+                {views}
+              </Section>
 
-            <Rule />
-          </>
-        )}
+              <Rule />
+            </>
+          )}
 
-        <Section
-          title="SERVERS"
-          counter={`${hosts.length} ${hosts.length === 1 ? "host" : "hosts"}`}
-        >
-          {hosts.map((host) => (
-            <ServerRow
-              key={host.id}
-              host={host}
-              here={paneHostIds[activePane] === host.id}
-              boundTo={[paneHostIds[0] === host.id, paneHostIds[1] === host.id]}
-              onPick={() => onBindHost(activePane, host)}
-              onBind={(pane) => onBindHost(pane, host)}
-            />
-          ))}
-          {hosts.length === 0 && <Empty>No hosts yet.</Empty>}
+          <Section
+            title="SERVERS"
+            counter={`${hosts.length} ${hosts.length === 1 ? "host" : "hosts"}`}
+          >
+            {hosts.map((host) => (
+              <ServerRow
+                key={host.id}
+                host={host}
+                here={paneHostIds[activePane] === host.id}
+                boundTo={[paneHostIds[0] === host.id, paneHostIds[1] === host.id]}
+                onPick={() => onBindHost(activePane, host)}
+                onBind={(pane) => onBindHost(pane, host)}
+              />
+            ))}
+            {hosts.length === 0 && <Empty>No hosts yet.</Empty>}
 
-          {/* Not in the mockup, which ends this section at the last row and
+            {/* Not in the mockup, which ends this section at the last row and
               rules off into VOLUMES (TRE-102). It is here because the pane's
               `This machine ▾` chip was the only way to reach the host manager,
               and nobody looking for "where do I add a server" reads a pane's
@@ -110,48 +135,49 @@ export function Sidebar({
 
               It is VIEWS' `＋ save current view…`, which since TRE-104 is one
               component rather than the same classes twice. */}
-          <AddButton
-            label="＋ new host…"
-            onClick={onNewHost}
-          />
-        </Section>
+            <AddButton
+              label="＋ new host…"
+              onClick={onNewHost}
+            />
+          </Section>
 
-        <Rule />
+          <Rule />
 
-        {/* Below SERVERS and above FAVOURITES, as the mockup orders them — and
+          {/* Below SERVERS and above FAVOURITES, as the mockup orders them — and
             the order is the meaning again: this section describes the machine
             the section above it selected. */}
-        <Section title="VOLUMES">
-          <Volumes
-            host={hosts.find((host) => host.id === paneHostIds[activePane]) ?? null}
-            onNavigate={onNavigate}
-          />
-        </Section>
+          <Section title="VOLUMES">
+            <Volumes
+              host={hosts.find((host) => host.id === paneHostIds[activePane]) ?? null}
+              onNavigate={onNavigate}
+            />
+          </Section>
 
-        <Rule />
+          <Rule />
 
-        <Section title="FAVOURITES">
-          <Favourites
-            hosts={hosts}
-            bookmarks={bookmarks ?? []}
-            onNavigate={onNavigate}
-          />
-        </Section>
+          <Section title="FAVOURITES">
+            <Favourites
+              hosts={hosts}
+              bookmarks={bookmarks ?? []}
+              onNavigate={onNavigate}
+            />
+          </Section>
 
-        <Rule />
+          <Rule />
 
-        {/* Above ACTIVITY, and the order is the meaning: this section is what
+          {/* Above ACTIVITY, and the order is the meaning: this section is what
             is happening, the one below it is what happened. A finished transfer
             leaves here and appears there (TRE-24 §3). */}
-        <Section title="TRANSFERS">
-          <TransferQueue />
-        </Section>
+          <Section title="TRANSFERS">
+            <TransferQueue />
+          </Section>
 
-        <Rule />
+          <Rule />
 
-        <Section title="ACTIVITY">
-          <ActivityStrip />
-        </Section>
+          <Section title="ACTIVITY">
+            <ActivityStrip />
+          </Section>
+        </div>
       </div>
     </aside>
   );
