@@ -242,13 +242,13 @@ check("the `#`, elevated", PROMPT_ELEVATED_INK, TERMINAL_SURFACE);
 check("the word TERMINAL", TERMINAL_TITLE_INK, TERMINAL_BAR);
 check("the header beside it, and its two buttons", TERMINAL_LABEL_INK, TERMINAL_BAR);
 // The collapsed strip (TRE-85) is the prompt row on the panel's own ground, so
-// its three parts are measured above. These two are the strip's alone: the
-// placeholder that says what the terminal last answered, and the hint beside
-// it. Both wear an ink already checked on this surface — named again here
-// because the row they sit in is the one a person reads without opening
-// anything, and a later change to either constant should fail under its own
-// name rather than under the scrollback's.
-check("what the collapsed strip last said", TERMINAL_ECHO_INK, TERMINAL_SURFACE);
+// its parts are measured above. This one is the strip's alone: the hint that
+// names the chord. It wears an ink already checked on this surface — named
+// again here because the row it sits in is the one a person reads without
+// opening anything, and a later change to the constant should fail under its
+// own name rather than under the header's. The placeholder that once said what
+// the terminal last answered went with TRE-115 — the strip invites now, it
+// does not report.
 check("the strip's `⌥↩ expand to terminal` hint", TERMINAL_LABEL_INK, TERMINAL_SURFACE);
 
 /*
@@ -682,8 +682,8 @@ const ROOMS: readonly Room[] = [
     boxes: [
       {
         on: ["bg-terminal"],
-        inks: ["ink", "ink-dim"],
-        note: "the input, and the placeholder the collapsed strip offers (TRE-85)",
+        inks: ["ink"],
+        note: "the input the prompt row carries (TRE-85; its placeholder went with TRE-115)",
       },
     ],
   },

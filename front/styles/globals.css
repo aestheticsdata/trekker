@@ -444,6 +444,14 @@
    * appears to stall twice a turn, and a stalled spinner is read as a hung one.
    */
   --animate-measuring: measuring 0.8s linear infinite;
+  /*
+   * The collapsed prompt's stand-in caret (TRE-115). `step-end` because a
+   * caret does not fade — it is lit, and then it is not, half of each second,
+   * which is the cadence the field's real caret blinks at. The
+   * reduced-motion rule below stops it after one instant cycle, which leaves
+   * it solid: still a caret, just not a moving one.
+   */
+  --animate-prompt-caret: prompt-caret 1s step-end infinite;
 
   /* A pane is not one of those. It does not float above the layout, it *is*
    * layout — it takes its width from the panes beside it — so fading one in
@@ -710,6 +718,14 @@ body {
 @keyframes measuring {
   to {
     transform: rotate(1turn);
+  }
+}
+
+/* One declared frame and `step-end` in the token above: on for the first half
+ * of the second, out for the other — a square wave, which is what a blink is. */
+@keyframes prompt-caret {
+  50% {
+    opacity: 0;
   }
 }
 

@@ -40,7 +40,8 @@ import type { TerminalLine } from "@helpers/terminal";
  * and widening it means writing a parser.
  *
  * **It has two forms and one input.** Collapsed it is a 28px strip — the prompt
- * row alone, with the last thing the terminal said as its placeholder. Expanded
+ * row pared down to an invitation: `user@host $` and a blinking stand-in caret
+ * (TRE-115), with the cwd and the echo kept for the expanded form. Expanded
  * it is that same row with 198px of panel grown above it. Not two components
  * and not two inputs: the row below is the *same element* in both, so the draft,
  * the caret, the focus and the walk through history survive a toggle without
@@ -348,9 +349,6 @@ export function TerminalPanel({
     setInput(history[next]);
   };
 
-  /** What the terminal last said, which is what the collapsed strip offers. */
-  const lastLine = lines.length === 0 ? null : lines[lines.length - 1].text;
-
   // One render's wait, and only on the very first paint: the row is a callback
   // ref in `AppShell`, so it exists by the time that state has settled. Null
   // rather than a fallback position, because rendering here first would put the
@@ -431,7 +429,7 @@ export function TerminalPanel({
         </div>
       )}
 
-      {/* Four children and no punctuation between them: the mockup separates
+      {/* No punctuation between the prompt's parts: the mockup separates
           `user@host`, the path and the prompt character by a gap rather than a
           `:`, so each is a colour rather than a fragment of one string. The
           joined form still exists — it is what an echoed line keeps, where the
@@ -459,13 +457,30 @@ export function TerminalPanel({
         <span className={`${PROMPT_WHO_INK} flex-none font-medium`}>
           {world === null ? "…" : `${who(world, remoteUser)}@${world.host.slug}`}
         </span>
-        <span className={`${PROMPT_WHERE_INK} min-w-0 flex-none truncate`}>{world?.cwd ?? "/"}</span>
+        {/* Only while the scrollback is up. Collapsed, the strip is an
+            invitation rather than a report, and a path in it made the row read
+            as one more status line under the actual status bar (TRE-115).
+            Where you are is the panes' own headline; the prompt repeats it
+            once it is a prompt. */}
+        {open && <span className={`${PROMPT_WHERE_INK} min-w-0 flex-none truncate`}>{world?.cwd ?? "/"}</span>}
         <span
           aria-hidden
           className={`${elevated ? PROMPT_ELEVATED_INK : PROMPT_CHAR_INK} flex-none font-medium`}
         >
           {elevated ? "#" : "$"}
         </span>
+        {/* The blink is what says "command line" from across the room, and the
+            collapsed strip had none (TRE-115). A thin bar rather than 2a's
+            solid block, deliberately: the field's own caret is a bar, and a
+            stand-in should look like the thing it stands in for. Collapsed
+            only — focusing the field raises the panel and puts the real caret
+            in this exact spot, so the two are never on screen together. */}
+        {!open && (
+          <span
+            aria-hidden
+            className="bg-ink animate-prompt-caret h-2.75 w-px flex-none"
+          />
+        )}
         <input
           ref={inputRef}
           value={input}
@@ -533,14 +548,13 @@ export function TerminalPanel({
           // path nobody thought of can leave it focused inside a strip that
           // never raised itself.
           onFocus={() => onOpenChange(true)}
-          // The placeholder is the strip's whole reason for existing: 28px that
-          // only held an empty box would be furniture. It is the echo ink —
-          // dimmer than the terminal's own answers, which is the distinction
-          // the seven output inks already draw — and it is offered only while
-          // the scrollback is down, since a line repeated directly beneath
-          // itself is noise.
-          placeholder={open ? undefined : (lastLine ?? EMPTY_SCROLLBACK)}
-          className="text-ink placeholder:text-ink-dim min-w-0 flex-1 bg-transparent outline-none"
+          // No placeholder, deliberately — the strip used to echo the
+          // terminal's last line here, and a row that opens `user@host $` and
+          // then prints an old answer reads as a status bar, which is the
+          // confusion TRE-115 exists to end. An empty field behind a blinking
+          // caret is what "type here" looks like; what the terminal last said
+          // is one ⌥↩ away.
+          className="text-ink min-w-0 flex-1 bg-transparent outline-none"
         />
 
         {!open && (

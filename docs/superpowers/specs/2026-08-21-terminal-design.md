@@ -274,10 +274,16 @@ Overruled, in three places — the fourth was overruled here and built later:
    built *here*: this ticket asked for a panel that toggles, and a permanent
    28px strip is a layout change it does not ask for. It got its own ticket,
    and **TRE-85 built it** — so this entry is history rather than a standing
-   deviation. What shipped differs from 2a on one point: the caret is the
-   input's own rather than an animated block, because the strip is a real
-   prompt and not a picture of one. The strip's placeholder is the terminal's
-   last line, which is the answer to what a permanent 28px row is *for*.
+   deviation. What TRE-85 first shipped differed from 2a on one point — no
+   blink, the input's own caret or nothing — and added a placeholder echoing
+   the terminal's last line. **TRE-115 walked both back**: a strip that opens
+   `user@host  cwd  $` and then prints an old answer reads as a status bar,
+   and nothing in it said "type here". Collapsed it is now the invitation
+   alone — `user@host $` and a thin blinking stand-in caret, with the cwd and
+   the echo kept for the expanded form. 2a's solid block cursor stays unbuilt
+   on purpose: the field's real caret is a bar, the stand-in should look like
+   the thing it stands in for, and focusing the field swaps one for the other
+   in place.
 
 One behaviour *is* carried over: **the terminal replaces the disk-usage strip
 while it is open.** They are the same kind of object — a fixed-height panel
@@ -286,9 +292,9 @@ furniture. It is also why `du` prints its level into scrollback rather than
 forcing the strip open, which was the first thing tried and is incoherent with
 this: the command would open a panel it had just displaced.
 
-`pnpm verify:contrast` measures all fifteen of the terminal's pairs, including
+`pnpm verify:contrast` measures all fourteen of the terminal's pairs, including
 TRE-29's `#` against its second surface and, since TRE-85, the collapsed strip's
-placeholder and hint.
+hint. The strip's placeholder was the fifteenth, and went with TRE-115.
 
 ## Out of scope, and staying that way
 
