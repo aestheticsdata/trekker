@@ -870,6 +870,12 @@ body {
   .scroll-composited {
     scrollbar-width: none;
     container-type: size;
+    /* Promoted at creation rather than when Chrome gets around to it: a
+     * scroller whose overflow arrives after mount (the terminal answering its
+     * first `ls`) is otherwise scrolled by the main thread until a heuristic
+     * re-promotes it — minutes later, or on a remount — and until then the
+     * thumb trails exactly the way TRE-113 diagnosed (TRE-119). */
+    will-change: scroll-position;
   }
   .scroll-composited::-webkit-scrollbar {
     display: none;
@@ -889,6 +895,8 @@ body {
   .scroll-thumb-rail > span {
     position: absolute;
     background: var(--color-pane-line);
+    /* The same promotion, for the thumbs' own animation (TRE-119). */
+    will-change: transform;
   }
   .scroll-thumb-y {
     top: 0;
