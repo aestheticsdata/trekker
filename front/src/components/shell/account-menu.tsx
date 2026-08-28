@@ -145,7 +145,16 @@ export function AccountMenu({ onOpenChange }: { onOpenChange?: (open: boolean) =
         }}
         aria-haspopup="menu"
         aria-expanded={point !== null}
-        className="border-line-strong text-ink-muted hover:bg-raised flex h-5.5 max-w-40 items-center gap-1.5 rounded-sm border px-2 font-mono text-xs"
+        // `outline-none`, with nothing put in its place (TRE-118). The ring was
+        // the browser's, drawn over a chip that already carries a border, and
+        // it looked like it arrived out of nowhere because `close()` above is
+        // what fetches it: focus comes back here by script, and Chrome counts
+        // a script-moved focus as keyboard focus for as long as the last key
+        // was a real one — so ⎋ out of this menu and the ring stays behind on
+        // a chip nobody Tabbed to. The border, the hover fill and
+        // `aria-expanded` say where focus is; the app has added no focus
+        // treatment of its own since TRE-78 and this is not the place to start.
+        className="border-line-strong text-ink-muted hover:bg-raised flex h-5.5 max-w-40 items-center gap-1.5 rounded-sm border px-2 font-mono text-xs outline-none"
       >
         {/* The address, not a name: it is what was typed to get in, and it is
             what tells two accounts apart on a shared machine. Truncated rather
