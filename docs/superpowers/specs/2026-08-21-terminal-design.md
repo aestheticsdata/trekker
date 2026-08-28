@@ -225,12 +225,18 @@ is the point of the URL, and a link that also reopens a terminal is a link that
 types into somebody else's session. The history — which the ticket *does* ask to
 persist — is per tab, which is what "per session" means.
 
-**`⎋` closes, and only from inside the input.** Every dialogue in this app
-listens for it on the window, and the pane behind reads it as "never mind" to a
-held clipboard. A global handler would be two things on one keypress. Focused,
-it can only mean one thing — and `useKeyboard` already stands down inside an
-input, so nothing else sees it. `⌥↩` needed a listener of its own for the
-opposite reason: both existing hooks return early on `altKey`, deliberately.
+**`⎋` puts the terminal away, and only from inside the input.** Every dialogue
+in this app listens for it on the window, and the pane behind reads it as "never
+mind" to a held clipboard. A global handler would be two things on one keypress.
+Focused, it can only mean one thing — and `useKeyboard` already stands down
+inside an input, so nothing else sees it. `⌥↩` needed a listener of its own for
+the opposite reason: both existing hooks return early on `altKey`, deliberately.
+
+Since TRE-85 the prompt row never unmounts, and that split the two keys apart.
+`⎋` means "I am done with the terminal": it lowers the scrollback **and** blurs,
+on one press, because a caret left in a row that never leaves keeps the panes'
+own keys stood down. `⌥↩` means "get the scrollback out of my way" and keeps the
+caret, since putting the output away is not the same as being finished typing.
 
 ### Built from the mockup, and the four places it was overruled
 

@@ -334,19 +334,6 @@ export function TerminalPanel({
         open ? "h-terminal" : "h-omnibar cursor-text"
       }`}
       aria-label="Terminal"
-      // Anywhere on the strip is the prompt, the way anywhere on a search box
-      // is the field — 2a says so with `cursor: text`. On mousedown rather than
-      // click so the caret is placed by the same press that raised the panel,
-      // and `focus()` rather than `preventDefault()` so a press that landed on
-      // the input keeps the offset it was aimed at.
-      onMouseDown={
-        open
-          ? undefined
-          : () => {
-              onOpenChange(true);
-              inputRef.current?.focus();
-            }
-      }
     >
       {open && (
         <header
@@ -409,7 +396,22 @@ export function TerminalPanel({
           `:`, so each is a colour rather than a fragment of one string. The
           joined form still exists — it is what an echoed line keeps, where the
           parts have to survive being copied out. */}
-      <div
+      {/* A `<label>`, and that is load-bearing rather than tidy markup. Every
+          press anywhere on this row has to reach the field — 2a says so with
+          `cursor: text` — and a `<div>` does the opposite: a mousedown focuses
+          the nearest focusable ancestor of what was pressed, and the prompt's
+          other four children have none, so pressing the identity, the path, the
+          `$`, the hint or the padding between them *clears* focus. The panes
+          hold no DOM focus at all, so the app's resting state is `body` and the
+          window listener drives them from there — meaning the very next key
+          after that stray press is a pane shortcut. That is how a `⌫` aimed at
+          this field walked a directory up instead.
+
+          A label's own default action is "focus my control", which is the
+          behaviour wanted, from the browser rather than from a `preventDefault`
+          racing it. The `aria-label` on the input stays: without it the
+          accessible name would become this row's whole text. */}
+      <label
         className={`flex items-center gap-2 px-2.5 font-mono text-xs leading-none ${
           open ? "border-line flex-none border-t py-1.5" : "min-h-0 flex-1"
         }`}
@@ -431,6 +433,11 @@ export function TerminalPanel({
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
+              // One line at a time, and the refusal keeps the draft: a second
+              // ↩ once the first has answered runs what is already typed. The
+              // field stays live throughout — see `aria-busy` below for why it
+              // is guarded here rather than by disabling it.
+              if (busy) return;
               const typed = input;
               setInput("");
               setWalked(null);
@@ -455,22 +462,37 @@ export function TerminalPanel({
             // keypress. Focused, it can only mean one thing, and `useKeyboard`
             // already stands down inside an input, so nothing else sees it.
             //
-            // Two steps rather than one, and the second is what TRE-85 made
-            // necessary: the strip never leaves, so a caret that stayed in it
-            // after the scrollback went down would leave the panes' own keys
-            // standing down with no way back to them. `⎋` lowers the panel,
-            // then hands the keyboard back.
+            // Both halves on one press, and unconditionally: `⎋` means "I am
+            // done with the terminal", so it lowers the scrollback *and* hands
+            // the keyboard back to the panes. It is `⌥↩` that keeps the caret,
+            // because putting the scrollback away is not the same as being
+            // finished typing — that is the whole distinction between the two
+            // keys, and splitting `⎋` across two presses blurred it.
             if (event.key === "Escape") {
               event.preventDefault();
-              if (open) onOpenChange(false);
-              else inputRef.current?.blur();
+              onOpenChange(false);
+              inputRef.current?.blur();
             }
           }}
-          disabled={busy}
+          // Never `disabled`, deliberately. A control that becomes disabled is
+          // unfocused by the browser there and then, and re-enabling it does
+          // not give the focus back — so every command that reached the runner
+          // used to cost the caret, and the next one had to start with a
+          // click. `aria-busy` says the same thing to a screen reader without
+          // taking anything away, and ↩ is refused above.
+          aria-busy={busy}
           spellCheck={false}
           autoComplete="off"
           autoCapitalize="off"
           aria-label="Terminal input"
+          // Focus is the one signal that the person has come to the terminal,
+          // and every route to it ends here: a press anywhere on the row, the
+          // label's own default action, `⌥↩`, or a tab stop. So the panel opens
+          // from `onFocus` rather than from a click handler on the row — one
+          // place instead of four, and no press that reaches the field by a
+          // path nobody thought of can leave it focused inside a strip that
+          // never raised itself.
+          onFocus={() => onOpenChange(true)}
           // The placeholder is the strip's whole reason for existing: 28px that
           // only held an empty box would be furniture. It is the echo ink —
           // dimmer than the terminal's own answers, which is the distinction
@@ -478,7 +500,7 @@ export function TerminalPanel({
           // the scrollback is down, since a line repeated directly beneath
           // itself is noise.
           placeholder={open ? undefined : (lastLine ?? EMPTY_SCROLLBACK)}
-          className="text-ink placeholder:text-ink-dim min-w-0 flex-1 bg-transparent outline-none disabled:opacity-60"
+          className="text-ink placeholder:text-ink-dim min-w-0 flex-1 bg-transparent outline-none"
         />
 
         {!open && (
@@ -486,7 +508,7 @@ export function TerminalPanel({
             ⌥↩ expand to terminal · ↑ history
           </span>
         )}
-      </div>
+      </label>
     </section>,
     foot,
   );
