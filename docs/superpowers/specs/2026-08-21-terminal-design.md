@@ -249,7 +249,7 @@ an **echo is dimmer than its own answer**, because scrollback is read for what
 came back, and an echo set brighter turns a column of answers into a column of
 questions. A table sits one shade under a scalar. A state change is green.
 
-Overruled, in four places:
+Overruled, in three places — the fourth was overruled here and built later:
 
 1. **`#4d7f99` for the path in the prompt** — that is `--color-ink-faint`, and
    on this ground it measures **4.22:1**. Under AA, for the one thing on the
@@ -265,8 +265,13 @@ Overruled, in four places:
    hundred" and it is 500.
 4. **The collapsed omnibar** — 2a keeps a 28px prompt strip visible when the
    terminal is closed, with a blinking caret and `⌥↩ expand to terminal`. Not
-   built: the ticket asks for a panel that toggles, and a permanent 28px strip
-   is a layout change it does not ask for. Worth its own ticket if wanted.
+   built *here*: this ticket asked for a panel that toggles, and a permanent
+   28px strip is a layout change it does not ask for. It got its own ticket,
+   and **TRE-85 built it** — so this entry is history rather than a standing
+   deviation. What shipped differs from 2a on one point: the caret is the
+   input's own rather than an animated block, because the strip is a real
+   prompt and not a picture of one. The strip's placeholder is the terminal's
+   last line, which is the answer to what a permanent 28px row is *for*.
 
 One behaviour *is* carried over: **the terminal replaces the disk-usage strip
 while it is open.** They are the same kind of object — a fixed-height panel
@@ -275,8 +280,9 @@ furniture. It is also why `du` prints its level into scrollback rather than
 forcing the strip open, which was the first thing tried and is incoherent with
 this: the command would open a panel it had just displaced.
 
-`pnpm verify:contrast` measures all thirteen of the terminal's pairs, including
-TRE-29's `#` against its second surface.
+`pnpm verify:contrast` measures all fifteen of the terminal's pairs, including
+TRE-29's `#` against its second surface and, since TRE-85, the collapsed strip's
+placeholder and hint.
 
 ## Out of scope, and staying that way
 

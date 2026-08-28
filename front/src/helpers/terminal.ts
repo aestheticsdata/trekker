@@ -555,6 +555,16 @@ export const PROMPT_WHO_INK = "text-ink-label";
 export const PROMPT_WHERE_INK = "text-on-terminal-dim";
 export const PROMPT_CHAR_INK = "text-ink-dim";
 
+/**
+ * What the panel says with nothing in its scrollback — and, since TRE-85, what
+ * the collapsed strip offers as its placeholder before anything has been run.
+ *
+ * One string rather than two so the two forms cannot drift: the strip's
+ * placeholder is "the terminal's last line", and on a fresh tab there is no
+ * last line, so it falls back to the sentence the panel would have shown.
+ */
+export const EMPTY_SCROLLBACK = "a restricted set, not a shell — `help` lists what it takes";
+
 /** Which ink a line of scrollback takes. */
 export const LINE_INK: Readonly<Record<LineKind, string>> = {
   echo: TERMINAL_ECHO_INK,

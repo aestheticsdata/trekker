@@ -1,8 +1,10 @@
 "use client";
 
 import { promptFor, run, who } from "@components/explorer/terminal-runner";
+import { useFootSlot } from "@components/shell/foot-slot";
 import { PROMPT_ELEVATED_INK } from "@helpers/sudo";
 import {
+  EMPTY_SCROLLBACK,
   HISTORY_LIMIT,
   helpLines,
   LINE_INK,
@@ -22,12 +24,13 @@ import { QUERY_KEYS } from "@lib/query/keys";
 import { useSudoWindow } from "@lib/query/use-sudo";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { TerminalWorld, Written } from "@components/explorer/terminal-runner";
 import type { TerminalLine } from "@helpers/terminal";
 
 /**
- * The terminal, docked under the panes (TRE-35 §3).
+ * The terminal, docked at the foot of the window (TRE-35 §3, TRE-85).
  *
  * Not a shell and not pretending to be one. Every line goes through
  * `helpers/terminal.ts`, which either produces one typed intent or refuses with
@@ -36,13 +39,25 @@ import type { TerminalLine } from "@helpers/terminal";
  * here has a passthrough to add later — the `Intent` union is the whole surface,
  * and widening it means writing a parser.
  *
- * It lives inside `Explorer` rather than in the shell's `strip` slot, which is
- * where the disk-usage bar goes. The reason is the ticket's own: "the terminal
- * is a keyboard interface to the explorer, not an escape hatch out of it" — and
+ * **It has two forms and one input.** Collapsed it is a 28px strip — the prompt
+ * row alone, with the last thing the terminal said as its placeholder. Expanded
+ * it is that same row with 198px of panel grown above it. Not two components
+ * and not two inputs: the row below is the *same element* in both, so the draft,
+ * the caret, the focus and the walk through history survive a toggle without
+ * anything being handed over. That is the whole reason `open` is a class on the
+ * box and a pair of conditional children, rather than an early return.
+ *
+ * It lives inside `Explorer` rather than in the shell, and renders through a
+ * portal into the row `AppShell` keeps below the status bar (`useFootSlot`).
+ * The reason for the first half is the ticket's own: "the terminal is a
+ * keyboard interface to the explorer, not an escape hatch out of it" — and
  * moving a pane, rebinding a host and opening a modal are all closures in
- * `Explorer`. A panel in the shell would need every one of them lifted out and
- * handed back down, and would still be unable to see `overlayOpen`, which is
- * what stops `⎋` closing a dialogue and the terminal on one keypress.
+ * `Explorer`. A panel owned by the shell would need every one of them lifted
+ * out and handed back down, and would still be unable to see `overlayOpen`,
+ * which is what stops `⎋` closing a dialogue and the terminal on one keypress.
+ * The portal is the second half: 2a draws the strip as the last row of the
+ * window, below a status bar this component does not own, and a portal answers
+ * that without reopening any of the above.
  */
 
 /** Where the typed history is kept, per tab, which is what "per session" means. */
@@ -76,16 +91,16 @@ export function TerminalPanel({
   hostsPending,
   pending,
   onPendingRun,
-  onClose,
+  onOpenChange,
 }: {
   /**
-   * Whether the panel is showing.
+   * Whether the scrollback is up. The prompt row shows either way.
    *
    * A prop rather than a condition on the mount, so scrollback outlives being
    * put away: `⌥↩` twice is a glance at the panes and back, and a terminal that
    * forgot what it had answered would make `clear` pointless — the buffer would
    * already be empty every time you looked at it. This holds no connection and
-   * no timer, so staying mounted costs a closed panel nothing.
+   * no timer, so staying mounted costs a collapsed panel nothing.
    */
   open: boolean;
   /** Null while the active pane has no host — everything but `help` needs one. */
@@ -105,7 +120,12 @@ export function TerminalPanel({
   pending: string | null;
   /** Called the moment the line is taken, so it is never taken twice. */
   onPendingRun: () => void;
-  onClose: () => void;
+  /**
+   * Both directions, because the strip now expands as well as collapses: a
+   * click on it, and a line submitted from it, both need somewhere for the
+   * answer to land.
+   */
+  onOpenChange: (open: boolean) => void;
 }) {
   const [lines, setLines] = useState<readonly TerminalLine[]>([]);
   const [input, setInput] = useState("");
@@ -124,6 +144,7 @@ export function TerminalPanel({
   const sequence = useRef(0);
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const foot = useFootSlot();
 
   const hostId = world?.host.id ?? null;
   const { open: elevated } = useSudoWindow(hostId);
@@ -144,7 +165,10 @@ export function TerminalPanel({
 
   // The panel is opened by a keypress, so the caret is where the keypress meant
   // to go. Without this the first thing typed lands in the pane's own handler.
-  // On `open` rather than on mount, because it now stays mounted while closed.
+  //
+  // Only on the way up. Collapsing deliberately does not touch focus — `⌥↩`
+  // means "get the scrollback out of my way", not "stop typing", and since
+  // TRE-85 the input it would have blurred is still on screen.
   useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
@@ -191,6 +215,11 @@ export function TerminalPanel({
    */
   const submit = async (typed: string) => {
     if (typed.trim().length === 0) return;
+    // An answer needs somewhere to land. A line run from the collapsed strip
+    // raises the scrollback first rather than writing into a box nobody can
+    // see — including the refusal, which is the most likely thing a line typed
+    // down here produces.
+    onOpenChange(true);
     remember(typed);
     write([{ kind: "echo", text: `${echoed} ${typed}` }]);
 
@@ -257,13 +286,16 @@ export function TerminalPanel({
       taken.current = null;
       return;
     }
-    if (!open || taken.current === pending) return;
+    if (taken.current === pending) return;
     taken.current = pending;
     onPendingRun();
+    // No `open` guard any more: the panel is mounted whatever it is showing,
+    // and `submit` raises the scrollback itself. Waiting for the panel to be up
+    // would have meant the palette's line never running while it was down.
     void submit(pending);
     // `submit` is rebuilt every render and closes over nothing this needs to
     // watch; `pending` arriving is the whole event.
-  }, [open, pending, onPendingRun]);
+  }, [pending, onPendingRun]);
 
   const walk = (delta: -1 | 1) => {
     if (history.length === 0) return;
@@ -287,68 +319,101 @@ export function TerminalPanel({
     setInput(history[next]);
   };
 
-  // Null rather than `hidden`: a closed panel must not be in the tab order or
-  // reachable by a screen reader, and it keeps its state either way.
-  if (!open) return null;
+  /** What the terminal last said, which is what the collapsed strip offers. */
+  const lastLine = lines.length === 0 ? null : lines[lines.length - 1].text;
 
-  return (
+  // One render's wait, and only on the very first paint: the row is a callback
+  // ref in `AppShell`, so it exists by the time that state has settled. Null
+  // rather than a fallback position, because rendering here first would put the
+  // strip under the panes for a frame and then move it.
+  if (foot === null) return null;
+
+  return createPortal(
     <section
-      className={`${TERMINAL_SURFACE} border-line h-terminal flex flex-none flex-col border-t`}
+      className={`${TERMINAL_SURFACE} border-line flex flex-none flex-col border-t ${
+        open ? "h-terminal" : "h-omnibar cursor-text"
+      }`}
       aria-label="Terminal"
+      // Anywhere on the strip is the prompt, the way anywhere on a search box
+      // is the field — 2a says so with `cursor: text`. On mousedown rather than
+      // click so the caret is placed by the same press that raised the panel,
+      // and `focus()` rather than `preventDefault()` so a press that landed on
+      // the input keeps the offset it was aimed at.
+      onMouseDown={
+        open
+          ? undefined
+          : () => {
+              onOpenChange(true);
+              inputRef.current?.focus();
+            }
+      }
     >
-      <header
-        className={`${TERMINAL_BAR} ${TERMINAL_LABEL_INK} border-line h-termbar flex flex-none items-center gap-2.5 border-b px-2.5 font-mono text-caption leading-none`}
-      >
-        <span className={`${TERMINAL_TITLE_INK} tracking-label flex-none`}>TERMINAL</span>
-        <span className="min-w-0 flex-1 truncate">{world?.host.label ?? "no host"}</span>
-        <button
-          type="button"
-          onClick={() => setLines([])}
-          className="flex-none hover:opacity-70"
+      {open && (
+        <header
+          className={`${TERMINAL_BAR} ${TERMINAL_LABEL_INK} border-line h-termbar flex flex-none items-center gap-2.5 border-b px-2.5 font-mono text-caption leading-none`}
         >
-          clear
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex-none hover:opacity-70"
-        >
-          close ⌥↩
-        </button>
-      </header>
+          <span className={`${TERMINAL_TITLE_INK} tracking-label flex-none`}>TERMINAL</span>
+          <span className="min-w-0 flex-1 truncate">{world?.host.label ?? "no host"}</span>
+          <button
+            type="button"
+            onClick={() => setLines([])}
+            className="flex-none hover:opacity-70"
+          >
+            clear
+          </button>
+          {/* `×` rather than `close ⌥↩`: since TRE-85 nothing closes. The panel
+            puts its scrollback away and leaves the prompt where it was, and a
+            button that said "close" would be describing the old behaviour. The
+            chord is still the chord — it is in the strip's own hint below. */}
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            aria-label="Collapse the terminal"
+            className="flex-none hover:opacity-70"
+          >
+            ×
+          </button>
+        </header>
+      )}
 
-      <div
-        ref={bodyRef}
-        role="log"
-        // `off` for the reason the live tail's is off: the role implies polite,
-        // and output that is read aloud as it lands would talk over somebody
-        // still typing the next line. Labelled, so it can be read on purpose.
-        aria-live="off"
-        aria-label="Terminal output"
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box with no other keyboard route has to be focusable, or its content is reachable by pointer alone
-        tabIndex={0}
-        className={`${TERMINAL_OUTPUT_INK} min-h-0 flex-1 overflow-x-auto overflow-y-auto px-2.5 py-1.75 font-mono text-xs leading-term whitespace-pre`}
-      >
-        {lines.length === 0 ? (
-          <p className={LINE_INK.quiet}>a restricted set, not a shell — `help` lists what it takes</p>
-        ) : (
-          lines.map((line) => (
-            <div
-              key={line.key}
-              className={LINE_INK[line.kind]}
-            >
-              {line.text}
-            </div>
-          ))
-        )}
-      </div>
+      {open && (
+        <div
+          ref={bodyRef}
+          role="log"
+          // `off` for the reason the live tail's is off: the role implies polite,
+          // and output that is read aloud as it lands would talk over somebody
+          // still typing the next line. Labelled, so it can be read on purpose.
+          aria-live="off"
+          aria-label="Terminal output"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box with no other keyboard route has to be focusable, or its content is reachable by pointer alone
+          tabIndex={0}
+          className={`${TERMINAL_OUTPUT_INK} min-h-0 flex-1 overflow-x-auto overflow-y-auto px-2.5 py-1.75 font-mono text-xs leading-term whitespace-pre`}
+        >
+          {lines.length === 0 ? (
+            <p className={LINE_INK.quiet}>{EMPTY_SCROLLBACK}</p>
+          ) : (
+            lines.map((line) => (
+              <div
+                key={line.key}
+                className={LINE_INK[line.kind]}
+              >
+                {line.text}
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Four children and no punctuation between them: the mockup separates
           `user@host`, the path and the prompt character by a gap rather than a
           `:`, so each is a colour rather than a fragment of one string. The
           joined form still exists — it is what an echoed line keeps, where the
           parts have to survive being copied out. */}
-      <div className="border-line flex flex-none items-center gap-2 border-t px-2.5 py-1.5 font-mono text-xs leading-none">
+      <div
+        className={`flex items-center gap-2 px-2.5 font-mono text-xs leading-none ${
+          open ? "border-line flex-none border-t py-1.5" : "min-h-0 flex-1"
+        }`}
+      >
         <span className={`${PROMPT_WHO_INK} flex-none font-medium`}>
           {world === null ? "…" : `${who(world, remoteUser)}@${world.host.slug}`}
         </span>
@@ -383,15 +448,22 @@ export function TerminalPanel({
               walk(1);
               return;
             }
-            // `⎋` closes, and only from in here (TRE-35 §3). Every dialogue in
-            // this app listens for it on the window, and the pane behind reads
-            // it as "never mind" to a held clipboard — so a global handler for
-            // it would be two things happening on one keypress. Focused, it can
-            // only mean one thing, and `useKeyboard` already stands down inside
-            // an input, so nothing else sees it.
+            // `⎋` puts the terminal away, and only from in here (TRE-35 §3).
+            // Every dialogue in this app listens for it on the window, and the
+            // pane behind reads it as "never mind" to a held clipboard — so a
+            // global handler for it would be two things happening on one
+            // keypress. Focused, it can only mean one thing, and `useKeyboard`
+            // already stands down inside an input, so nothing else sees it.
+            //
+            // Two steps rather than one, and the second is what TRE-85 made
+            // necessary: the strip never leaves, so a caret that stayed in it
+            // after the scrollback went down would leave the panes' own keys
+            // standing down with no way back to them. `⎋` lowers the panel,
+            // then hands the keyboard back.
             if (event.key === "Escape") {
               event.preventDefault();
-              onClose();
+              if (open) onOpenChange(false);
+              else inputRef.current?.blur();
             }
           }}
           disabled={busy}
@@ -399,9 +471,23 @@ export function TerminalPanel({
           autoComplete="off"
           autoCapitalize="off"
           aria-label="Terminal input"
-          className="text-ink min-w-0 flex-1 bg-transparent outline-none disabled:opacity-60"
+          // The placeholder is the strip's whole reason for existing: 28px that
+          // only held an empty box would be furniture. It is the echo ink —
+          // dimmer than the terminal's own answers, which is the distinction
+          // the seven output inks already draw — and it is offered only while
+          // the scrollback is down, since a line repeated directly beneath
+          // itself is noise.
+          placeholder={open ? undefined : (lastLine ?? EMPTY_SCROLLBACK)}
+          className="text-ink placeholder:text-ink-dim min-w-0 flex-1 bg-transparent outline-none disabled:opacity-60"
         />
+
+        {!open && (
+          <span className={`${TERMINAL_LABEL_INK} flex-none text-caption leading-none`}>
+            ⌥↩ expand to terminal · ↑ history
+          </span>
+        )}
       </div>
-    </section>
+    </section>,
+    foot,
   );
 }

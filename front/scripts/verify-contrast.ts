@@ -241,6 +241,15 @@ check("the `$`", PROMPT_CHAR_INK, TERMINAL_SURFACE);
 check("the `#`, elevated", PROMPT_ELEVATED_INK, TERMINAL_SURFACE);
 check("the word TERMINAL", TERMINAL_TITLE_INK, TERMINAL_BAR);
 check("the header beside it, and its two buttons", TERMINAL_LABEL_INK, TERMINAL_BAR);
+// The collapsed strip (TRE-85) is the prompt row on the panel's own ground, so
+// its three parts are measured above. These two are the strip's alone: the
+// placeholder that says what the terminal last answered, and the hint beside
+// it. Both wear an ink already checked on this surface — named again here
+// because the row they sit in is the one a person reads without opening
+// anything, and a later change to either constant should fail under its own
+// name rather than under the scrollback's.
+check("what the collapsed strip last said", TERMINAL_ECHO_INK, TERMINAL_SURFACE);
+check("the strip's `⌥↩ expand to terminal` hint", TERMINAL_LABEL_INK, TERMINAL_SURFACE);
 
 /*
  * The pair those two buttons would have worn, which was somebody's next ticket
@@ -668,7 +677,16 @@ const ROOMS: readonly Room[] = [
       { on: ["bg-pane-hover"], inks: ["on-pane-data"], note: "its picker buttons under the pointer" },
     ],
   },
-  { file: "components/explorer/terminal-panel.tsx", boxes: [{ on: ["bg-terminal"], inks: ["ink"] }] },
+  {
+    file: "components/explorer/terminal-panel.tsx",
+    boxes: [
+      {
+        on: ["bg-terminal"],
+        inks: ["ink", "ink-dim"],
+        note: "the input, and the placeholder the collapsed strip offers (TRE-85)",
+      },
+    ],
+  },
   {
     file: "components/explorer/transfer-modal.tsx",
     boxes: [

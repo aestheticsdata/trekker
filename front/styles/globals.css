@@ -501,6 +501,11 @@
    * same one with fewer lines in it. */
   --spacing-terminal: 12.375rem; /* 198px */
   --spacing-termbar: 1.375rem; /* 22px — its header */
+  /* The same panel with the scrollback put away (TRE-85): the prompt row alone,
+   * docked at the foot of the window. 2a states it as 28px, and the row inside
+   * is the panel's own — so this is a height on the box rather than padding on
+   * the row, which is what keeps the two forms the same element. */
+  --spacing-omnibar: 1.75rem; /* 28px */
   /* The ⌘K palette (TRE-36 §4), which 2a states outright: a 620px panel with a
    * 330px list in it, and the header, footer and rows taking what they need
    * from the spacing scale around it. Two tokens rather than six for the reason

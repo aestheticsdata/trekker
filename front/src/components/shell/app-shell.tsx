@@ -1,11 +1,13 @@
 "use client";
 
+import { FootSlotProvider } from "@components/shell/foot-slot";
 import { StatusBar } from "@components/shell/status-bar";
 import { Toolbar } from "@components/shell/toolbar";
 import { TopBar } from "@components/shell/top-bar";
 import { ToastProvider } from "@components/ui/toast";
 import { TransferProvider } from "@components/ui/transfers";
 import { UploadProvider } from "@components/ui/uploads";
+import { useState } from "react";
 
 import type { Action } from "@components/shell/actions";
 import type { SelectionSummary } from "@components/shell/status-bar";
@@ -92,6 +94,11 @@ export function AppShell({
   onShowStrip?: (() => void) | null;
   children: ReactNode;
 }) {
+  // The foot row's node, handed to whatever portals into it (TRE-85 §3). State
+  // rather than a ref: the terminal renders inside `children`, one pass before
+  // this row exists, and only a state update brings it back to fill it.
+  const [foot, setFoot] = useState<HTMLElement | null>(null);
+
   return (
     <ToastProvider>
       {/* Inside the toasts, because an upload that hits the rate limit says so
@@ -135,7 +142,9 @@ export function AppShell({
             draws it, and it goes with the panes below the `panes:` breakpoint. */}
             <div className="flex min-h-0 flex-1 overflow-hidden">
               <div className="hidden panes:flex">{sidebar}</div>
-              <main className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
+              <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                <FootSlotProvider value={foot}>{children}</FootSlotProvider>
+              </main>
             </div>
 
             {strip}
@@ -145,6 +154,16 @@ export function AppShell({
               clipboard={clipboard}
               onClearClipboard={onClearClipboard}
               onShowStrip={onShowStrip}
+            />
+
+            {/* The last row of the window, and empty until something fills it
+                (TRE-85 §3). `flex-none` with no height of its own: the terminal
+                is 28px collapsed and 198px expanded, and the row is whichever of
+                those its occupant currently is. Outside the provider on purpose
+                — this row is read from the DOM, not from the tree. */}
+            <div
+              ref={setFoot}
+              className="flex-none"
             />
           </div>
         </TransferProvider>

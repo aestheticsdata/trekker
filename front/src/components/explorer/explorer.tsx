@@ -1982,11 +1982,13 @@ export function Explorer({
   };
 
   return (
-    // Three levels of nesting, and each one is doing something. The column is
-    // the terminal's: it docks under everything, the way the disk-usage strip
-    // docks under the whole app. The row inside it is the inspector's — left
-    // flat, a solo pane would stack the panel underneath itself rather than
-    // beside it. And the row inside *that* is the split's.
+    // Three levels of nesting, and each one is doing something. The column was
+    // the terminal's until TRE-85 sent it through a portal to the foot of the
+    // window; it stays because the panel is still rendered from here, and a
+    // component that returns a portal still occupies its slot. The row inside
+    // it is the inspector's — left flat, a solo pane would stack the panel
+    // underneath itself rather than beside it. And the row inside *that* is the
+    // split's.
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-0 flex-1">
         {/* A query container, so a pane that is collapsing can hold its width in
@@ -2088,7 +2090,7 @@ export function Explorer({
         hostsPending={hostsPending}
         pending={pendingCommand}
         onPendingRun={() => setPendingCommand(null)}
-        onClose={() => onTerminalOpenChange(false)}
+        onOpenChange={onTerminalOpenChange}
       />
 
       {terminalPermissions && (
