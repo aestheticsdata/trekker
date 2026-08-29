@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { HttpException } from "@nestjs/common";
 import { RateLimitService } from "@audit/rate-limit.service";
-import { numberedName, partialName, safeFilename } from "@fs/upload-name";
+import { numberedName, partialName, safeRelativePath } from "@fs/upload-name";
 import { UploadRefused, UploadService } from "@fs/upload.service";
 import { LocalDriver } from "@hosts/drivers/local.driver";
 import { writeFileSync } from "node:fs";
@@ -93,6 +93,17 @@ async function entries(dir: string): Promise<string[]> {
   return (await readdir(dir)).sort();
 }
 
+/**
+ * The name a path ends in, or "" when the whole path is refused.
+ *
+ * These cases were written against `safeFilename`, which TRE-126 folded into
+ * `safeRelativePath`: the character rules are the same rules, applied to every
+ * segment instead of only the last one.
+ */
+function nameOf(raw: string): string {
+  return safeRelativePath(raw)?.name ?? "";
+}
+
 function statusOf(error: unknown): number {
   return error instanceof HttpException ? error.getStatus() : 0;
 }
@@ -108,43 +119,51 @@ afterEach(async () => {
 
 describe("the filename", () => {
   it("keeps an ordinary one", () => {
-    expect(safeFilename("report.txt")).toBe("report.txt");
-    expect(safeFilename("Rapport financier (2024).pdf")).toBe("Rapport financier (2024).pdf");
+    expect(nameOf("report.txt")).toBe("report.txt");
+    expect(nameOf("Rapport financier (2024).pdf")).toBe("Rapport financier (2024).pdf");
   });
 
-  it("takes the last segment, so a traversal is a name and not a path", () => {
+  it("refuses a traversal outright rather than repairing it into a name", () => {
     // The attack, and the reason this function exists. `filename` is the one
     // string in an upload the server did not choose.
-    expect(safeFilename("../../etc/cron.d/backdoor")).toBe("backdoor");
-    expect(safeFilename("/etc/passwd")).toBe("passwd");
+    //
+    // This used to keep the last segment, which was safe — `backdoor` landed in
+    // the destination and nothing escaped it. It stopped being right when a
+    // client gained the ability to send a real path (TRE-126): repairing
+    // `../a.jpg` into `a.jpg` would put the file one directory away from where
+    // the client said, silently, which is a traversal arriving as a fix.
+    expect(safeRelativePath("../../etc/cron.d/backdoor")).toBeNull();
+    expect(safeRelativePath("photos/../../../a.jpg")).toBeNull();
   });
 
-  it("takes the last segment of a Windows path too", () => {
-    // A backslash is a legal character in a POSIX filename, so a name arriving
-    // from Windows would otherwise become one very odd file rather than a path.
-    expect(safeFilename("C:\\Users\\me\\Desktop\\notes.txt")).toBe("notes.txt");
+  it("refuses an absolute path, in either dialect", () => {
+    expect(safeRelativePath("/etc/passwd")).toBeNull();
+    // A backslash is a legal character in a POSIX filename, so a Windows path
+    // left alone would become one very odd file — and read as a relative path
+    // it would become four directories starting with `C_`.
+    expect(safeRelativePath("C:\\Users\\me\\Desktop\\notes.txt")).toBeNull();
   });
 
   it("refuses a name that is only dots, including one wearing camouflage", () => {
-    expect(safeFilename("..")).toBe("");
-    expect(safeFilename(".")).toBe("");
+    expect(nameOf("..")).toBe("");
+    expect(nameOf(".")).toBe("");
     // Trimmed before the check, not after. `" .. "` is `..` with two spaces on
     // it, and a check made on the untrimmed string lets it straight through.
-    expect(safeFilename(" .. ")).toBe("");
-    expect(safeFilename("....")).toBe("");
+    expect(nameOf(" .. ")).toBe("");
+    expect(nameOf("....")).toBe("");
     // Truncated before the check too: 300 dots must not pass by being long.
-    expect(safeFilename(`${".".repeat(300)}a`)).toBe("");
+    expect(nameOf(`${".".repeat(300)}a`)).toBe("");
   });
 
   it("keeps a leading dot, because a dotfile is an ordinary file", () => {
-    expect(safeFilename(".bashrc")).toBe(".bashrc");
+    expect(nameOf(".bashrc")).toBe(".bashrc");
   });
 
   it("removes a NUL, a newline and every shell metacharacter", () => {
-    expect(safeFilename("a\0b.txt")).toBe("a_b.txt");
-    expect(safeFilename("a\nb.txt")).toBe("a_b.txt");
+    expect(nameOf("a\0b.txt")).toBe("a_b.txt");
+    expect(nameOf("a\nb.txt")).toBe("a_b.txt");
     for (const char of ["$", "`", ";", "|", "&", ">", "<", "*", "?", "!", "~", '"']) {
-      expect(safeFilename(`a${char}b.txt`)).toBe("a_b.txt");
+      expect(nameOf(`a${char}b.txt`)).toBe("a_b.txt");
     }
   });
 
@@ -154,23 +173,23 @@ describe("the filename", () => {
     // metacharacter and it is kept anyway: no path in this application reaches
     // a shell — `exec` takes an argv array — so the reason to drop it would be
     // a danger that does not exist here, against a cost that plainly does.
-    expect(safeFilename("John's report (2).txt")).toBe("John's report (2).txt");
-    expect(safeFilename("photo [raw]#3.jpg")).toBe("photo [raw]#3.jpg");
+    expect(nameOf("John's report (2).txt")).toBe("John's report (2).txt");
+    expect(nameOf("photo [raw]#3.jpg")).toBe("photo [raw]#3.jpg");
   });
 
   it("keeps a non-Latin name intact — the filesystem takes UTF-8", () => {
     // Unlike the download header, which has to reduce to ASCII, this is a
     // filename on a POSIX host and there is nothing to protect it from.
-    expect(safeFilename("報告書.pdf")).toBe("報告書.pdf");
-    expect(safeFilename("rapport-écrit.pdf")).toBe("rapport-écrit.pdf");
+    expect(nameOf("報告書.pdf")).toBe("報告書.pdf");
+    expect(nameOf("rapport-écrit.pdf")).toBe("rapport-écrit.pdf");
   });
 
   it("trims trailing space, which makes two files look identical in a listing", () => {
-    expect(safeFilename("report.txt   ")).toBe("report.txt");
+    expect(nameOf("report.txt   ")).toBe("report.txt");
   });
 
   it("bounds the length at what a filesystem takes", () => {
-    expect(safeFilename(`${"a".repeat(400)}.txt`)).toHaveLength(255);
+    expect(nameOf(`${"a".repeat(400)}.txt`)).toHaveLength(255);
   });
 
   it("numbers a copy before the extension, so it still opens", () => {
@@ -230,7 +249,7 @@ describe("receiving a file", () => {
     expect(await entries(base)).toEqual(["notes.txt"]);
   });
 
-  it("sanitises the name on the way in, so a traversal lands in the directory", async () => {
+  it("refuses a traversal on the way in, and writes nothing anywhere", async () => {
     await mkdir(join(base, "dest"));
     const outcome = await serviceFor(writeRoot()).receive(
       USER_ID,
@@ -241,9 +260,12 @@ describe("receiving a file", () => {
       "keepBoth",
     );
 
-    expect(outcome.name).toBe("owned.sh");
-    expect(await entries(join(base, "dest"))).toEqual(["owned.sh"]);
-    // The directory two levels up is untouched, which is the property.
+    // It used to land as `owned.sh` in the destination, which was safe and is
+    // no longer what this promises (TRE-126): a path that cannot be honoured
+    // as written is refused rather than trimmed into one that can.
+    expect(outcome).toMatchObject({ ok: false, code: "EBADNAME" });
+    expect(await entries(join(base, "dest"))).toEqual([]);
+    // The directory two levels up is untouched, which is still the property.
     expect(await entries(base)).toEqual(["dest"]);
   });
 
@@ -531,5 +553,77 @@ describe("uploading with sudo", () => {
     expect(outcome.ok).toBe(false);
     expect(calls).toHaveLength(0);
     expect((await readdir(base)).filter((name) => name.includes("part"))).toEqual([]);
+  });
+});
+
+describe("uploading a folder", () => {
+  it("recreates the tree under the destination", async () => {
+    const outcome = await serviceFor(writeRoot()).receive(
+      USER_ID,
+      driver(),
+      base,
+      "photos/2019/a.jpg",
+      body("jpeg"),
+      "keepBoth",
+    );
+
+    expect(outcome).toMatchObject({ ok: true, name: "a.jpg" });
+    // Inside the destination, not flattened into it.
+    expect(await entries(base)).toEqual(["photos"]);
+    expect(await entries(join(base, "photos", "2019"))).toEqual(["a.jpg"]);
+    expect(await readFile(join(base, "photos", "2019", "a.jpg"), "utf8")).toBe("jpeg");
+  });
+
+  it("makes each directory once across the parts of one request", async () => {
+    const service = serviceFor(writeRoot());
+    // The memo the controller hands to every part of one request.
+    const made = new Map<string, string>();
+
+    for (const path of ["photos/a.jpg", "photos/b.jpg", "photos/2019/c.jpg"]) {
+      const outcome = await service.receive(USER_ID, driver(), base, path, body("x"), "keepBoth", undefined, made);
+      expect(outcome.ok).toBe(true);
+    }
+
+    // Three files, two directories, and the memo holds exactly those two — the
+    // second and third files did not re-walk `photos`.
+    expect([...made.keys()].sort()).toEqual(["photos", "photos/2019"]);
+    expect(await entries(join(base, "photos"))).toEqual(["2019", "a.jpg", "b.jpg"]);
+  });
+
+  it("refuses a segment that is a symlink out of the roots, and writes nothing into it", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "trekker-outside-"));
+    await symlink(outside, join(base, "escape"));
+
+    try {
+      const outcome = await serviceFor(writeRoot()).receive(
+        USER_ID,
+        driver(),
+        base,
+        "escape/owned.sh",
+        body("#!/bin/sh"),
+        "keepBoth",
+      );
+
+      // The string work cannot see this one: every segment is ordinary, and
+      // what makes it an escape is the host's own filesystem. The guard is the
+      // thing that catches it, which is why the walk asks it per level.
+      expect(outcome).toMatchObject({ ok: false, code: "EPATH" });
+      expect(await entries(outside)).toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("fails the part alone when the folder cannot be made, so its siblings still land", async () => {
+    // A file standing where a directory has to go.
+    await writeFile(join(base, "photos"), "not a directory");
+    const service = serviceFor(writeRoot());
+
+    const refused = await service.receive(USER_ID, driver(), base, "photos/a.jpg", body("x"), "keepBoth");
+    const landed = await service.receive(USER_ID, driver(), base, "ok.txt", body("y"), "keepBoth");
+
+    expect(refused.ok).toBe(false);
+    expect(landed).toMatchObject({ ok: true, name: "ok.txt" });
+    expect(await readFile(join(base, "photos"), "utf8")).toBe("not a directory");
   });
 });

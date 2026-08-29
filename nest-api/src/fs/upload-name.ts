@@ -26,28 +26,77 @@ export const NO_NAME = "";
 const SAFE = /[^\p{L}\p{N}._ ()[\]#@+,'-]/gu;
 
 /**
- * The last segment of whatever the client sent, made safe.
+ * One segment, made safe. The rule both callers share.
  *
- * Browsers send a bare filename in `filename=`, but a directory upload sends
- * `webkitRelativePath` in some clients and `curl` sends whatever it is told, so
- * the separators are stripped rather than trusted absent. Both separators: a
- * Windows client sends backslashes and a POSIX host would keep them as part of
- * the name.
+ * The order is the whole function, and each step has to come after the one
+ * before it or it checks the wrong string:
+ *
+ *   substitute — every character that is not on the allowlist becomes `_`
+ *   truncate   — before the checks, so 300 dots do not pass by being long
+ *   trim       — `" .. "` is `..` with camouflage, and only trimming shows it
+ *   refuse     — a leading dot is fine (dotfiles are ordinary); nothing but
+ *                dots is not, because that is `.` or `..` or a name no
+ *                listing can distinguish from them
  */
-export function safeFilename(raw: string): string {
-  const last = raw.split(/[\\/]/).filter(Boolean).at(-1) ?? "";
-
-  // The order is the whole function, and each step has to come after the one
-  // before it or it checks the wrong string:
-  //
-  //   substitute — every character that is not on the allowlist becomes `_`
-  //   truncate   — before the checks, so 300 dots do not pass by being long
-  //   trim       — `" .. "` is `..` with camouflage, and only trimming shows it
-  //   refuse     — a leading dot is fine (dotfiles are ordinary); nothing but
-  //                dots is not, because that is `.` or `..` or a name no
-  //                listing can distinguish from them
-  const truncated = last.replace(SAFE, "_").slice(0, 255).trim();
+function safeSegment(raw: string): string {
+  const truncated = raw.replace(SAFE, "_").slice(0, 255).trim();
   return /^\.+$/.test(truncated) ? NO_NAME : truncated;
+}
+
+/** How deep a folder upload may recreate. */
+const MAX_DEPTH = 32;
+
+/** And how long the whole relative path may be once joined. */
+const MAX_LENGTH = 4096;
+
+export interface RelativeUpload {
+  /** Directories to create under the destination, outermost first. */
+  readonly directories: readonly string[];
+  /** What the file is called inside them. */
+  readonly name: string;
+}
+
+/**
+ * A whole relative path, made safe — the folder upload's version of the
+ * function above (TRE-126).
+ *
+ * This replaced a `safeFilename` that threw the path away and kept the last
+ * segment. That was exactly right while a client could only send one file and
+ * exactly wrong once it can send a tree: `photos/2019/a.jpg` has to stay three
+ * things, and `../a.jpg` must not quietly become `a.jpg`.
+ *
+ * Every segment goes through the same `safeSegment` as a bare filename, so a
+ * path cannot smuggle through a character a name could not. What it adds is the
+ * refusal: **any** segment that reduces to nothing takes the whole path with
+ * it. Dropping the bad segment instead would quietly relocate the file — a
+ * `..` in the middle would land it one directory up from where the client said,
+ * which is the traversal this file exists to prevent, arriving by way of a
+ * repair rather than a hole.
+ *
+ * Traversal is therefore not a case handled here so much as one that cannot be
+ * constructed: no segment survives as `..`, and none can contain a separator.
+ * The path guard still runs on the joined directory, because a segment that is
+ * a **symlink** on the host is a way out of the roots that no amount of string
+ * work can see.
+ */
+export function safeRelativePath(raw: string): RelativeUpload | null {
+  // A relative path is relative. `/etc/passwd` reaching here is a client that
+  // has been told what to send and sent something else, and the honest answer
+  // is to refuse it rather than to quietly reinterpret it as `etc/passwd`
+  // underneath the destination. A drive letter is the same claim in the other
+  // dialect, and would otherwise become four directories called `C_`, `Users`
+  // and so on.
+  if (/^[\\/]/.test(raw) || /^[A-Za-z]:[\\/]/.test(raw)) return null;
+
+  const segments = raw.split(/[\\/]/).filter(Boolean).map(safeSegment);
+  if (segments.length === 0) return null;
+  if (segments.some((segment) => segment === NO_NAME)) return null;
+
+  const directories = segments.slice(0, -1);
+  if (directories.length > MAX_DEPTH) return null;
+  if (segments.join("/").length > MAX_LENGTH) return null;
+
+  return { directories, name: segments[segments.length - 1] };
 }
 
 /**

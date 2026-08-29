@@ -34,6 +34,7 @@ import { volumeFor } from "@helpers/disks";
 import { commandFor, hintFor, KEYS, matches, viewSlotFor, writeViewSlot } from "@helpers/keys";
 import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
 import { ACTION_GLYPH, GLYPH } from "@helpers/palette";
+import { pickedFromDrop } from "@helpers/picked";
 import { describePanes } from "@helpers/views";
 import { createBookmark, fetchBookmarks } from "@lib/api/bookmarks";
 import { ApiError } from "@lib/api/client";
@@ -69,6 +70,7 @@ import type { Column } from "@helpers/columns";
 import type { Chord } from "@helpers/keys";
 import type { SortKey } from "@helpers/listing";
 import type { Point } from "@helpers/menu";
+import type { DroppedItems, Picked, PickedFile } from "@helpers/picked";
 import type { CompareEntry, CompareResult } from "@lib/api/compare";
 import type { DiskMount } from "@lib/api/disks";
 import type { FileRow } from "@lib/api/fs";
@@ -377,7 +379,7 @@ export function Explorer({
    * carries `File` handles and the page has no business holding those. What the
    * toolbar sends up is still only `uploadRequested`; this is where it lands.
    */
-  const [uploadPick, setUploadPick] = useState<{ pane: PaneIndex; files: readonly File[] } | null>(null);
+  const [uploadPick, setUploadPick] = useState<{ pane: PaneIndex; picked: Picked } | null>(null);
   /** Set once a host has been bound automatically, so it happens per pane once. */
   const [seeded, setSeeded] = useState<[boolean, boolean]>([false, false]);
   /**
@@ -1300,17 +1302,30 @@ export function Explorer({
    * pane unambiguously names is the directory it is standing in. Dropping onto
    * a highlighted folder row would be a nicer gesture and a worse promise —
    * there is no way to show, mid-drag, which of the two it decided on.
+   *
+   * The drop is the half that can be carrying folders (TRE-126), so it walks
+   * before it opens. The host is checked before the walk rather than after it:
+   * a drop onto an unbound pane should say so at once, not after descending a
+   * directory tree to find out there was nowhere to put what it found.
    */
-  const askUpload = (pane: PaneIndex, files: readonly File[]) => {
+  const askUploadFromDrop = (pane: PaneIndex, dropped: DroppedItems) => {
     if (views[pane].hostId === null) {
       push({ tone: "info", message: "No host on that pane", detail: "Bind one from the sidebar first" });
       return;
     }
-    setUploadPick({ pane, files });
+    void pickedFromDrop(dropped).then((picked) => {
+      // An empty folder, or a drag that turned out to carry nothing readable.
+      // Raising an empty modal for it would be a dialog with nothing to say.
+      if (picked.files.length === 0) {
+        push({ tone: "info", message: "Nothing to upload", detail: "That drop carried no files" });
+        return;
+      }
+      setUploadPick({ pane, picked });
+    });
   };
 
   /** What the modal's `upload` button commits to (TRE-65). */
-  const uploadInto = (pane: PaneIndex, files: readonly File[], conflict: ConflictPolicy) => {
+  const uploadInto = (pane: PaneIndex, files: readonly PickedFile[], conflict: ConflictPolicy) => {
     const view = views[pane];
     if (view.hostId === null || files.length === 0) return;
 
@@ -1334,7 +1349,7 @@ export function Explorer({
       : {
           directory: views[uploadPick.pane].path,
           host: hosts.find((host) => host.id === views[uploadPick.pane].hostId) ?? null,
-          initial: uploadPick.files,
+          initial: uploadPick.picked,
         };
 
   useEffect(() => {
@@ -1348,7 +1363,7 @@ export function Explorer({
     // Empty, and that is the point: the dialogue is opened from inside the
     // modal, so the destination is on screen right up to the moment the system
     // window covers it.
-    setUploadPick({ pane: active, files: [] });
+    setUploadPick({ pane: active, picked: { files: [], truncated: false } });
   }, [uploadRequested, onUploadRequestedChange, activePane, active, push]);
 
   /**
@@ -2037,7 +2052,7 @@ export function Explorer({
       onHostMenu: () => onManageHosts({ pane: index, mode: "list" }),
       onClearGlob: () => onGlobChange(""),
       onTail: (path) => onPaneChange(index, { tail: path }),
-      onFilesDropped: (files) => askUpload(index, files),
+      onFilesDropped: (dropped) => askUploadFromDrop(index, dropped),
       onContextMenu: (point, name) => {
         // The inactive pane is activated first, or the menu, the status bar and
         // the toolbar would describe three different things (§2).

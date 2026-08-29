@@ -18,6 +18,7 @@ import {
   MARK_ON_PANE,
   partialTotalHint,
 } from "@helpers/listing";
+import { droppedFrom } from "@helpers/picked";
 import { PRESS } from "@helpers/press";
 import { isLogDirectory } from "@helpers/tail";
 import { ApiError } from "@lib/api/client";
@@ -28,6 +29,7 @@ import type { DirSize, DirSizes } from "@components/explorer/use-dir-sizes";
 import type { Column } from "@helpers/columns";
 import type { Crumb, SortKey } from "@helpers/listing";
 import type { Point } from "@helpers/menu";
+import type { DroppedItems } from "@helpers/picked";
 import type { DiskMount } from "@lib/api/disks";
 import type { FileRow, ListMeta } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
@@ -83,7 +85,8 @@ export interface PaneCallbacks {
    */
   onTail: (path: string | null) => void;
   /** Files dropped onto this pane, bound for the directory it is showing (TRE-65). */
-  onFilesDropped: (files: readonly File[]) => void;
+  /** Read synchronously off the drop; the walk into files happens above. */
+  onFilesDropped: (dropped: DroppedItems) => void;
   /**
    * A right-click inside the listing (TRE-70 §1).
    *
@@ -277,7 +280,12 @@ export function Pane({
         event.preventDefault();
         setDropping(false);
         callbacks.onFocus();
-        callbacks.onFilesDropped([...event.dataTransfer.files]);
+        // Read here and not in the handler this calls (TRE-126): `dataTransfer`
+        // is emptied the moment this function returns, so a folder walk that
+        // began with an `await` would find nothing and the drop would appear to
+        // do nothing at all. `droppedFrom` is synchronous for that reason, and
+        // what it captures stays valid afterwards.
+        callbacks.onFilesDropped(droppedFrom(event.dataTransfer));
       }}
       className={`border-line flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l-2 ${
         active ? "bg-pane-active" : "bg-pane"

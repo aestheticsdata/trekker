@@ -15,7 +15,7 @@ import { RateLimitService } from "@audit/rate-limit.service";
 
 import type { AuditIntent, AuditSpec } from "@audit/audited.decorator";
 import type { AuditOutcome } from "@audit/audit.service";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 import type { Observable } from "rxjs";
 
 /**
@@ -134,7 +134,7 @@ export class AuditInterceptor implements NestInterceptor {
     const intent = this.describe(spec, request);
     const started = Date.now();
 
-    return from(this.admit(spec, request, userId, intent)).pipe(
+    return from(this.admit(spec, request, context.switchToHttp().getResponse<Response>(), userId, intent)).pipe(
       switchMap((rowId) => {
         this.audit.bindRow(request, rowId);
 
@@ -178,6 +178,7 @@ export class AuditInterceptor implements NestInterceptor {
   private async admit(
     spec: AuditSpec | undefined,
     request: Request,
+    response: Response,
     userId: string,
     intent: AuditIntent,
   ): Promise<string> {
@@ -206,6 +207,14 @@ export class AuditInterceptor implements NestInterceptor {
       if (!verdict.allowed) {
         const message = RateLimitService.describe(spec.limit, verdict.resetSeconds);
         await this.audit.refused({ ...opening, hostId: undefined }, message);
+        // The reset, where a client can act on it (TRE-126). `describe` puts it
+        // in the sentence, which is the right place for a person and useless to
+        // the uploader deciding whether to wait or give up. A header costs one
+        // line here and turns "abandon the rest of the batch" into "pause".
+        //
+        // Exposed through CORS in `main.ts`; the front is a different origin and
+        // a header it cannot read is a header that is not there.
+        response.setHeader("Retry-After", String(Math.max(verdict.resetSeconds, 1)));
         throw new HttpException(message, HttpStatus.TOO_MANY_REQUESTS);
       }
     }

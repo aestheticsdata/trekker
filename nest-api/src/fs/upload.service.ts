@@ -4,7 +4,7 @@ import { BadRequestException, HttpException, HttpStatus, Injectable, Logger } fr
 import { LIMITS } from "@audit/limits";
 import { RateLimitService } from "@audit/rate-limit.service";
 import { toHttp } from "@fs/driver-http";
-import { numberedName, partialName, safeFilename } from "@fs/upload-name";
+import { numberedName, partialName, safeRelativePath } from "@fs/upload-name";
 import { isDriverError } from "@hosts/drivers/driver-error";
 import { mvArgv, rmArgv } from "@hosts/sudo/sudo-argv";
 import { isPermissionRefusal, SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
@@ -54,6 +54,17 @@ export function maxUploadBytes(): number {
   const override = Number.parseInt(process.env.TREKKER_UPLOAD_MAX_BYTES ?? "", 10);
   return Number.isNaN(override) || override < 1 ? DEFAULT_MAX_BYTES : override;
 }
+
+/**
+ * The directories one request has already created and had validated (TRE-126).
+ *
+ * Made by the controller and shared across every part of a single request, so a
+ * folder of two hundred files in ten subdirectories costs ten `mkdir` round
+ * trips and ten guard checks rather than two hundred of each. Absent — as in
+ * every caller that sends one file — means a memo of one, made here and thrown
+ * away with the call.
+ */
+export type MadeDirectories = Map<string, string>;
 
 /** What to do when the destination already holds this name. */
 export type ConflictPolicy = "overwrite" | "skip" | "keepBoth";
@@ -133,14 +144,17 @@ export class UploadService {
   async receive(
     userId: string,
     driver: HostDriver,
-    directory: string,
+    root: string,
     requested: string,
     body: Readable,
     conflict: ConflictPolicy,
     sessionId?: string,
+    made: MadeDirectories = new Map(),
   ): Promise<UploadOutcome> {
-    const name = safeFilename(requested);
-    if (name === "") {
+    // The whole path rather than only its last segment (TRE-126). A client
+    // sending one file sends one segment and comes out of here unchanged.
+    const placed = safeRelativePath(requested);
+    if (placed === null) {
       body.resume();
       return {
         requested,
@@ -148,8 +162,19 @@ export class UploadService {
         ok: false,
         bytes: 0,
         code: "EBADNAME",
-        message: "That filename has nothing usable in it.",
+        message: "That path has a segment with nothing usable in it.",
       };
+    }
+
+    const name = placed.name;
+    let directory = root;
+    if (placed.directories.length > 0) {
+      try {
+        directory = await this.subdirectory(userId, driver, root, placed.directories, made);
+      } catch (error) {
+        body.resume();
+        return { requested, name, ok: false, bytes: 0, ...folderRefusal(error) };
+      }
     }
 
     // Asked before a byte is written. `skip` means "do not upload this", and
@@ -273,6 +298,57 @@ export class UploadService {
   }
 
   /**
+   * The directory one part of a folder upload goes into, made if it is not
+   * there (TRE-126).
+   *
+   * Walked a segment at a time rather than made in one recursive `mkdir`, and
+   * the reason is a symlink. `photos` may already exist on the host and point
+   * at somewhere outside the roots; a recursive mkdir would cheerfully create
+   * `photos/2019` inside it and the guard would only be asked afterwards, with
+   * the directory already made. Creating one level and validating it before
+   * descending means the guard refuses while nothing has been created outside.
+   *
+   * `recursive` is still set on each step, because it is the flag that makes an
+   * existing directory not an error — it never creates more than the one level,
+   * since everything above has already been walked.
+   *
+   * There is no elevated path here on purpose. `mkdir` is not on
+   * `SUDO_ONLY_PROGRAMS` and putting it there is a security decision, not a
+   * convenience: a folder upload into a root-owned tree fails at the first
+   * directory, and says so, rather than quietly acquiring the ability to make
+   * directories as root.
+   */
+  private async subdirectory(
+    userId: string,
+    driver: HostDriver,
+    root: string,
+    segments: readonly string[],
+    made: MadeDirectories,
+  ): Promise<string> {
+    let real = root;
+    let key = "";
+
+    for (const segment of segments) {
+      key = key === "" ? segment : `${key}/${segment}`;
+
+      const known = made.get(key);
+      if (known !== undefined) {
+        real = known;
+        continue;
+      }
+
+      const next = join(real, segment);
+      await driver.mkdir(next, { recursive: true });
+      const validated = await this.guard.validate({ driver, userId, path: next, intent: "write" });
+
+      real = validated.realPath;
+      made.set(key, real);
+    }
+
+    return real;
+  }
+
+  /**
    * The name the file will actually take, decided as late as possible.
    *
    * Late because the check is a race either way and this is the cheapest place
@@ -371,6 +447,24 @@ export class UploadService {
 /** The HTTP exception an `UploadRefused` becomes once the controller is done. */
 export function toRefusalException(error: UploadRefused): HttpException {
   return new HttpException({ statusCode: error.status, code: error.code, message: error.message }, error.status);
+}
+
+/**
+ * Why a folder could not be made, in the shape an outcome takes.
+ *
+ * A part whose directory is refused fails on its own rather than taking the
+ * request down, which is the same rule the rest of `receive` follows: one bad
+ * name in a batch of fifty must not discard the forty-nine that were fine.
+ */
+function folderRefusal(error: unknown): { code: string; message: string } {
+  if (isDriverError(error)) {
+    return error.code === "EACCES" || error.code === "EPERM"
+      ? { code: error.code, message: "Permission denied making that folder on the host." }
+      : { code: error.code, message: `The host refused the folder with ${error.code}.` };
+  }
+  // The path guard's own refusal, which already reads as a sentence.
+  if (error instanceof HttpException) return { code: "EPATH", message: error.message };
+  return { code: "EUNKNOWN", message: "That folder could not be made on the host." };
 }
 
 function join(directory: string, name: string): string {

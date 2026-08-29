@@ -4,14 +4,17 @@ import { HostPath } from "@components/ui/host-path";
 import { Overlay } from "@components/ui/overlay";
 import { Tooltip } from "@components/ui/tooltip";
 import { formatSize } from "@helpers/listing";
+import { isDotFile, MAX_PICKED, pickedFromInput } from "@helpers/picked";
 import { PRESS, SELECTED } from "@helpers/press";
 import { useEffect, useRef, useState } from "react";
 
+import type { Picked, PickedFile } from "@helpers/picked";
 import type { HostView } from "@lib/api/hosts";
 import type { ConflictPolicy } from "@lib/api/upload";
 
 /**
- * Naming the destination before the file dialogue opens (TRE-125).
+ * Naming the destination before the file dialogue opens (TRE-125), and letting
+ * a whole folder through it (TRE-126).
  *
  * The upload button used to click a hidden `<input type="file">` directly, and
  * the operating system's dialogue is the one surface this app cannot draw on:
@@ -57,7 +60,7 @@ export interface UploadTarget {
   /** For the colour dot. Null while the host list is still loading. */
   host: HostView | null;
   /** What a drop arrived carrying. The toolbar button opens this modal empty. */
-  initial: readonly File[];
+  initial: Picked;
 }
 
 export function UploadModal({
@@ -68,7 +71,7 @@ export function UploadModal({
   target: UploadTarget;
   onClose: () => void;
   /** Hands the list back to the explorer, which owns the sending. */
-  onConfirm: (files: readonly File[], conflict: ConflictPolicy) => void;
+  onConfirm: (files: readonly PickedFile[], conflict: ConflictPolicy) => void;
 }) {
   return (
     <Overlay
@@ -94,15 +97,27 @@ function UploadPanel({
 }: {
   target: UploadTarget;
   close: () => void;
-  onConfirm: (files: readonly File[], conflict: ConflictPolicy) => void;
+  onConfirm: (files: readonly PickedFile[], conflict: ConflictPolicy) => void;
 }) {
-  // Through `merge` even on the way in, so every row has a distinct
-  // fingerprint and that fingerprint can be its key.
-  const [files, setFiles] = useState<readonly File[]>(() => merge([], target.initial));
+  // Through `merge` even on the way in, so every row has a distinct fingerprint
+  // and that fingerprint can be its key.
+  const [files, setFiles] = useState<readonly PickedFile[]>(() => merge([], target.initial.files));
+  const [truncated, setTruncated] = useState(target.initial.truncated);
   const [conflict, setConflict] = useState<ConflictPolicy>("keepBoth");
+  const [skipDots, setSkipDots] = useState(true);
 
-  const picker = useRef<HTMLInputElement>(null);
+  const filePicker = useRef<HTMLInputElement>(null);
+  const folderPicker = useRef<HTMLInputElement>(null);
   const commit = useRef<HTMLButtonElement>(null);
+
+  /**
+   * `webkitdirectory` is set here rather than in the JSX because it is not a
+   * React DOM attribute — it would be dropped from the markup, and the picker
+   * would quietly open in file mode, which looks exactly like it working.
+   */
+  useEffect(() => {
+    folderPicker.current?.setAttribute("webkitdirectory", "");
+  }, []);
 
   /**
    * The thing to press, focused once on open — the same reasoning as the field
@@ -113,9 +128,18 @@ function UploadPanel({
     commit.current?.focus();
   }, []);
 
-  const total = files.reduce((sum, file) => sum + file.size, 0);
-  const shown = files.slice(0, RENDER_LIMIT);
-  const hidden = files.length - shown.length;
+  const dotted = files.filter((picked) => isDotFile(picked.path)).length;
+  const sending = skipDots ? files.filter((picked) => !isDotFile(picked.path)) : files;
+
+  const total = sending.reduce((sum, picked) => sum + picked.file.size, 0);
+  const shown = sending.slice(0, RENDER_LIMIT);
+  const hidden = sending.length - shown.length;
+
+  const choose = (list: FileList | null) => {
+    const picked = pickedFromInput(list);
+    setFiles(merge(files, picked.files));
+    if (picked.truncated) setTruncated(true);
+  };
 
   return (
     <>
@@ -144,29 +168,44 @@ function UploadPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {files.length === 0 ? (
-          /* The empty state carries the only button that matters, rather than
-             leaving the operator to find it in a footer beside `cancel`. */
+        {sending.length === 0 ? (
+          /* The empty state carries the buttons that matter, rather than
+             leaving them to be found in a footer beside `cancel`. */
           <div className="flex flex-col items-center gap-2.5 px-3.5 py-9">
-            <span className="text-ink-muted font-mono text-cmd">Nothing chosen yet.</span>
-            <button
-              type="button"
-              onClick={() => picker.current?.click()}
-              className={`${PRESS} px-3.5 py-1.75 font-mono text-xs/none font-medium`}
-            >
-              choose files…
-            </button>
+            <span className="text-ink-muted font-mono text-cmd">
+              {files.length === 0 ? "Nothing chosen yet." : "Everything chosen is a dot-file."}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => filePicker.current?.click()}
+                className={`${PRESS} px-3.5 py-1.75 font-mono text-xs/none font-medium`}
+              >
+                choose files…
+              </button>
+              <button
+                type="button"
+                onClick={() => folderPicker.current?.click()}
+                className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
+              >
+                choose a folder…
+              </button>
+            </div>
             <span className="text-ink-faint font-mono text-2xs">or drop them onto a pane</span>
           </div>
         ) : (
           <>
-            {shown.map((file) => (
+            {shown.map((picked) => (
               <div
-                key={fingerprint(file)}
+                key={fingerprint(picked)}
                 className="border-raised flex items-baseline gap-2 border-t px-3.5 py-1.5 first:border-t-0"
               >
-                <span className="text-ink-muted min-w-0 flex-1 truncate font-mono text-cmd">{file.name}</span>
-                <span className="text-ink-dim flex-none font-mono text-2xs/none">{formatSize(file.size, "file")}</span>
+                {/* The path, not the name: in a folder upload the name alone
+                    would render fifty rows called `index.html`. */}
+                <span className="text-ink-muted min-w-0 flex-1 truncate font-mono text-cmd">{picked.path}</span>
+                <span className="text-ink-dim flex-none font-mono text-2xs/none">
+                  {formatSize(picked.file.size, "file")}
+                </span>
               </div>
             ))}
             {hidden > 0 && (
@@ -178,7 +217,14 @@ function UploadPanel({
         )}
       </div>
 
-      <div className="border-line flex flex-none items-center gap-2.5 border-t px-3.5 py-2.25">
+      {truncated && (
+        <div className="bg-warning-wash border-warning text-warning mx-3.5 mt-2.5 border px-2.5 py-1.75 font-mono text-cmd/[1.5]">
+          That is more than {MAX_PICKED} files. Only the first {MAX_PICKED} were collected — send the rest in another
+          pass.
+        </div>
+      )}
+
+      <div className="border-line flex flex-none flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t px-3.5 py-2.25">
         <span className="text-ink-faint font-sans text-3xs/none font-medium tracking-[0.12em] uppercase">
           if it exists
         </span>
@@ -203,19 +249,32 @@ function UploadPanel({
             );
           })}
         </fieldset>
+
+        {/* Only once there is something to skip. A checkbox about `.DS_Store`
+            on an empty panel is a question nobody has yet. */}
+        {dotted > 0 && (
+          <label className="text-ink-muted flex cursor-pointer items-center gap-1.5 font-mono text-2xs">
+            <input
+              type="checkbox"
+              checked={skipDots}
+              onChange={(event) => setSkipDots(event.target.checked)}
+            />
+            skip {dotted} dot-file{dotted === 1 ? "" : "s"}
+          </label>
+        )}
       </div>
 
       <footer className="bg-chrome border-line flex h-11 flex-none items-center gap-2 border-t px-3.5">
         <span className="text-ink-muted font-mono text-2xs/none">
-          {files.length === 0
+          {sending.length === 0
             ? "nothing to send"
-            : `${files.length} file${files.length === 1 ? "" : "s"}, ${formatSize(total, "file")}`}
+            : `${sending.length} file${sending.length === 1 ? "" : "s"}, ${formatSize(total, "file")}`}
         </span>
         <div className="flex-1" />
         {files.length > 0 && (
           <button
             type="button"
-            onClick={() => picker.current?.click()}
+            onClick={() => filePicker.current?.click()}
             className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
           >
             add more…
@@ -231,9 +290,9 @@ function UploadPanel({
         <button
           ref={commit}
           type="button"
-          disabled={files.length === 0}
+          disabled={sending.length === 0}
           onClick={() => {
-            onConfirm(files, conflict);
+            onConfirm(sending, conflict);
             close();
           }}
           className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
@@ -242,19 +301,29 @@ function UploadPanel({
         </button>
       </footer>
 
-      {/* The picker, opened from inside the modal so the destination above is
+      {/* Both pickers, opened from inside the modal so the destination above is
           on screen right up to the moment the system dialogue covers it.
           Hidden rather than absent: `.click()` on an input that is not in the
           document opens nothing. */}
       <input
-        ref={picker}
+        ref={filePicker}
         type="file"
         multiple
         hidden
         onChange={(event) => {
-          setFiles(merge(files, [...(event.target.files ?? [])]));
+          choose(event.target.files);
           // Cleared so choosing the same file twice fires `change` twice. An
           // input keeps its value, and the second attempt would be silent.
+          event.target.value = "";
+        }}
+      />
+      <input
+        ref={folderPicker}
+        type="file"
+        multiple
+        hidden
+        onChange={(event) => {
+          choose(event.target.files);
           event.target.value = "";
         }}
       />
@@ -268,15 +337,15 @@ function UploadPanel({
  * Two picks of the same dialogue can name the same file, and two rows for it
  * would be two uploads racing for one name — which `keepBoth` would then
  * resolve into `report.txt` and `report (2).txt`, both of them the same bytes.
- * Name, size and mtime together are as close to identity as the browser gives
+ * Path, size and mtime together are as close to identity as the browser gives
  * us for a `File`, and they are enough to notice the case that actually
  * happens: somebody picking the same thing twice.
  */
-function merge(current: readonly File[], chosen: readonly File[]): readonly File[] {
+function merge(current: readonly PickedFile[], chosen: readonly PickedFile[]): readonly PickedFile[] {
   const seen = new Set(current.map(fingerprint));
-  return [...current, ...chosen.filter((file) => !seen.has(fingerprint(file)))];
+  return [...current, ...chosen.filter((picked) => !seen.has(fingerprint(picked)))];
 }
 
-function fingerprint(file: File): string {
-  return `${file.name}:${file.size}:${file.lastModified}`;
+function fingerprint(picked: PickedFile): string {
+  return `${picked.path}:${picked.file.size}:${picked.file.lastModified}`;
 }

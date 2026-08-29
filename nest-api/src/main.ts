@@ -63,6 +63,9 @@ async function bootstrap() {
   app.enableCors({
     origin: appConfig.frontendUrl,
     credentials: true,
+    // Without this the browser hides it from the page, and the uploader's
+    // backoff would have nothing to read (TRE-126).
+    exposedHeaders: ["Retry-After"],
   });
 
   app.use("/api", (req: Request, res: Response, next: NextFunction) => {

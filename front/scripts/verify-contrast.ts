@@ -698,10 +698,14 @@ const ROOMS: readonly Room[] = [
   },
 
   {
-    // No danger wash: this modal refuses nothing of its own. What it can say
-    // goes in the footer's count, and the server's refusals land in the tray.
+    // No danger wash: this modal refuses nothing of its own. The server's
+    // refusals land in the tray, and the one thing it says for itself — that a
+    // drop was bigger than the cap — is a warning rather than a failure.
     file: "components/explorer/upload-modal.tsx",
-    boxes: [{ on: [APP, CHROME_BG], inks: ["ink-dim", "ink-faint", "ink-label", "ink-muted", "ink-soft"] }],
+    boxes: [
+      { on: [APP, CHROME_BG], inks: ["ink-dim", "ink-faint", "ink-label", "ink-muted", "ink-soft"] },
+      { on: [WARNING_WASH], inks: ["warning"], note: "the line saying the walk stopped at the cap (TRE-126)" },
+    ],
   },
 
   {
@@ -837,7 +841,7 @@ const ROOMS: readonly Room[] = [
     boxes: [
       {
         on: [APP],
-        inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-label", "ink-muted", "success"],
+        inks: ["danger-soft", "ink", "ink-dim", "ink-faint", "ink-label", "ink-muted", "success", "warning"],
         note: "the panel; its only chrome is the progress track, which carries nothing",
       },
     ],

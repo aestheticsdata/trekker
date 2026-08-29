@@ -36,7 +36,7 @@ import { TailService } from "@fs/tail.service";
 import { heartbeat, lastEventIdOf, openStream, sendFrame, subscriberFor } from "@fs/tail-sse";
 import { UploadQueryDto } from "@fs/dto/upload.dto";
 import { receiveMultipart } from "@fs/upload-multipart";
-import { toRefusalException, type UploadOutcome, UploadService } from "@fs/upload.service";
+import { type MadeDirectories, toRefusalException, type UploadOutcome, UploadService } from "@fs/upload.service";
 import { CsrfGuard } from "@users/guards/csrf.guard";
 import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/session-auth.guard";
 
@@ -333,8 +333,13 @@ export class FsController {
     // arranged around.
     const { driver, real } = await this.upload.destination(userId, query.hostId, query.path);
 
+    // One memo for the whole request (TRE-126). A folder arrives as many parts
+    // sharing a handful of directories, and without this each part would make
+    // and re-validate every one of them.
+    const made: MadeDirectories = new Map();
+
     const { outcomes, refusal } = await receiveMultipart(req, (filename, stream) =>
-      this.upload.receive(userId, driver, real, filename, stream, conflict, req.sessionID),
+      this.upload.receive(userId, driver, real, filename, stream, conflict, req.sessionID, made),
     );
 
     const uploaded = outcomes.filter((outcome) => outcome.ok && outcome.code !== "ESKIPPED").length;

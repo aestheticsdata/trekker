@@ -1,25 +1,38 @@
 import { API_ORIGIN, ApiError } from "@lib/api/client";
 
+import type { PickedFile } from "@helpers/picked";
+
 /**
- * Upload (TRE-65), the second call this app does not make through `apiRequest`.
+ * Upload (TRE-65, TRE-126), the second call this app does not make through
+ * `apiRequest`.
  *
  * `fetch` cannot report upload progress. There is no event for it, the
  * `ReadableStream` request body that would give you one is not implemented in
- * Safari, and the ticket asks for per-file progress — so this is an
+ * Safari, and progress is the whole point of the tray — so this is an
  * `XMLHttpRequest`, which has had `upload.onprogress` since 2008 and is the
  * only thing in the platform that answers the question.
  *
- * One request per file rather than one carrying several. The route takes a
- * multipart body with any number of parts and would happily accept them, but a
- * per-file request is what makes per-file progress a number the browser already
- * knows rather than one this code has to apportion, and it means one file
- * failing does not take the other nine down with it.
+ * It used to send **one request per file**, which made per-file progress a
+ * number the browser already knew rather than one this code had to apportion.
+ * That stopped being affordable the moment a folder could be picked: the rate
+ * limit is spent per request, thirty a minute, so a hundred-file folder was
+ * seventy refusals. The route has always taken up to two hundred parts and
+ * streamed them one at a time under backpressure — only the client's choice
+ * kept it to one — so files now share a request and the per-file answers come
+ * out of the `results[]` it already returned.
+ *
+ * What that costs is the per-file *bar*: `upload.onprogress` counts the
+ * request, not the part inside it. A packed batch therefore reports one
+ * fraction and the caller decides what to draw with it, and a large file is
+ * never packed with anything — precisely so it keeps a bar of its own.
  */
 
 export type ConflictPolicy = "overwrite" | "skip" | "keepBoth";
 
 export interface UploadOutcome {
+  /** The path as sent, before sanitising — so the UI can pair it with its row. */
   requested: string;
+  /** What it ended up called on the host, or null when nothing was written. */
   name: string | null;
   ok: boolean;
   bytes: number;
@@ -34,17 +47,37 @@ export interface UploadResult {
   failed: number;
 }
 
+/**
+ * A refusal that says when to come back (TRE-126).
+ *
+ * The per-minute limit sends `Retry-After`, and a caller that reads it can
+ * pause and go on. The hourly byte budget sends none, and means it: there is
+ * nothing useful to wait for inside one sitting, so the absence of the header
+ * is the signal to stop rather than a value to guess at.
+ */
+export class UploadRefusal extends ApiError {
+  constructor(
+    status: number,
+    message: string,
+    code: string | undefined,
+    readonly retryAfterSeconds: number | null,
+  ) {
+    super(status, message, code);
+    this.name = "UploadRefusal";
+  }
+}
+
 export interface UploadHandle {
-  /** Resolves with what the server did. Rejects with an ApiError on refusal. */
+  /** Resolves with what the server did to every part. */
   done: Promise<UploadResult>;
-  /** Stops it. The server removes the partial file it was writing. */
+  /** Stops it. The server removes the partial files it was writing. */
   abort: () => void;
 }
 
-export function uploadFile(
+export function uploadBatch(
   hostId: string,
   directory: string,
-  file: File,
+  files: readonly PickedFile[],
   csrfToken: string | null,
   conflict: ConflictPolicy,
   onProgress: (fraction: number) => void,
@@ -74,7 +107,14 @@ export function uploadFile(
         return;
       }
       const body = payload as { message?: string; code?: string } | null;
-      reject(new ApiError(request.status, body?.message ?? `Upload failed (${request.status})`, body?.code));
+      reject(
+        new UploadRefusal(
+          request.status,
+          body?.message ?? `Upload failed (${request.status})`,
+          body?.code,
+          retryAfterOf(request),
+        ),
+      );
     });
 
     // Distinguished on purpose: a network failure is the host or the tunnel,
@@ -84,13 +124,30 @@ export function uploadFile(
     request.addEventListener("abort", () => reject(new ApiError(0, "Cancelled.", "EABORTED")));
 
     const form = new FormData();
-    // `file.name` and not a path: the server takes the last segment anyway, and
-    // a directory drop should not be able to suggest one.
-    form.append("file", file, file.name);
+    for (const picked of files) {
+      // The path, not `file.name`: it is what tells the server which directory
+      // to make under the destination, and `safeRelativePath` is what reads it.
+      // A flat pick sends one segment and behaves exactly as it always did.
+      form.append("file", picked.file, picked.path);
+    }
     request.send(form);
   });
 
   return { done, abort: () => request.abort() };
+}
+
+/**
+ * The reset, in seconds, when the server sent one.
+ *
+ * Readable only because `main.ts` names it in `exposedHeaders` — a header a
+ * different origin has not been given is invisible to the page, and this would
+ * silently be null forever.
+ */
+function retryAfterOf(request: XMLHttpRequest): number | null {
+  const header = request.getResponseHeader("Retry-After");
+  if (header === null) return null;
+  const seconds = Number.parseInt(header, 10);
+  return Number.isNaN(seconds) || seconds < 0 ? null : seconds;
 }
 
 function parse(text: string): unknown {
