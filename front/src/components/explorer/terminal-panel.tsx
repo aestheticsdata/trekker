@@ -340,6 +340,43 @@ export function TerminalPanel({
         open ? "h-terminal" : "h-omnibar cursor-text"
       }`}
       aria-label="Terminal"
+      // `⎋` puts the terminal away, from anywhere inside it (TRE-35 §3, TRE-123).
+      //
+      // On the panel rather than on the field, which is where it used to be and
+      // where it could only ever fire while the field held the focus. The
+      // scrollback takes focus of its own — it has to, or a pointer is the only
+      // thing that can scroll it — so a click on a printed line moves the
+      // keyboard off the input, and the key that means "I am done with the
+      // terminal" was unreachable from the very place the terminal's answer is
+      // read. The header's two buttons had the same hole under them.
+      //
+      // Not on the window, which is how TRE-109 gave the context menu its keys
+      // back: every dialogue in this app listens for `⎋` there, and the pane
+      // behind reads it as "never mind" to a held clipboard, so a global handler
+      // would be two things happening on one keypress. A menu can afford that
+      // because a menu is a mode. The terminal is not one, and does not need to
+      // be — unlike the menu it has a subtree that holds focus, and that subtree
+      // is the whole of what "in the terminal" means.
+      //
+      // Both halves on one press, and unconditionally: `⎋` lowers the
+      // scrollback *and* hands the keyboard back to the panes. It is `⌥↩` that
+      // keeps the caret, because putting the scrollback away is not the same as
+      // being finished typing — that is the whole distinction between the two
+      // keys, and splitting `⎋` across two presses blurred it.
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        // Nothing behind hears this press. `useKeyboard` stands down inside a
+        // field on its own, but the scrollback is a `<div>` and it does not —
+        // which is how `⎋` on a printed line came to release a held clipboard
+        // instead of putting the panel away.
+        event.stopPropagation();
+        onOpenChange(false);
+        // Whatever was holding the keyboard gives it back, rather than the field
+        // specifically: after a click on the output the field is not it, and the
+        // app's resting state is `body`, with the panes driven from there.
+        (event.target as HTMLElement).blur();
+      }}
     >
       {open && (
         <header
@@ -478,24 +515,6 @@ export function TerminalPanel({
               event.preventDefault();
               walk(1);
               return;
-            }
-            // `⎋` puts the terminal away, and only from in here (TRE-35 §3).
-            // Every dialogue in this app listens for it on the window, and the
-            // pane behind reads it as "never mind" to a held clipboard — so a
-            // global handler for it would be two things happening on one
-            // keypress. Focused, it can only mean one thing, and `useKeyboard`
-            // already stands down inside an input, so nothing else sees it.
-            //
-            // Both halves on one press, and unconditionally: `⎋` means "I am
-            // done with the terminal", so it lowers the scrollback *and* hands
-            // the keyboard back to the panes. It is `⌥↩` that keeps the caret,
-            // because putting the scrollback away is not the same as being
-            // finished typing — that is the whole distinction between the two
-            // keys, and splitting `⎋` across two presses blurred it.
-            if (event.key === "Escape") {
-              event.preventDefault();
-              onOpenChange(false);
-              inputRef.current?.blur();
             }
           }}
           // Never `disabled`, deliberately. A control that becomes disabled is
