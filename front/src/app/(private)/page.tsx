@@ -12,6 +12,7 @@ import { ViewList } from "@components/views/view-list";
 import { ViewMenu } from "@components/views/view-menu";
 import { ViewRebind } from "@components/views/view-rebind";
 import { ViewStrip } from "@components/views/view-strip";
+import { parseHidden, writeHidden } from "@helpers/columns";
 import { formatInstant, formatSize } from "@helpers/listing";
 import { brokenPanes, isDirty, layoutOf } from "@helpers/views";
 import { fetchHostMetrics, fetchHostSummary, fetchHosts } from "@lib/api/hosts";
@@ -231,6 +232,22 @@ export default function HomePage() {
 
   const active = shared.active as PaneIndex;
   const panes: readonly [PaneUrl, PaneUrl] = [left, right];
+
+  /**
+   * What a pane adopts on landing at a machine (TRE-127), or nothing hidden.
+   *
+   * `??` twice over, and both mean the same thing: a host that is not in the
+   * list yet — the half-second before the fetch lands, or a host that has been
+   * deleted — has no memory to offer, and an unbound pane has nothing to have a
+   * memory *about*. Every column showing is the honest answer to both.
+   */
+  const hiddenColumnsOf = (hostId: string | null) =>
+    // Normalised on the way out, not merely taken. The API holds this column to
+    // its shape and not to its vocabulary, so an unrecognised name in it would
+    // otherwise be written straight into the query string and only be dropped
+    // on the read after — one beat of a URL carrying a column that does not
+    // exist. `parseHidden` is where every other reader of this string starts.
+    writeHidden(parseHidden(hosts?.find((host) => host.id === hostId)?.hiddenColumns ?? ""));
   const setPane = (pane: PaneIndex, patch: Partial<PaneUrl>) => {
     // A live tail follows a file on *this pane's* host (TRE-34). Moving the
     // pane to another machine leaves that path pointing at a file which is very
@@ -244,7 +261,26 @@ export default function HomePage() {
     // at a directory it was already on would be a bug with no visible cause.
     // Skipped outright when the caller is setting both in one breath.
     const moved = patch.host !== undefined && patch.host !== panes[pane].host;
-    const next = moved && patch.tail === undefined ? { ...patch, tail: null } : patch;
+
+    const next: Partial<PaneUrl> = { ...patch };
+    if (moved) {
+      if (patch.tail === undefined) next.tail = null;
+      // And the columns come the other way (TRE-127). Which of them earn their
+      // width is a fact about the machine — `owner` is worth 88px on a shared
+      // box with real accounts on it and worth nothing on a laptop where every
+      // row says the same name — so a pane arriving somewhere takes up what that
+      // machine was left showing.
+      //
+      // Only here, which is the whole rule. A restored view and a session
+      // restore write the panes directly, and a link is read straight off the
+      // query string, so none of them passes through this and none of them
+      // adopts. That is deliberate: those three are somebody asking for a
+      // *specific* arrangement, and the host's memory answering over the top of
+      // one would be the app quietly showing something other than what was
+      // asked for.
+      if (patch.hide === undefined) next.hide = hiddenColumnsOf(patch.host ?? null);
+    }
+
     void (pane === 0 ? setLeft(next) : setRight(next));
   };
 

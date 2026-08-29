@@ -9,6 +9,7 @@ import {
   IsString,
   Matches,
   Max,
+  MaxLength,
   Min,
   MinLength,
   ValidateNested,
@@ -35,6 +36,27 @@ export class UpdateHostDto {
   @IsString()
   @Matches(/^\//, { message: "homePath must be absolute" })
   homePath?: string;
+
+  /**
+   * Which listing columns a pane hides when it binds to this host (TRE-127),
+   * comma-separated.
+   *
+   * Here rather than on `CreateHostDto`: a host that has just been added has
+   * never been arranged, and a create that could preset this would be offering
+   * a decision nobody is in a position to make yet. The default on the column
+   * says the same thing and says it once.
+   *
+   * Shape only, like `glob` on the layout DTOs. Which names are real is the
+   * front's vocabulary and this class would be a second copy of it, stale on
+   * the day a column is added; the front drops what it cannot recognise on the
+   * way back out, which fails towards a column showing rather than a column
+   * nobody can find.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  @Matches(/^[a-z,]*$/, { message: "hiddenColumns must be comma-separated column names" })
+  hiddenColumns?: string;
 
   /**
    * Replaces the whole allowlist — this is not a merge. Editing roots is

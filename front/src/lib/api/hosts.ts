@@ -36,6 +36,19 @@ export interface HostView {
   /** The accent the pane edge and the host dot take. */
   colour: string;
   homePath: string;
+  /**
+   * Which listing columns a pane hides when it binds to this machine (TRE-127).
+   *
+   * The set that is *off*, in `helpers/columns.ts`'s vocabulary; empty is every
+   * column. Beside `colour` and `homePath` because it is the same kind of fact
+   * — how this machine is drawn for this account — and read the same way, with
+   * the host rather than on its own.
+   *
+   * What a pane *adopts* when it arrives, never what it is currently showing:
+   * that stays in the URL, because a link has to mean the same thing to
+   * somebody who does not have this host at all.
+   */
+  hiddenColumns: string;
   hasCredential: boolean;
   credentialKind: CredentialKind | null;
   roots: HostRoot[];
@@ -63,6 +76,8 @@ export interface HostInput {
   transport?: Transport;
   colour?: string;
   homePath?: string;
+  /** Written only when somebody explicitly turns a column on or off (TRE-127). */
+  hiddenColumns?: string;
   roots?: HostRoot[];
   address?: string;
   port?: number;

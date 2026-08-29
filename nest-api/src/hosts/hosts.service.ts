@@ -35,6 +35,8 @@ export interface HostView {
   username: string | null;
   colour: string;
   homePath: string;
+  /** Which listing columns a pane hides when it binds here (TRE-127). */
+  hiddenColumns: string;
   hasCredential: boolean;
   credentialKind: string | null;
   /** The allowlist, so the client can show and edit the boundary it is bound by. */
@@ -331,6 +333,7 @@ export class HostsService {
           label: dto.label ?? undefined,
           colour: dto.colour ?? undefined,
           homePath: dto.homePath ?? undefined,
+          hiddenColumns: dto.hiddenColumns ?? undefined,
           address: host.transport === "SSH" ? (dto.address ?? undefined) : undefined,
           port: dto.port ?? undefined,
           username: host.transport === "SSH" ? (dto.username ?? undefined) : undefined,
@@ -835,6 +838,7 @@ function toView(host: {
   username: string | null;
   colour: string;
   homePath: string;
+  hiddenColumns: string;
   createdAt: Date;
   updatedAt: Date;
   credential: { kind: string } | null;
@@ -855,6 +859,7 @@ function toView(host: {
     username: host.username,
     colour: host.colour,
     homePath: host.homePath,
+    hiddenColumns: host.hiddenColumns,
     hasCredential: host.credential !== null,
     credentialKind: host.credential?.kind ?? null,
     // Sorted by path so the editor lists them the same way twice running;

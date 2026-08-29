@@ -213,6 +213,19 @@ model Hosts {
   /// Accent colour for the pane header and the host chip, as a hex string.
   colour    String        @default("#7fa8c9") @db.VarChar(16)
   homePath  String        @default("/") @db.VarChar(700)
+  /// Which listing columns a pane hides when it binds to this host (TRE-127),
+  /// comma-separated in `helpers/columns.ts`'s vocabulary. Empty is every
+  /// column, which is what a host nobody has arranged looks like.
+  ///
+  /// The set that is *off*, so the name says `hidden`: stored the other way
+  /// round, `owner,age` would read as the two columns this host shows.
+  ///
+  /// Here beside `colour` and `homePath` because it is the same kind of fact —
+  /// how this machine is drawn for this account. A pane still carries its own
+  /// live set in the URL, since a link has to mean the same thing to somebody
+  /// who does not have this host at all; this is only what a pane adopts when
+  /// it arrives.
+  hiddenColumns String @default("") @db.VarChar(64)
 
   /// A user may have at most one LOCAL host. MySQL has no partial unique
   /// index, so LOCAL rows set this to `true` and SSH rows leave it NULL — a

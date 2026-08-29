@@ -1,0 +1,24 @@
+-- Which listing columns a pane hides when it binds to this host (TRE-127).
+--
+-- Beside `colour` and `homePath`, which are the two facts already on this row
+-- about how a machine is *drawn* for this account. Which of its columns earn
+-- their width is the same kind of fact: `owner` is worth 88px on a shared box
+-- with real accounts on it and worth nothing on a single-user laptop where
+-- every row says the same name.
+--
+-- The set that is *off*, comma-separated, in the vocabulary the front writes in
+-- `helpers/columns.ts`. Stored the other way round the column would read
+-- backwards — `owner,age` as the two columns this host shows — which is why the
+-- name says `hidden`.
+--
+-- `VARCHAR(64)` is all five names and their commas and no more, matching the
+-- ceiling the URL parser and both layout DTOs already hold this string to.
+-- Defaulted rather than nullable: every existing host shows every column, and
+-- the empty string says that in the same vocabulary as everything else rather
+-- than adding a second spelling of it.
+--
+-- Not indexed and never queried into. It is read with the host and written
+-- only when somebody explicitly toggles a column.
+
+-- AlterTable
+ALTER TABLE `Hosts` ADD COLUMN `hiddenColumns` VARCHAR(64) NOT NULL DEFAULT '';

@@ -39,7 +39,7 @@ import { ApiError } from "@lib/api/client";
 import { fetchDisks } from "@lib/api/disks";
 import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
-import { fetchHostSummary } from "@lib/api/hosts";
+import { fetchHostSummary, updateHost } from "@lib/api/hosts";
 import { startTransfer } from "@lib/api/transfers";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useHashJob } from "@lib/query/use-hash-job";
@@ -1575,7 +1575,7 @@ export function Explorer({
               icon: GLYPH.columns,
               label: "show every column",
               detail: activePane.path,
-              run: () => onPaneChange(active, { hide: "" }),
+              run: () => resetColumns(active),
             },
           ]),
 
@@ -2054,8 +2054,54 @@ export function Explorer({
    * in the frame it happens: the rows reorder and the arrow lands on NAME.
    */
   const toggleColumn = (index: PaneIndex, column: Column) => {
-    const hide = toggled(views[index].hide, column);
+    setColumns(index, toggled(views[index].hide, column));
+  };
+
+  /** Every column back, from the menu's last row or the palette's. */
+  const resetColumns = (index: PaneIndex) => {
+    setColumns(index, "");
+  };
+
+  const setColumns = (index: PaneIndex, hide: string) => {
     onPaneChange(index, hidesSort(parseHidden(hide), views[index].sort) ? { hide, sort: "name", dir: 1 } : { hide });
+    rememberColumns(views[index].hostId, hide);
+  };
+
+  /**
+   * Tell the machine what its columns are now (TRE-127).
+   *
+   * Reached from the column menu and the palette and from nowhere else, which
+   * is the whole rule. A restored view, a followed link and a session restore
+   * all put a `hide` on a pane too, and none of them writes here — opening
+   * somebody's URL must not quietly rewrite your own preference for a machine
+   * you have had set up for months, and that is a failure nobody would connect
+   * to the link weeks later.
+   *
+   * Nothing on success, because there is nothing to say: the columns moved when
+   * they were clicked, and a toast confirming that a preference was remembered
+   * is a toast on every toggle. A refusal does get one — a memory that silently
+   * fails to persist is worse than one that never existed, because it is
+   * noticed later as the app forgetting rather than now as a save failing.
+   */
+  const rememberColumns = (hostId: string | null, hide: string) => {
+    // An unbound pane has nothing to remember against. It keeps what it has and
+    // writes nowhere, and the next machine it binds to answers for itself.
+    if (hostId === null) return;
+    void updateHost(hostId, { hiddenColumns: hide }, csrfToken).then(
+      () => {
+        void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.HOSTS] });
+      },
+      (error: unknown) => {
+        push({
+          tone: "warning",
+          message: "Could not remember these columns",
+          detail:
+            error instanceof ApiError
+              ? error.message
+              : "This pane is showing what you asked for; the machine will not remember it.",
+        });
+      },
+    );
   };
 
   // Pointing at a directory is a reliable signal that it is about to be
@@ -2397,7 +2443,7 @@ export function Explorer({
             // three trips through a menu that closed itself after the first —
             // which is the behaviour of every column menu on this desktop.
             if (id === "columns:all") {
-              onPaneChange(pane, { hide: "" });
+              resetColumns(pane);
               return;
             }
             const column = id.slice("columns:".length);
