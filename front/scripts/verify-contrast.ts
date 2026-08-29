@@ -805,8 +805,12 @@ const ROOMS: readonly Room[] = [
   {
     file: "components/ui/context-menu.tsx",
     boxes: [
-      { on: [STRIP], inks: ["danger-soft", "ink-dim", "ink-faint", "ink-soft"] },
-      { on: [LINE], inks: ["danger-soft", "ink-dim", "ink-soft"], note: "the row under the cursor, where the quiet step steps up" },
+      { on: [STRIP], inks: ["brand", "danger-soft", "ink-dim", "ink-faint", "ink-soft"] },
+      {
+        on: [LINE],
+        inks: ["brand", "danger-soft", "ink-dim", "ink-soft"],
+        note: "the row under the cursor, where the quiet step steps up",
+      },
     ],
   },
   {

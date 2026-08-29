@@ -19,9 +19,19 @@ import type { Action } from "@components/shell/actions";
  * how anyone learns this app has an F5 and an F6 at all, and a toolbar that
  * grows buttons over three milestones never looks like a finished product.
  *
- * The bar joins the degradation ladder (TRE-14 §5): the columns readout goes
- * below `stats:` with the glob narrowing alongside it, and the action row goes
- * below `panes:` — a single pane has nothing for a pane-to-pane action to do.
+ * The bar joins the degradation ladder (TRE-14 §5): the glob narrows below
+ * `stats:`, and the action row goes below `panes:` — a single pane has nothing
+ * for a pane-to-pane action to do.
+ *
+ * What is no longer here is the columns readout (TRE-124). It named the
+ * listing's columns beside the glob, did nothing, and named them wrong — it
+ * listed `share`, which is a bar rather than a column anybody sorts by, and
+ * left out `size`, which is a real one. Columns are now turned on and off from
+ * a menu on the header that draws them, which is where every table on this
+ * desktop has kept that menu, and which settles by itself the question this bar
+ * could not answer: *which pane*. A control in the frame that silently reshapes
+ * whichever pane happened to have the keyboard is the confusion the readout was
+ * one step away from becoming.
  */
 
 export type ViewMode = "list" | "detail";
@@ -34,9 +44,6 @@ export type SplitMode = "split" | "left" | "right";
  * registry, so the row, the context menu and TRE-36's palette cannot disagree
  * about what is possible right now.
  */
-
-/** The listing columns the glob sits beside. Placeholder until TRE-16's table owns them. */
-const DEFAULT_COLUMNS: readonly string[] = ["share", "mode", "owner", "age"];
 
 export function Toolbar({
   viewMode = "detail",
@@ -102,13 +109,6 @@ export function Toolbar({
           </span>
         )}
       </label>
-
-      <Tooltip content="Column visibility isn't configurable yet">
-        <span className="hidden items-center gap-2.25 font-mono text-2xs whitespace-nowrap stats:flex">
-          <span className="text-ink-dim">columns</span>
-          <span className="text-brand">{DEFAULT_COLUMNS.join(" · ")}</span>
-        </span>
-      </Tooltip>
 
       <Toggle
         label="heat"

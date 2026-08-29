@@ -1,3 +1,4 @@
+import { MAX_HIDE, parseHidden, writeHidden } from "@helpers/columns";
 import { createParser, debounce, parseAsNumberLiteral, parseAsStringLiteral } from "nuqs";
 
 import type { UrlKeys } from "nuqs";
@@ -94,6 +95,35 @@ export const paneParams = {
    * different things in the same pane.
    */
   tail: parseAsAbsolutePath,
+  /**
+   * The columns this pane has turned off (TRE-124), by name and comma-separated.
+   *
+   * Per pane, beside `sort` and `dir`, because that is what the control turned
+   * out to be: the menu opens on a pane's own column header, so the set it
+   * changes has to be that pane's — a menu reached from pane B that quietly
+   * re-laid-out pane A is the app answering a question nobody asked. It is also
+   * the honest shape. Two panes are routinely two machines, and wanting `owner`
+   * on the remote one and not on the local one is an ordinary thing to want.
+   *
+   * The *off* set rather than the on set, so the default is the empty string
+   * and `clearOnDefault` keeps both keys out of every URL where nobody has
+   * hidden anything — which is nearly all of them, and the budget at the top of
+   * this file is why that matters.
+   *
+   * Normalised on the way in rather than merely checked. `?aHide=age,age,banana`
+   * is a URL somebody can type, and it means the age column is off; parsing it
+   * to anything but `age` would leave two spellings of one layout, and the
+   * dirty dot and the session restore both decide whether to write by comparing
+   * two layouts as strings.
+   *
+   * No `history: "push"`, for `tail`'s reason: hiding a column is not a
+   * navigation, and a back button that undid it one column at a time would make
+   * ⌫ mean two different things in the same pane.
+   */
+  hide: createParser({
+    parse: (query: string) => (query.length > MAX_HIDE ? null : writeHidden(parseHidden(query))),
+    serialize: (value: string) => value,
+  }).withDefault(""),
 };
 
 export const LEFT_KEYS: UrlKeys<typeof paneParams> = {
@@ -102,6 +132,7 @@ export const LEFT_KEYS: UrlKeys<typeof paneParams> = {
   sort: "aSort",
   dir: "aDir",
   tail: "aTail",
+  hide: "aHide",
 };
 export const RIGHT_KEYS: UrlKeys<typeof paneParams> = {
   host: "bHost",
@@ -109,6 +140,7 @@ export const RIGHT_KEYS: UrlKeys<typeof paneParams> = {
   sort: "bSort",
   dir: "bDir",
   tail: "bTail",
+  hide: "bHide",
 };
 
 /**

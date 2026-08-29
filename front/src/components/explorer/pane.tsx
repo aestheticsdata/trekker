@@ -6,6 +6,7 @@ import { useRowWindow } from "@components/explorer/row-window";
 import { TailStrip } from "@components/explorer/tail-strip";
 import { ScrollThumbRail, useScrollThumbs } from "@components/ui/scroll-thumbs";
 import { Tooltip } from "@components/ui/tooltip";
+import { gridOf, HIDEABLE, parseHidden } from "@helpers/columns";
 import { ageIndex, HEAT, HEAT_OFF_BAR, HEAT_OFF_INK } from "@helpers/heat";
 import {
   ageDays,
@@ -24,7 +25,9 @@ import { useState } from "react";
 
 import type { PaneView } from "@components/explorer/pane-state";
 import type { DirSize, DirSizes } from "@components/explorer/use-dir-sizes";
+import type { Column } from "@helpers/columns";
 import type { Crumb, SortKey } from "@helpers/listing";
+import type { Point } from "@helpers/menu";
 import type { DiskMount } from "@lib/api/disks";
 import type { FileRow, ListMeta } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
@@ -45,15 +48,19 @@ import type { HostView } from "@lib/api/hosts";
  */
 
 /**
- * The eight columns, shared by the header, the rows and the skeleton.
+ * What the header, the rows and the skeleton share once the tracks are gone.
  *
- * In `rem` rather than the mockup's px so the whole listing follows
- * `--ui-base` (TRE-44); the px it was drawn at is in the comment. Tailwind's
- * numeric scale is 4px a unit, which is where `gap-1.25` (5px) comes from.
+ * The tracks themselves moved to `helpers/columns.ts` when they stopped being
+ * fixed (TRE-124): a pane draws whichever columns it has not been asked to put
+ * away, so `grid-template-columns` is a computed style now rather than a class.
+ * It had to become one — Tailwind's scanner reads source text, so a class name
+ * assembled at runtime is a class name that never reaches the stylesheet.
+ *
+ * `gap-1.25` is 5px, which is Tailwind's 4px unit and a quarter, and the widths
+ * `columns.ts` works in are `rem` so the whole listing keeps following
+ * `--ui-base` (TRE-44).
  */
-const GRID =
-  // 14  104   13  26  62  30  88  38
-  "grid-cols-[0.875rem_minmax(6.5rem,1fr)_0.8125rem_1.625rem_3.875rem_1.875rem_5.5rem_2.375rem] gap-1.25 min-w-101 px-2.25";
+const CELLS = "gap-1.25 px-2.25";
 
 export interface PaneCallbacks {
   onFocus: () => void;
@@ -86,6 +93,18 @@ export interface PaneCallbacks {
    * this only says where the pointer was and what was under it.
    */
   onContextMenu: (point: { x: number; y: number }, name: string | null) => void;
+  /**
+   * A right-click on the column header (TRE-124), which is where the columns
+   * are turned on and off.
+   *
+   * The header rather than the toolbar, because that is where the columns are
+   * drawn and where every table on this desktop has kept this menu for twenty
+   * years — and because it settles which pane is meant by being the pane you
+   * clicked. Separate from `onContextMenu` above: that one is about a row or a
+   * directory, and this one is about the shape of the listing, which is a
+   * different question asked in a different place.
+   */
+  onColumnMenu: (point: Point) => void;
 }
 
 export function Pane({
@@ -157,6 +176,12 @@ export function Pane({
   callbacks: PaneCallbacks;
 }) {
   const path = pathOf(pane);
+
+  // The columns this pane is not drawing, and the tracks that leaves (TRE-124).
+  // Once here rather than once per row: the listing is virtualised and this is
+  // the same answer for every row in it.
+  const hidden = parseHidden(pane.hide);
+  const grid = gridOf(hidden);
 
   // The selection is a list of names (TRE-16 §3) because a listing can be
   // re-sorted underneath it. Asking that list a question once per row is fine
@@ -285,7 +310,10 @@ export function Pane({
       <ColumnHeader
         sort={pane.sort}
         direction={pane.dir}
+        hidden={hidden}
+        grid={grid}
         onSort={callbacks.onSort}
+        onColumnMenu={callbacks.onColumnMenu}
       />
 
       {/* biome-ignore lint/a11y/noStaticElementInteractions: the keyboard route is ⇧F10 and the Menu key, and it lives in the explorer beside the rest of the keys */}
@@ -305,7 +333,10 @@ export function Pane({
         />
 
         {loading ? (
-          <Skeleton />
+          <Skeleton
+            hidden={hidden}
+            grid={grid}
+          />
         ) : host === null ? (
           <Placeholder
             title="no host"
@@ -362,10 +393,11 @@ export function Pane({
                       data-parent-row
                       onMouseDown={(event) => pressRow(event, PARENT_NAME, callbacks.onRowClick)}
                       onDoubleClick={callbacks.onUp}
-                      // Two columns, not the eight of `GRID`: there is no size,
-                      // mode, owner or age to put in the other six. The glyph
-                      // column keeps the type tag's width, so `↰` lands under
-                      // the tags and the name under the names.
+                      // Two columns, not the listing's: there is no size, mode,
+                      // owner or age to put in the others, whichever of them
+                      // this pane is currently drawing. The glyph column keeps
+                      // the type tag's width, so `↰` lands under the tags and
+                      // the name under the names.
                       //
                       // Everything around those columns is a row's, down to the
                       // transparent left border and the negative margin
@@ -373,7 +405,11 @@ export function Pane({
                       // fall on exactly the rectangle it falls on one row below
                       // — and `min-w` has to match, or the outline stops short
                       // in a pane scrolled to the right.
-                      className={`text-on-pane-muted hover:bg-pane-hover grid h-row min-w-101 -ml-0.5 cursor-pointer grid-cols-[0.875rem_1fr] items-center gap-1.25 border-l-2 border-transparent px-2.25 font-mono text-xs ${
+                      // The floor is the listing's own, shrunk by whatever it
+                      // has put away — a `..` still at the full width would put
+                      // its outline past the end of every row below it.
+                      style={{ minWidth: grid.minWidth }}
+                      className={`text-on-pane-muted hover:bg-pane-hover grid h-row -ml-0.5 cursor-pointer grid-cols-[0.875rem_1fr] items-center gap-1.25 border-l-2 border-transparent px-2.25 font-mono text-xs ${
                         active && pane.cur === PARENT_NAME
                           ? "outline-on-pane-strong -outline-offset-1 outline-1 outline-dotted"
                           : ""
@@ -398,6 +434,8 @@ export function Pane({
                     size={sizes.known.get(row.name) ?? null}
                     walking={sizes.walking}
                     heat={heat}
+                    hidden={hidden}
+                    grid={grid}
                     now={now}
                     onClick={callbacks.onRowClick}
                     onOpen={callbacks.onOpen}
@@ -719,7 +757,15 @@ function NavButton({
   );
 }
 
-const COLUMNS: ReadonlyArray<{ key: SortKey; label: string; align?: "right" }> = [
+/**
+ * The sortable four. `share` is not among them and never was — it is a bar, not
+ * a figure, which is exactly the thing the toolbar's old readout got wrong by
+ * naming it and leaving `size` out (TRE-124).
+ *
+ * Every key here is also a `Column`, so filtering this list by the hidden set
+ * needs no translation between the two vocabularies.
+ */
+const COLUMNS: ReadonlyArray<{ key: SortKey & Column; label: string; align?: "right" }> = [
   { key: "size", label: "SIZE", align: "right" },
   { key: "mode", label: "MODE" },
   { key: "owner", label: "OWNER" },
@@ -729,18 +775,33 @@ const COLUMNS: ReadonlyArray<{ key: SortKey; label: string; align?: "right" }> =
 function ColumnHeader({
   sort,
   direction,
+  hidden,
+  grid,
   onSort,
+  onColumnMenu,
 }: {
   sort: SortKey;
   direction: 1 | -1;
+  hidden: ReadonlySet<Column>;
+  grid: React.CSSProperties;
   onSort: (key: SortKey) => void;
+  onColumnMenu: (point: Point) => void;
 }) {
   const arrow = (key: SortKey) => (sort === key ? (direction === 1 ? " ▲" : " ▼") : "");
   const tone = (key: SortKey) => (sort === key ? "text-on-pane" : "text-on-pane-label");
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: the bar is a row of buttons that each carry their own keyboard; the menu over it is reached by the palette, which is where every keyboard route in this app that is not a chord already lives
     <div
-      className={`bg-pane-bar border-pane-line text-on-pane-label grid h-row-tight flex-none items-center border-b font-sans text-3xs font-medium tracking-[0.11em] ${GRID}`}
+      // Right-click, and only right-click: the left button already means sort,
+      // and a header where one button did two things depending on which button
+      // is the kind of control nobody trusts twice (TRE-124).
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onColumnMenu({ x: event.clientX, y: event.clientY });
+      }}
+      style={grid}
+      className={`bg-pane-bar border-pane-line text-on-pane-label grid h-row-tight flex-none items-center border-b font-sans text-3xs font-medium tracking-[0.11em] ${CELLS}`}
     >
       <span />
       <button
@@ -751,8 +812,10 @@ function ColumnHeader({
         NAME{arrow("name")}
       </button>
       <span />
-      <span>SHARE</span>
-      {COLUMNS.map((column) => (
+      {/* Not a button, because it is not a sort: the bar is each row's share of
+          the largest one in the listing, and `SORT_KEYS` has never held it. */}
+      {!hidden.has("share") && <span>SHARE</span>}
+      {COLUMNS.filter((column) => !hidden.has(column.key)).map((column) => (
         <button
           key={column.key}
           type="button"
@@ -802,6 +865,8 @@ function Row({
   walking,
   heat,
   now,
+  hidden,
+  grid,
   onClick,
   onOpen,
 }: {
@@ -818,6 +883,10 @@ function Row({
   walking: boolean;
   heat: boolean;
   now: number;
+  /** The columns this pane has put away (TRE-124). */
+  hidden: ReadonlySet<Column>;
+  /** The tracks, computed once by the pane rather than per row. */
+  grid: React.CSSProperties;
   onClick: PaneCallbacks["onRowClick"];
   onOpen: PaneCallbacks["onOpen"];
 }) {
@@ -839,7 +908,8 @@ function Row({
       data-row={row.name}
       onMouseDown={(event) => pressRow(event, row.name, onClick)}
       onDoubleClick={() => onOpen(row)}
-      className={`grid h-row cursor-pointer items-center font-mono text-xs ${GRID} -ml-0.5 border-l-2 ${
+      style={grid}
+      className={`grid h-row cursor-pointer items-center font-mono text-xs ${CELLS} -ml-0.5 border-l-2 ${
         selected
           ? `${paneActive ? "bg-pane-sel" : "bg-pane-sel-idle"} border-on-pane-strong`
           : "hover:bg-pane-hover border-transparent"
@@ -886,38 +956,48 @@ function Row({
           does not reflow when it arrives. */}
       <span />
 
-      <span className="bg-pane-block block h-1.5">
-        <span
-          className={`block h-1.5 ${heat ? paint.bar : HEAT_OFF_BAR}`}
-          style={{ width: `${share}%` }}
-        />
-      </span>
+      {!hidden.has("share") && (
+        <span className="bg-pane-block block h-1.5">
+          <span
+            className={`block h-1.5 ${heat ? paint.bar : HEAT_OFF_BAR}`}
+            style={{ width: `${share}%` }}
+          />
+        </span>
+      )}
 
       {/* `whitespace-nowrap` is a guard rather than a style (TRE-110): the column
           is 62px and the row height is fixed, so a figure two characters wider
           than expected does not narrow the cell — it wraps, spills out of
           `h-row` and lands on the row below. Nothing here may wrap, whatever a
           future format decides to put in it. */}
-      <span className="text-on-pane-data text-right whitespace-nowrap">
-        <SizeCell
-          row={row}
-          size={size}
-          walking={walking}
-        />
-      </span>
-      <span className="text-on-pane-muted">{row.mode}</span>
-      <span className={`truncate ${row.ownerResolved ? "text-on-pane-muted" : "text-on-pane-faint"}`}>{row.owner}</span>
+      {!hidden.has("size") && (
+        <span className="text-on-pane-data text-right whitespace-nowrap">
+          <SizeCell
+            row={row}
+            size={size}
+            walking={walking}
+          />
+        </span>
+      )}
+      {!hidden.has("mode") && <span className="text-on-pane-muted">{row.mode}</span>}
+      {!hidden.has("owner") && (
+        <span className={`truncate ${row.ownerResolved ? "text-on-pane-muted" : "text-on-pane-faint"}`}>
+          {row.owner}
+        </span>
+      )}
 
       {/* The padding is unconditional, so turning the heat map off removes a
           fill and never a pixel — the column keeps its width and no row moves. */}
       {/* The exact instant behind the rounding, in the app's own reading of it
           rather than the API's — `formatInstant` is what the inspector's
           modified/accessed rows already print (TRE-103). */}
-      <Tooltip content={formatInstant(row.mtime)}>
-        <span className={`px-1 py-0.5 text-right text-2xs ${chip ?? ""} ${heat ? paint.ink : HEAT_OFF_INK}`}>
-          {formatAge(days)}
-        </span>
-      </Tooltip>
+      {!hidden.has("age") && (
+        <Tooltip content={formatInstant(row.mtime)}>
+          <span className={`px-1 py-0.5 text-right text-2xs ${chip ?? ""} ${heat ? paint.ink : HEAT_OFF_INK}`}>
+            {formatAge(days)}
+          </span>
+        </Tooltip>
+      )}
     </div>
   );
 }
@@ -1037,15 +1117,15 @@ function MeasuringRing() {
 }
 
 /** Eleven staggered rows, as the mockup does — a listing arriving, not a spinner. */
-function Skeleton() {
+function Skeleton({ hidden, grid }: { hidden: ReadonlySet<Column>; grid: React.CSSProperties }) {
   return (
     <div aria-busy="true">
       {Array.from({ length: 11 }, (_, index) => (
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length placeholder, never reordered
           key={index}
-          className={`grid h-row animate-shimmer items-center ${GRID}`}
-          style={{ animationDelay: `${index * 70}ms` }}
+          className={`grid h-row animate-shimmer items-center ${CELLS}`}
+          style={{ ...grid, animationDelay: `${index * 70}ms` }}
         >
           <i className="bg-pane-block block h-2" />
           <i
@@ -1053,11 +1133,16 @@ function Skeleton() {
             style={{ width: `${34 + ((index * 37) % 52)}%` }}
           />
           <i />
-          <i className="bg-pane-block block h-1.5" />
-          <i className="bg-pane-block block h-2" />
-          <i className="bg-pane-block block h-2" />
-          <i className="bg-pane-block block h-2" />
-          <i className="bg-pane-block block h-2" />
+          {/* The placeholder has to lose the same cells the listing will, or the
+              rows shift sideways the moment the real ones arrive — which is the
+              one thing a skeleton exists to prevent. */}
+          {!hidden.has("share") && <i className="bg-pane-block block h-1.5" />}
+          {HIDEABLE.filter((column) => column !== "share" && !hidden.has(column)).map((column) => (
+            <i
+              key={column}
+              className="bg-pane-block block h-2"
+            />
+          ))}
         </div>
       ))}
     </div>

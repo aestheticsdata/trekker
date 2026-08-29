@@ -36,7 +36,7 @@ export const PANE_KEYS: readonly PaneKey[] = ["a", "b"];
  * catches this one by asserting the key list.
  */
 export function serialise(layout: ViewLayout): string {
-  const pane = ({ host, path, sort, dir }: ViewPane) => ({ host, path, sort, dir });
+  const pane = ({ host, path, sort, dir, hide }: ViewPane) => ({ host, path, sort, dir, hide });
   const { split, insp, heat, glob } = layout;
   return JSON.stringify({ a: pane(layout.a), b: pane(layout.b), split, insp, heat, glob });
 }
@@ -50,8 +50,8 @@ export function serialise(layout: ViewLayout): string {
  */
 export function layoutOf(current: StoredLayout): ViewLayout {
   return {
-    a: { host: current.a.host, path: current.a.path, sort: current.a.sort, dir: current.a.dir },
-    b: { host: current.b.host, path: current.b.path, sort: current.b.sort, dir: current.b.dir },
+    a: { host: current.a.host, path: current.a.path, sort: current.a.sort, dir: current.a.dir, hide: current.a.hide },
+    b: { host: current.b.host, path: current.b.path, sort: current.b.sort, dir: current.b.dir, hide: current.b.hide },
     split: current.split,
     insp: current.insp,
     heat: current.heat,
@@ -82,13 +82,15 @@ export const NEUTRAL = {
   split: "split",
   insp: true,
   heat: true,
-} as const satisfies Partial<ViewLayout> & Pick<ViewPane, "sort" | "dir">;
+  // Every column showing, which is what a pane nobody has arranged looks like.
+  hide: "",
+} as const satisfies Partial<ViewLayout> & Pick<ViewPane, "sort" | "dir" | "hide">;
 
 /** What the save form's two checkboxes are. */
 export interface Keeps {
   /** The sort of each pane, and the glob — the things that decide what a pane *shows*. */
   sorts: boolean;
-  /** The split, the inspector and the heat map — the things that decide how it *looks*. */
+  /** The split, the inspector, the heat map and the columns — how it *looks*. */
   layout: boolean;
 }
 
@@ -102,7 +104,15 @@ export interface Keeps {
  * view left behind, which is the one thing a *saved* view must never do.
  */
 export function narrow(layout: ViewLayout, keeps: Keeps): ViewLayout {
-  const pane = (side: ViewPane): ViewPane => (keeps.sorts ? side : { ...side, sort: NEUTRAL.sort, dir: NEUTRAL.dir });
+  // The one pane field that answers to the *other* checkbox: which columns are
+  // showing is how a listing looks, not what it shows, so it goes with the
+  // split and the inspector even though it is stored per pane.
+  const pane = (side: ViewPane): ViewPane => ({
+    ...side,
+    sort: keeps.sorts ? side.sort : NEUTRAL.sort,
+    dir: keeps.sorts ? side.dir : NEUTRAL.dir,
+    hide: keeps.layout ? side.hide : NEUTRAL.hide,
+  });
 
   return {
     a: pane(layout.a),
@@ -166,11 +176,15 @@ export function describePanes(layout: ViewLayout, labelOf: LabelOf): string {
   return PANE_KEYS.map((key) => `${labelOf(layout[key].host) ?? "—"}:${layout[key].path}`).join("  ↔  ");
 }
 
-/** One pane, as the save form previews it: where it is, and how it is sorted. */
-export function describePane(pane: ViewPane, labelOf: LabelOf): { where: string; sorted: string } {
+/** One pane, as the save form previews it: where it is, how it is sorted, what it shows. */
+export function describePane(pane: ViewPane, labelOf: LabelOf): { where: string; sorted: string; columns: string } {
   return {
     where: `${labelOf(pane.host) ?? "no host"}:${pane.path}`,
     sorted: `sorted by ${pane.sort} ${pane.dir > 0 ? "▲" : "▼"}`,
+    // Named rather than counted: "2 columns hidden" makes somebody restore the
+    // view to find out which two, and the whole point of a preview is that they
+    // should not have to.
+    columns: pane.hide === "" ? "every column" : `without ${pane.hide.split(",").join(", ")}`,
   };
 }
 

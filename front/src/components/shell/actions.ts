@@ -88,6 +88,16 @@ export interface MenuEntry {
   label: string;
   /** The key that reaches this, where one does. */
   hint?: string;
+  /**
+   * A row that is a setting rather than an act, and whether it is currently on
+   * (TRE-124) — the column menu's five, drawn with a tick the way every other
+   * menu on this desktop draws one.
+   *
+   * Absent means an ordinary row, and an ordinary menu is unchanged by this
+   * existing: the tick gutter appears only in a menu that has a checkable row
+   * in it, so nothing already shipped moves by a pixel.
+   */
+  checked?: boolean;
   /** Absent means enabled. Present means disabled, and this is the sentence. */
   unavailableReason?: string;
   danger?: boolean;

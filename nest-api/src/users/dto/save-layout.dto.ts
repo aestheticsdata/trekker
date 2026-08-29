@@ -23,6 +23,8 @@ export const SORT_KEYS = ["name", "size", "mode", "owner", "age"] as const;
 /** Same ceiling as the URL parser, for the same reason: a path stays a path. */
 const MAX_PATH = 700;
 const MAX_GLOB = 200;
+/** All five column names and their commas, and no longer. */
+const MAX_HIDE = 64;
 
 export class PaneLayoutDto {
   /**
@@ -66,6 +68,27 @@ export class PaneLayoutDto {
   @MaxLength(MAX_PATH)
   @Matches(/^\//, { message: "tail must be absolute" })
   tail?: string | null;
+
+  /**
+   * The columns this pane has turned off (TRE-124), by name and comma-separated.
+   *
+   * Shape only, like `glob`: which names are real is the front's vocabulary and
+   * this class would be a second copy of it, going stale on the day a column is
+   * added. The front drops what it cannot recognise on the way back out, which
+   * fails in the safe direction — a column showing that should not be, never a
+   * column nobody can find.
+   *
+   * Listed at all because the pipe is `whitelist: true`: a property this class
+   * does not declare is stripped rather than refused, and the front's schema for
+   * reading the column back is strict. A field dropped here would fail to parse
+   * there, and every session restore in the app would quietly become a cold
+   * open.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_HIDE)
+  @Matches(/^[a-z,]*$/, { message: "hide must be comma-separated column names" })
+  hide?: string;
 }
 
 export class SaveLayoutDto {

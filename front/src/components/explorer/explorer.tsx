@@ -28,6 +28,7 @@ import { ContextMenu } from "@components/ui/context-menu";
 import { useToast } from "@components/ui/toast";
 import { useUploads } from "@components/ui/uploads";
 import { cutNamesIn, describeClipboard, nameList, resolvePaste, splitHeld } from "@helpers/clipboard";
+import { HIDEABLE, hidesSort, isColumn, parseHidden, toggled } from "@helpers/columns";
 import { volumeFor } from "@helpers/disks";
 import { commandFor, hintFor, KEYS, matches, viewSlotFor, writeViewSlot } from "@helpers/keys";
 import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@helpers/listing";
@@ -58,10 +59,11 @@ import type { TerminalDelete, TerminalPermissions, TerminalWorld } from "@compon
 import type { TransferTarget } from "@components/explorer/transfer-modal";
 import type { DirSizes } from "@components/explorer/use-dir-sizes";
 import type { HostsMode } from "@components/hosts/host-manager";
-import type { ActionContext, ActionId, TargetKind } from "@components/shell/actions";
+import type { ActionContext, ActionId, MenuRow, TargetKind } from "@components/shell/actions";
 import type { PaletteEntry } from "@components/shell/palette";
 import type { SplitMode } from "@components/shell/toolbar";
 import type { Clipboard, ClipboardMode } from "@helpers/clipboard";
+import type { Column } from "@helpers/columns";
 import type { Chord } from "@helpers/keys";
 import type { SortKey } from "@helpers/listing";
 import type { Point } from "@helpers/menu";
@@ -110,6 +112,33 @@ const SPLITS: ReadonlyArray<{ mode: SplitMode; label: string; detail: string }> 
   { mode: "right", label: "right pane only", detail: "the left one collapses" },
 ];
 
+/**
+ * The column menu's rows (TRE-124), for whichever pane's header was clicked.
+ *
+ * The five names exactly as the header prints them, so the row and the column
+ * it turns off can be matched by eye, and ticked for the ones that are showing
+ * — the checklist every table on this desktop opens on a right-click.
+ *
+ * `share` is in the list and `size` is in it too, which is the second half of
+ * what this ticket is about: the readout this menu replaces named the first and
+ * left out the second, so it described a table that did not exist.
+ *
+ * The way back is offered only when there is something to come back from. A
+ * permanent "show every column" on a listing showing every column is a row that
+ * is dead every time it is read, and this menu is short enough that a dead row
+ * in it is conspicuous.
+ */
+function columnRows(hide: string): readonly MenuRow[] {
+  const hidden = parseHidden(hide);
+  const columns: MenuRow[] = HIDEABLE.map((column) => ({
+    id: `columns:${column}`,
+    label: column,
+    checked: !hidden.has(column),
+  }));
+
+  return hidden.size === 0 ? columns : [...columns, { rule: true }, { id: "columns:all", label: "show every column" }];
+}
+
 /** One pane's share of the URL. */
 export interface PaneUrl {
   host: string | null;
@@ -118,6 +147,8 @@ export interface PaneUrl {
   dir: 1 | -1;
   /** The file this pane's live tail is following (TRE-34), or null for none. */
   tail: string | null;
+  /** The columns this pane has put away (TRE-124), comma-separated. */
+  hide: string;
 }
 
 /** An open host manager: which pane it answers to, and what it opened on. */
@@ -369,6 +400,15 @@ export function Explorer({
    */
   const [menu, setMenu] = useState<{ pane: PaneIndex; point: Point; name: string | null } | null>(null);
   /**
+   * The column menu, and which pane's header it was opened on (TRE-124).
+   *
+   * Its own state rather than a mode on `menu` above: that one is about a row
+   * or a directory and carries a selection with it, this one is about the shape
+   * of a listing, and folding two questions into one piece of state is how a
+   * right-click on the header would end up re-selecting a file.
+   */
+  const [columnMenu, setColumnMenu] = useState<{ pane: PaneIndex; point: Point } | null>(null);
+  /**
    * The two dialogues the terminal opens, each in its own slot (TRE-35 §1).
    *
    * Not `permissionsOpen`/`deleteOpen`, which are booleans whose target is
@@ -384,8 +424,22 @@ export function Explorer({
   const hashJob = useHashJob();
 
   const views: [PaneView, PaneView] = [
-    { ...memory.panes[0], hostId: panes[0].host, path: panes[0].path, sort: panes[0].sort, dir: panes[0].dir },
-    { ...memory.panes[1], hostId: panes[1].host, path: panes[1].path, sort: panes[1].sort, dir: panes[1].dir },
+    {
+      ...memory.panes[0],
+      hostId: panes[0].host,
+      path: panes[0].path,
+      sort: panes[0].sort,
+      dir: panes[0].dir,
+      hide: panes[0].hide,
+    },
+    {
+      ...memory.panes[1],
+      hostId: panes[1].host,
+      path: panes[1].path,
+      sort: panes[1].sort,
+      dir: panes[1].dir,
+      hide: panes[1].hide,
+    },
   ];
 
   /** What `⌘X` or `⌘C` is holding (TRE-71 §1), or null for nothing. */
@@ -1497,6 +1551,34 @@ export function Explorer({
         run: () => onHeatChange(!heat),
       },
 
+      // The keyboard's way to the column menu (TRE-124), and the reason that
+      // menu is allowed to be right-click-only: a control reachable by one
+      // input device is a control half the people using this app cannot reach.
+      // The active pane, because that is the one every other entry in this
+      // group and every chord in the app already means.
+      ...HIDEABLE.map(
+        (column): PaletteEntry => ({
+          id: `view:column:${column}`,
+          group: "VIEW",
+          icon: GLYPH.columns,
+          label: parseHidden(activePane.hide).has(column) ? `show the ${column} column` : `hide the ${column} column`,
+          detail: activePane.path,
+          run: () => toggleColumn(active, column),
+        }),
+      ),
+      ...(activePane.hide === ""
+        ? []
+        : [
+            {
+              id: "view:columns:all",
+              group: "VIEW" as const,
+              icon: GLYPH.columns,
+              label: "show every column",
+              detail: activePane.path,
+              run: () => onPaneChange(active, { hide: "" }),
+            },
+          ]),
+
       {
         id: "shell:terminal",
         group: "SHELL",
@@ -1950,7 +2032,30 @@ export function Explorer({
         // moves it, rather than stacking a second or dismissing the first (§5).
         setMenu({ pane: index, point, name });
       },
+      onColumnMenu: (point) => {
+        // Activated first, like the row menu above and for the same reason: the
+        // status bar and the toolbar describe the active pane, and a menu open
+        // over one pane while the frame describes the other is three things
+        // saying two.
+        onActiveChange(index);
+        setColumnMenu({ pane: index, point });
+      },
     };
+  };
+
+  /**
+   * One column, put away or brought back (TRE-124).
+   *
+   * The sort goes with it when it has to. Hiding the column a pane is sorted by
+   * takes the header carrying the arrow, and the arrow is the only thing on
+   * screen saying what the order is — so rather than leave the listing in a
+   * sequence nothing accounts for, the pane drops back to name. Both writes go
+   * in one patch, so it is one history entry and one render, and it is visible
+   * in the frame it happens: the rows reorder and the arrow lands on NAME.
+   */
+  const toggleColumn = (index: PaneIndex, column: Column) => {
+    const hide = toggled(views[index].hide, column);
+    onPaneChange(index, hidesSort(parseHidden(hide), views[index].sort) ? { hide, sort: "name", dir: 1 } : { hide });
   };
 
   // Pointing at a directory is a reliable signal that it is about to be
@@ -2275,6 +2380,30 @@ export function Explorer({
           rows={resolveActions(menuContext, "menu")}
           onChoose={chooseAction}
           onClose={() => setMenu(null)}
+        />
+      )}
+
+      {columnMenu && (
+        <ContextMenu
+          point={columnMenu.point}
+          // Named for the pane it will change, not "columns". The two panes have
+          // their own sets, and a menu that did not say which one it was about
+          // would be the ambiguity this design exists to remove.
+          label={`columns · ${views[columnMenu.pane].path}`}
+          rows={columnRows(views[columnMenu.pane].hide)}
+          onChoose={(id) => {
+            const pane = columnMenu.pane;
+            // Left open. This is a checklist, and putting three columns away is
+            // three trips through a menu that closed itself after the first —
+            // which is the behaviour of every column menu on this desktop.
+            if (id === "columns:all") {
+              onPaneChange(pane, { hide: "" });
+              return;
+            }
+            const column = id.slice("columns:".length);
+            if (isColumn(column)) toggleColumn(pane, column);
+          }}
+          onClose={() => setColumnMenu(null)}
         />
       )}
 

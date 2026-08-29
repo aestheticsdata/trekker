@@ -52,6 +52,8 @@ export interface PaneView extends PaneMemory {
   path: string;
   sort: SortKey;
   dir: SortDirection;
+  /** The columns this pane has put away (TRE-124), as `helpers/columns.ts` writes them. */
+  hide: string;
 }
 
 export interface ExplorerState {

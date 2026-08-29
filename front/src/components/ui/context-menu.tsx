@@ -78,6 +78,15 @@ export function ContextMenu({ point, label, rows, onChoose, onClose }: ContextMe
   /** Whether any entry here could ever put a sentence in the strip below. */
   const canExplain = rows.some((row) => !isRule(row) && row.unavailableReason !== undefined);
 
+  /**
+   * Whether this menu is one with settings in it (TRE-124).
+   *
+   * The tick gutter is the menu's, not the row's, so the labels of a menu that
+   * mixes acts and settings still line up with each other. A menu with no
+   * checkable row in it opens exactly the gutter it always had: none.
+   */
+  const canTick = rows.some((row) => !isRule(row) && row.checked !== undefined);
+
   /** Only these can be moved to by the keyboard, chosen, or typed at. */
   const live = rows
     .map((row, index) => (!isRule(row) && row.unavailableReason === undefined ? index : -1))
@@ -337,6 +346,7 @@ export function ContextMenu({ point, label, rows, onChoose, onClose }: ContextMe
             key={row.id}
             id={`${id}-${index}`}
             row={row}
+            ticks={canTick}
             active={active === index}
             onHover={() => setActive(index)}
             onChoose={() => choose(index)}
@@ -371,12 +381,15 @@ export function ContextMenu({ point, label, rows, onChoose, onClose }: ContextMe
 function Item({
   id,
   row,
+  ticks,
   active,
   onHover,
   onChoose,
 }: {
   id: string;
   row: MenuEntry;
+  /** Whether this menu keeps a column for ticks, because some row in it is a setting. */
+  ticks: boolean;
   active: boolean;
   onHover: () => void;
   onChoose: () => void;
@@ -385,9 +398,18 @@ function Item({
 
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: the keyboard is the panel's, as a menu's is — one handler and `aria-activedescendant`, not a listener per row
+    // biome-ignore lint/a11y/noStaticElementInteractions: the role is `menuitem` or `menuitemcheckbox`, and the rule reads a computed one as none
+    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: `aria-checked` is set on exactly the rows whose role is `menuitemcheckbox` — one ternary decides both, which the rule cannot see through
     <div
       id={id}
-      role="menuitem"
+      // A setting says so to a screen reader rather than being an act that
+      // happens to draw a tick — `menuitemcheckbox` is what makes `aria-checked`
+      // mean anything, and without it the tick is decoration nobody is told
+      // about. Computed rather than two elements: splitting this row in two to
+      // give each a literal role would be twenty-five lines duplicated to
+      // satisfy a lint rule, and two copies to keep in step afterwards.
+      role={row.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+      aria-checked={row.checked}
       aria-disabled={disabled}
       // The reason travels as the accessible description rather than a tooltip:
       // this row is already inside a floating layer, and a bubble over a menu is
@@ -405,6 +427,18 @@ function Item({
         active ? "bg-line" : "",
       ].join(" ")}
     >
+      {/* Always rendered where the menu has ticks at all, never conditionally:
+          a gutter that appears with the tick would shift every label in the
+          menu sideways as rows are toggled, on the one menu whose whole job is
+          to be toggled. `aria-hidden` because the state is already on the row. */}
+      {ticks && (
+        <span
+          aria-hidden
+          className={`w-2 flex-none ${row.checked === true ? "text-brand" : "text-transparent"}`}
+        >
+          ✓
+        </span>
+      )}
       <span className="truncate">{row.label}</span>
       <div className="flex-1" />
       {row.hint && (

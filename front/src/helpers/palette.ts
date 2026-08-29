@@ -296,6 +296,8 @@ export const GLYPH = {
   inspector: "◧",
   split: "▤",
   heat: "▦",
+  /** The column menu's own, one step along 2a's block family from `split`. */
+  columns: "▥",
   shell: "$",
   view: "▤",
   saveView: "+",

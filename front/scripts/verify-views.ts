@@ -38,6 +38,7 @@ import {
   serialise,
   suggestName,
 } from "../src/helpers/views.ts";
+import { gridOf, HIDEABLE, hidesSort, parseHidden, toggled, writeHidden } from "../src/helpers/columns.ts";
 
 import type { StoredLayout, ViewLayout } from "../src/schemas/layout.ts";
 
@@ -66,8 +67,8 @@ const SRC = join(HERE, "..", "src");
 
 /** A layout to move one field of at a time. */
 const BASE: ViewLayout = {
-  a: { host: "11111111-1111-1111-1111-111111111111", path: "/srv/www", sort: "name", dir: 1 },
-  b: { host: "22222222-2222-2222-2222-222222222222", path: "/srv/backups", sort: "age", dir: -1 },
+  a: { host: "11111111-1111-1111-1111-111111111111", path: "/srv/www", sort: "name", dir: 1, hide: "" },
+  b: { host: "22222222-2222-2222-2222-222222222222", path: "/srv/backups", sort: "age", dir: -1, hide: "share,mode" },
   split: "split",
   insp: true,
   heat: false,
@@ -101,7 +102,7 @@ check(
   Object.keys(JSON.parse(serialise(BASE))),
   ["a", "b", "split", "insp", "heat", "glob"],
 );
-check("and exactly the fields of a pane", Object.keys(JSON.parse(serialise(BASE)).a), ["host", "path", "sort", "dir"]);
+check("and exactly the fields of a pane", Object.keys(JSON.parse(serialise(BASE)).a), ["host", "path", "sort", "dir", "hide"]);
 
 // ------------------------------------------------------------ what makes it dirty
 
@@ -118,6 +119,9 @@ const MOVES: ReadonlyArray<[string, ViewLayout]> = [
   ["the heat map came on", { ...BASE, heat: true }],
   ["the glob changed", { ...BASE, glob: "*.gz" }],
   ["the glob was cleared", { ...BASE, glob: "" }],
+  ["pane A put a column away", { ...BASE, a: { ...BASE.a, hide: "owner" } }],
+  ["pane B got one back", { ...BASE, b: { ...BASE.b, hide: "share" } }],
+  ["pane B got both back", { ...BASE, b: { ...BASE.b, hide: "" } }],
 ];
 
 for (const [what, moved] of MOVES) {
@@ -167,6 +171,9 @@ check("and pane B's", [NO_SORTS.b.sort, NO_SORTS.b.dir], [NEUTRAL.sort, NEUTRAL.
 check("and the glob with them", NO_SORTS.glob, "");
 check("leaving the arrangement alone", [NO_SORTS.split, NO_SORTS.insp, NO_SORTS.heat], ["split", true, false]);
 check("and both paths, which are the view", [NO_SORTS.a.path, NO_SORTS.b.path], ["/srv/www", "/srv/backups"]);
+// The one pane field that answers to the *other* checkbox: which columns show
+// is how a listing looks, not what it shows.
+check("and the columns, which are arrangement", NO_SORTS.b.hide, "share,mode");
 
 const NO_LAYOUT = narrow({ ...BASE, split: "left", insp: false, heat: true }, { sorts: true, layout: false });
 check(
@@ -175,6 +182,7 @@ check(
   [NEUTRAL.split, NEUTRAL.insp, NEUTRAL.heat],
 );
 check("leaving the sorts alone", [NO_LAYOUT.a.sort, NO_LAYOUT.b.dir], ["name", -1]);
+check("layout unticked brings every column back", NO_LAYOUT.b.hide, "");
 
 // The neutral values have to be the URL's own defaults, or "do not save the
 // sort order" quietly means "save this other sort order instead".
@@ -183,6 +191,7 @@ check("and its inspector is open", NEUTRAL.insp, true);
 check("and its heat map is on", NEUTRAL.heat, true);
 check("and its panes sort by name, ascending", [NEUTRAL.sort, NEUTRAL.dir], ["name", 1]);
 check("and it filters nothing", NEUTRAL.glob, "");
+check("and it shows every column", NEUTRAL.hide, "");
 
 // ------------------------------------------------------------- the shortcut
 
@@ -216,7 +225,12 @@ check("nothing bound at all falls back to the directory", suggestName({ ...BASE,
 check("the sidebar's line is the two machines", describeHosts(BASE, labelOf), "prod-01 ↔ nas-01");
 check("the palette's is both directories too", describePanes(BASE, labelOf), "prod-01:/srv/www  ↔  nas-01:/srv/backups");
 
-check("a pane previews where and how", describePane(BASE.a, labelOf), { where: "prod-01:/srv/www", sorted: "sorted by name ▲" });
+check("a pane previews where and how", describePane(BASE.a, labelOf), {
+  where: "prod-01:/srv/www",
+  sorted: "sorted by name ▲",
+  columns: "every column",
+});
+check("and which columns it put away", describePane(BASE.b, labelOf).columns, "without share, mode");
 check("descending is drawn as descending", describePane(BASE.b, labelOf).sorted, "sorted by age ▼");
 check("an unbound pane says no host", describePane({ ...BASE.a, host: null }, labelOf).where, "no host:/srv/www");
 
@@ -257,6 +271,55 @@ check("and takes it to the root, because the path meant the old machine", UNBOUN
 check("a rebind of nothing changes nothing", serialise(rebind(BASE, {})), serialise(BASE));
 
 check("both panes are answered for", PANE_KEYS, ["a", "b"]);
+
+// ------------------------------------------------------------- the columns
+//
+// `columns.ts` is here rather than in a file of its own because the thing worth
+// pinning about it is the thing this whole script is about: two layouts that
+// mean the same have to produce the same string. The set is stored as text, it
+// is written by a menu and read from a URL, and a second spelling of one set is
+// a saved view that is quietly dirty for ever.
+
+console.log("--- one set of columns, one spelling ---");
+
+check("the order is the list's, not the caller's", writeHidden(new Set(["age", "share"])), "share,age");
+check("and it is the same set either way round", writeHidden(new Set(["share", "age"])), "share,age");
+check("a repeat is one column", writeHidden(parseHidden("age,age")), "age");
+check("a name nothing draws is dropped", writeHidden(parseHidden("age,banana")), "age");
+check("and so is the empty run a trailing comma leaves", writeHidden(parseHidden("age,")), "age");
+check("nothing hidden is the empty string", writeHidden(parseHidden("")), "");
+check("every column can go", writeHidden(parseHidden("age,owner,mode,size,share")), "share,size,mode,owner,age");
+// Round-tripping is what the URL parser and the stored-layout schema both do on
+// the way in, so anything that survives it once must survive it for ever.
+for (const spelling of ["", "size", "age,size", "share,size,mode,owner,age", "banana"]) {
+  const once = writeHidden(parseHidden(spelling));
+  check(`\`${spelling}\` settles after one pass`, writeHidden(parseHidden(once)), once);
+}
+
+check("toggling puts one away", toggled("", "size"), "size");
+check("and toggling again brings it back", toggled("size", "size"), "");
+check("a second column joins it in the list's order", toggled("age", "size"), "size,age");
+check("and toggling one of two leaves the other", toggled("size,age", "size"), "age");
+
+console.log("--- and the sort it takes with it ---");
+
+check("hiding the sorted column is caught", hidesSort(parseHidden("size"), "size"), true);
+check("hiding another one is not", hidesSort(parseHidden("owner"), "size"), false);
+// `name` is not in `HIDEABLE`, so a pane sorted by it can never lose its header
+// — which is also why it is the safe thing to fall back to.
+check("and name cannot be hidden at all", hidesSort(parseHidden("share,size,mode,owner,age"), "name"), false);
+
+console.log("--- and the tracks that leaves ---");
+
+const FULL = gridOf(new Set());
+check("everything showing draws eight tracks", FULL.gridTemplateColumns.split(" ").length, 8);
+check("and keeps the floor the pane has always had", FULL.minWidth, "25.25rem");
+check("one column gone is one track gone", gridOf(new Set(["size"])).gridTemplateColumns.split(" ").length, 7);
+// The whole point of hiding one: a floor that did not move would free no room
+// on exactly the narrow pane where somebody reached for this.
+check("and the floor comes down by its track and its gap", gridOf(new Set(["size"])).minWidth, "21.0625rem");
+check("all five gone leaves the three that are not columns", gridOf(new Set(HIDEABLE)).gridTemplateColumns.split(" ").length, 3);
+ok("and a floor still above zero", Number.parseFloat(gridOf(new Set(HIDEABLE)).minWidth) > 0);
 
 // ------------------------------------------------ nothing spells a chord itself
 
