@@ -172,23 +172,44 @@ export function ContextMenu({ point, label, rows, onChoose, onClose }: ContextMe
    * A right-click somewhere else is deliberately **not** here: it reaches the
    * pane, which reports a new point, and the menu moves. Closing on it here
    * would make the second right-click a dismissal and the third an open.
+   *
+   * A *scroll* is not here either, and used to be (TRE-128). It was registered
+   * in the capture phase so that a listing scrolling under the menu would reach
+   * it, on the reasoning that "a menu left hanging over rows that have moved is
+   * pointing at the wrong one". It is not: this panel is `fixed`, its header
+   * names what it is about, and its entries act on the selection captured when
+   * it opened, so rows moving underneath leave it untidy rather than wrong.
+   *
+   * What the capture phase actually bought was dismissal by any scroll in the
+   * document, this panel's own included. Turn the wheel anywhere with a menu
+   * open and it went; and a menu tall enough to scroll itself could not be
+   * scrolled at all, because its own `scroll` event reached the same listener
+   * and closed it before a second row came into view.
+   *
+   * Nothing replaces it, and that is measured rather than assumed. The first
+   * attempt at this fix added a non-passive `wheel` guard and
+   * `overscroll-contain` on the belief that the browser chains a wheel past a
+   * panel with nothing to scroll, onto the listing behind. Driven over CDP, it
+   * does not: with this panel's own CSS and no guard at all, a wheel over it
+   * moves a 400-row list underneath by zero pixels and fires no scroll on it —
+   * with the panel unscrollable, and with the panel scrolled to its end. A
+   * `fixed` element with `overflow-y: auto` already stops the chain, so both
+   * additions were code that could never run, and they went the way of the
+   * listener.
+   *
+   * `resize` and `blur` stay. Both genuinely invalidate a placement measured
+   * against a viewport that is no longer the one on screen.
    */
   useEffect(() => {
     const outside = (event: PointerEvent) => {
       if (!panel.current?.contains(event.target as Node)) onClose();
     };
-    // Capture, because a listing that scrolls does not bubble its scroll to the
-    // window — and a menu left hanging over rows that have moved is pointing at
-    // the wrong one.
-    const scrolled = () => onClose();
 
     window.addEventListener("pointerdown", outside);
-    window.addEventListener("scroll", scrolled, true);
     window.addEventListener("resize", onClose);
     window.addEventListener("blur", onClose);
     return () => {
       window.removeEventListener("pointerdown", outside);
-      window.removeEventListener("scroll", scrolled, true);
       window.removeEventListener("resize", onClose);
       window.removeEventListener("blur", onClose);
     };
