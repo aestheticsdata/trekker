@@ -19,6 +19,7 @@ import { PermissionsModal } from "@components/explorer/permissions-modal";
 import { RenameModal } from "@components/explorer/rename-modal";
 import { TerminalPanel } from "@components/explorer/terminal-panel";
 import { TransferModal } from "@components/explorer/transfer-modal";
+import { UploadModal } from "@components/explorer/upload-modal";
 import { useDirSizes, withDirSizes } from "@components/explorer/use-dir-sizes";
 import { HostManager } from "@components/hosts/host-manager";
 import { isRule, resolveActions } from "@components/shell/actions";
@@ -46,7 +47,7 @@ import { useHashJob } from "@lib/query/use-hash-job";
 import { useSignedLink } from "@lib/query/use-signed-link";
 import { warmDirectory } from "@lib/query/warm-directory";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 
 import type { CompareCopy, CompareTarget } from "@components/explorer/compare-modal";
 import type { CreateMode, CreateTarget } from "@components/explorer/create-modal";
@@ -57,6 +58,7 @@ import type { PermissionsTarget } from "@components/explorer/permissions-modal";
 import type { RenameMode, RenameTarget } from "@components/explorer/rename-modal";
 import type { TerminalDelete, TerminalPermissions, TerminalWorld } from "@components/explorer/terminal-runner";
 import type { TransferTarget } from "@components/explorer/transfer-modal";
+import type { UploadTarget } from "@components/explorer/upload-modal";
 import type { DirSizes } from "@components/explorer/use-dir-sizes";
 import type { HostsMode } from "@components/hosts/host-manager";
 import type { ActionContext, ActionId, MenuRow, TargetKind } from "@components/shell/actions";
@@ -71,6 +73,7 @@ import type { CompareEntry, CompareResult } from "@lib/api/compare";
 import type { DiskMount } from "@lib/api/disks";
 import type { FileRow } from "@lib/api/fs";
 import type { HostView } from "@lib/api/hosts";
+import type { ConflictPolicy } from "@lib/api/upload";
 import type { SavedView } from "@schemas/layout";
 
 /**
@@ -367,8 +370,14 @@ export function Explorer({
   const { push } = useToast();
   const uploads = useUploads();
   const queryClient = useQueryClient();
-  /** The toolbar's `upload` button clicks this; nothing else touches it. */
-  const filePicker = useRef<HTMLInputElement>(null);
+  /**
+   * The pane an upload was asked for, and whatever it arrived with (TRE-125).
+   *
+   * Local rather than a prop the way `createMode` is one, because a drop
+   * carries `File` handles and the page has no business holding those. What the
+   * toolbar sends up is still only `uploadRequested`; this is where it lands.
+   */
+  const [uploadPick, setUploadPick] = useState<{ pane: PaneIndex; files: readonly File[] } | null>(null);
   /** Set once a host has been bound automatically, so it happens per pane once. */
   const [seeded, setSeeded] = useState<[boolean, boolean]>([false, false]);
   /**
@@ -1279,32 +1288,54 @@ export function Explorer({
   }, [duplicateRequested, onDuplicateRequestedChange, activePane, duplicateEntries, csrfToken, queryClient, push]);
 
   /**
-   * Uploading into a pane (TRE-65).
+   * Asking where an upload goes (TRE-125).
    *
-   * Two ways in and one implementation. The toolbar's button opens the file
-   * picker below, and a drop on a pane arrives with its files already chosen —
-   * both end here, aimed at the directory that pane is showing.
+   * Two ways in and one modal. The toolbar's button raises it empty, and the
+   * file dialogue opens from inside it; a drop raises it with the files already
+   * collected. Neither sends anything until the destination has been read back
+   * to the operator and confirmed — which is the whole change, because the
+   * button used to click a hidden input and the drop used to send on the spot.
    *
    * Not at the selection: an upload goes *into* a place, and the only place a
    * pane unambiguously names is the directory it is standing in. Dropping onto
    * a highlighted folder row would be a nicer gesture and a worse promise —
    * there is no way to show, mid-drag, which of the two it decided on.
    */
-  const uploadInto = (pane: PaneIndex, files: readonly File[]) => {
-    const view = views[pane];
-    if (view.hostId === null) {
+  const askUpload = (pane: PaneIndex, files: readonly File[]) => {
+    if (views[pane].hostId === null) {
       push({ tone: "info", message: "No host on that pane", detail: "Bind one from the sidebar first" });
       return;
     }
-    if (files.length === 0) return;
+    setUploadPick({ pane, files });
+  };
 
-    void uploads.start(view.hostId, view.path, files).then(() => {
+  /** What the modal's `upload` button commits to (TRE-65). */
+  const uploadInto = (pane: PaneIndex, files: readonly File[], conflict: ConflictPolicy) => {
+    const view = views[pane];
+    if (view.hostId === null || files.length === 0) return;
+
+    void uploads.start(view.hostId, view.path, files, conflict).then(() => {
       // Once, at the end of the batch. Per file would re-list the directory
       // fifty times for fifty files, and the intermediate listings are of a
       // directory that is still being written into.
       void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY, view.hostId] });
     });
   };
+
+  /**
+   * The destination, resolved from the pane the request came from.
+   *
+   * Guarded a second time: `askUpload` refuses a pane with no host, and a host
+   * can still be unbound from the sidebar while the modal is standing open.
+   */
+  const uploadTarget: UploadTarget | null =
+    uploadPick === null || views[uploadPick.pane].hostId === null
+      ? null
+      : {
+          directory: views[uploadPick.pane].path,
+          host: hosts.find((host) => host.id === views[uploadPick.pane].hostId) ?? null,
+          initial: uploadPick.files,
+        };
 
   useEffect(() => {
     if (!uploadRequested) return;
@@ -1314,11 +1345,11 @@ export function Explorer({
       push({ tone: "info", message: "No host on this pane", detail: "Bind one from the sidebar first" });
       return;
     }
-    // The picker is a hidden input rather than `showOpenFilePicker`, which
-    // exists in one browser engine. Clicking it from here keeps the user
-    // gesture alive, which is what a file dialogue needs.
-    filePicker.current?.click();
-  }, [uploadRequested, onUploadRequestedChange, activePane, push]);
+    // Empty, and that is the point: the dialogue is opened from inside the
+    // modal, so the destination is on screen right up to the moment the system
+    // window covers it.
+    setUploadPick({ pane: active, files: [] });
+  }, [uploadRequested, onUploadRequestedChange, activePane, active, push]);
 
   /**
    * The one way a pane moves. Both writes are issued here — the reducer's
@@ -2006,7 +2037,7 @@ export function Explorer({
       onHostMenu: () => onManageHosts({ pane: index, mode: "list" }),
       onClearGlob: () => onGlobChange(""),
       onTail: (path) => onPaneChange(index, { tail: path }),
-      onFilesDropped: (files) => uploadInto(index, files),
+      onFilesDropped: (files) => askUpload(index, files),
       onContextMenu: (point, name) => {
         // The inactive pane is activated first, or the menu, the status bar and
         // the toolbar would describe three different things (§2).
@@ -2480,21 +2511,13 @@ export function Explorer({
         />
       )}
 
-      {/* The toolbar's upload button, which is a file dialogue wearing a
-          button's clothes. Hidden rather than absent: `.click()` on an input
-          that is not in the document opens nothing. */}
-      <input
-        ref={filePicker}
-        type="file"
-        multiple
-        hidden
-        onChange={(event) => {
-          uploadInto(active, [...(event.target.files ?? [])]);
-          // Cleared so choosing the same file twice fires `change` twice. An
-          // input keeps its value, and the second attempt would be silent.
-          event.target.value = "";
-        }}
-      />
+      {uploadTarget && uploadPick && (
+        <UploadModal
+          target={uploadTarget}
+          onClose={() => setUploadPick(null)}
+          onConfirm={(files, conflict) => uploadInto(uploadPick.pane, files, conflict)}
+        />
+      )}
     </div>
   );
 }

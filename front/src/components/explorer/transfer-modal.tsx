@@ -2,8 +2,8 @@
 
 import { useAuth } from "@auth/context/AuthContext";
 import { FileMark } from "@components/explorer/file-mark";
+import { HostPath } from "@components/ui/host-path";
 import { Overlay } from "@components/ui/overlay";
-import { Tooltip } from "@components/ui/tooltip";
 import { extensionOf, formatSize, MARK_ON_PANEL, rowTypeOf } from "@helpers/listing";
 import { PRESS, SELECTED } from "@helpers/press";
 import { ApiError } from "@lib/api/client";
@@ -184,7 +184,7 @@ function TransferPanel({
     <>
       <header className="bg-chrome border-line flex h-topbar flex-none items-center gap-2 border-b px-3">
         <span className="text-ink-label font-mono text-xs font-semibold tracking-label">{verb}</span>
-        <Endpoint
+        <HostPath
           host={hosts.find((host) => host.id === target.srcHostId) ?? null}
           path={target.srcPaths.length === 1 ? target.srcPaths[0] : `${target.srcPaths.length} entries`}
         />
@@ -194,7 +194,7 @@ function TransferPanel({
         >
           →
         </span>
-        <Endpoint
+        <HostPath
           host={hosts.find((host) => host.id === target.dstHostId) ?? null}
           path={target.dstPath}
         />
@@ -313,38 +313,6 @@ function TransferPanel({
         </button>
       </footer>
     </>
-  );
-}
-
-/**
- * One end of the transfer, with its host's colour dot.
- *
- * The path falls off the **left**, which is the pane's own breadcrumb rule and
- * matters more here than there: two endpoints of a deep tree share every
- * leading segment, so an ellipsis at the end renders the source and the
- * destination as the same illegible string with an arrow between them. What
- * distinguishes them is the last few segments, so those are what survive.
- *
- * Done with `justify-end` in an overflow-hidden box rather than `truncate`,
- * because CSS has no head-side text-overflow — the same reason `Breadcrumb`
- * does it this way.
- */
-function Endpoint({ host, path }: { host: HostView | null; path: string }) {
-  return (
-    <span className="flex min-w-0 flex-1 items-center gap-1.5">
-      <span
-        aria-hidden
-        className="size-1.5 flex-none rounded-full"
-        style={{ backgroundColor: host?.colour ?? "var(--color-ink-faint)" }}
-      />
-      <Tooltip content={host ? `${host.label}:${path}` : path}>
-        <span className="flex min-w-0 flex-auto justify-end overflow-hidden">
-          <span className="text-ink-muted flex-none font-mono text-cmd whitespace-nowrap">
-            {host ? `${host.label}:${path}` : path}
-          </span>
-        </span>
-      </Tooltip>
-    </span>
   );
 }
 

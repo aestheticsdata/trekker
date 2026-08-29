@@ -698,6 +698,13 @@ const ROOMS: readonly Room[] = [
   },
 
   {
+    // No danger wash: this modal refuses nothing of its own. What it can say
+    // goes in the footer's count, and the server's refusals land in the tray.
+    file: "components/explorer/upload-modal.tsx",
+    boxes: [{ on: [APP, CHROME_BG], inks: ["ink-dim", "ink-faint", "ink-label", "ink-muted", "ink-soft"] }],
+  },
+
+  {
     file: "components/hosts/field.tsx",
     boxes: [
       { on: [APP], inks: ["danger-soft", "ink-faint", "ink-muted", "ink-soft"], note: "label, hint and error" },
@@ -812,6 +819,10 @@ const ROOMS: readonly Room[] = [
         note: "the row under the cursor, where the quiet step steps up",
       },
     ],
+  },
+  {
+    file: "components/ui/host-path.tsx",
+    boxes: [{ on: [CHROME_BG], inks: ["ink-muted"], note: "both modal headers that draw it are chrome" }],
   },
   {
     file: "components/ui/toast.tsx",
