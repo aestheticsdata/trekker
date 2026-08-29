@@ -853,11 +853,20 @@ body {
  * the content changes — content changes, not scroll: nothing here touches
  * the main thread while scrolling.
  *
- * Not worn by the content-sized boxes, deliberately: `container-type: size`
- * below means `contain: size`, and a menu or a modal list that takes its
- * height from its rows would collapse to nothing. Those keep the native bar
- * above — they are scrolled three rows at a time, where a trailing thumb is
- * invisible.
+ * **Why the travel is a custom property and not `cqh` (TRE-120).** It was
+ * `100cqh`, which needed `container-type: size` on the scroller — and that
+ * means `contain: size`, so a box that takes its height from its rows
+ * collapses to nothing. Measured on the palette's own shape: 338px of list
+ * became 8px. That is why the ⌘K list and the `max-h` menus were left on the
+ * native bar, and it is the whole reason the one scroller somebody actually
+ * complained about was the one still trailing.
+ *
+ * The containment was only ever there to make the cq units resolve, and the
+ * scrollport is something `useScrollThumbs` already measures to size the
+ * thumb. So it writes it out — `--sb-ch`/`--sb-cw`, the content box, which is
+ * the box `cqh`/`cqw` meant — and no scroller needs containing any more. Same
+ * geometry for the four that were already converted, and now available to a
+ * box whose height comes from its children.
  *
  * Guarded on scroll-timeline support; without it the native 4.5px bar above
  * stays, trailing as before, which is the state every browser was in.
@@ -869,7 +878,6 @@ body {
 @supports (animation-timeline: scroll()) {
   .scroll-composited {
     scrollbar-width: none;
-    container-type: size;
     /* Promoted at creation rather than when Chrome gets around to it: a
      * scroller whose overflow arrives after mount (the terminal answering its
      * first `ls`) is otherwise scrolled by the main thread until a heuristic
@@ -900,7 +908,7 @@ body {
   }
   .scroll-thumb-y {
     top: 0;
-    left: calc(100cqw - 0.28125rem);
+    left: calc(var(--sb-cw, 0px) - 0.28125rem);
     width: 0.28125rem;
     height: var(--sb-vh, 0px);
     animation: sb-y linear both;
@@ -908,7 +916,7 @@ body {
   }
   .scroll-thumb-x {
     left: 0;
-    top: calc(100cqh - 0.28125rem);
+    top: calc(var(--sb-ch, 0px) - 0.28125rem);
     height: 0.28125rem;
     width: var(--sb-hw, 0px);
     animation: sb-x linear both;
@@ -916,12 +924,12 @@ body {
   }
   @keyframes sb-y {
     to {
-      transform: translateY(calc(100cqh - var(--sb-vh, 0px)));
+      transform: translateY(calc(var(--sb-ch, 0px) - var(--sb-vh, 0px)));
     }
   }
   @keyframes sb-x {
     to {
-      transform: translateX(calc(100cqw - var(--sb-hw, 0px)));
+      transform: translateX(calc(var(--sb-cw, 0px) - var(--sb-hw, 0px)));
     }
   }
 }

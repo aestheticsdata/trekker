@@ -20,13 +20,16 @@ import type { RefObject } from "react";
  *
  * Three moves, one contract: the scroller wears `scroll-composited`, renders
  * `<ScrollThumbRail />` as its first child, and calls `useScrollThumbs` with
- * something that changes whenever its content does. Mind what the class
- * carries — `container-type: size` means `contain: size`, so this is only for
- * boxes whose size is imposed from outside (a flex fill, a token). A box that
- * takes its height from its children collapses to nothing, which is why the
- * `max-h` menus and the content-hugging modal lists keep the native bar:
- * they are scrolled for three rows at a time, where a trailing thumb is
- * invisible, and the cure would erase the patient.
+ * something that changes whenever its content does.
+ *
+ * It used to carry a fourth, unwritten condition — the class also set
+ * `container-type: size`, which means `contain: size`, so a box taking its
+ * height from its children collapsed to nothing. That is what kept the ⌘K
+ * list and the `max-h` menus on the native bar, and so on the trailing thumb
+ * this file exists to remove (TRE-120). The containment was only holding up
+ * the `cqh`/`cqw` the travel was spanned in, and the scrollport is already
+ * measured below — so it is written out instead, and the condition is gone.
+ * Any scroller can wear this now, whatever decides its height.
  */
 export function ScrollThumbRail() {
   return (
@@ -41,11 +44,18 @@ export function ScrollThumbRail() {
 }
 
 /**
- * The two thumb lengths (client²/scroll per axis), written into `--sb-vh` and
- * `--sb-hw` — the one part of the composited scrollbar the CSS cannot derive
- * itself. Written when the box or the content changes and never per scroll
- * frame: while the wheel turns, the thumb is a compositor animation and the
- * main thread is not consulted, which is the entire point of TRE-113.
+ * The four numbers the CSS cannot derive itself: the two thumb lengths
+ * (client²/scroll per axis) as `--sb-vh`/`--sb-hw`, and the scrollport as
+ * `--sb-ch`/`--sb-cw`, which is how far a thumb travels. Written when the box
+ * or the content changes and never per scroll frame: while the wheel turns,
+ * the thumb is a compositor animation and the main thread is not consulted,
+ * which is the entire point of TRE-113.
+ *
+ * The scrollport is measured as the **content** box — `clientHeight` less the
+ * padding — because that is the box `100cqh` used to resolve against, so the
+ * scrollers converted before TRE-120 keep the geometry they were tuned with.
+ * It matters wherever padding rides the scroller itself: the two boxes differ
+ * there, and the sidebar carries a note about the 7px it costs.
  *
  * `content` is the caller saying what its scrollable size is a function of —
  * the terminal passes its lines, the pane passes the virtualiser's spacer
@@ -68,8 +78,9 @@ export function useScrollThumbs<T extends HTMLElement>(
     const el = ref.current;
     if (el === null) return;
     const measure = () => {
+      const style = getComputedStyle(el);
       const floor = 1.5 * Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
-      const { overflowX, overflowY } = getComputedStyle(el);
+      const { overflowX, overflowY } = style;
       const scrollsY = overflowY === "auto" || overflowY === "scroll";
       const scrollsX = overflowX === "auto" || overflowX === "scroll";
       const vertical =
@@ -80,8 +91,11 @@ export function useScrollThumbs<T extends HTMLElement>(
         scrollsX && el.scrollWidth > el.clientWidth
           ? Math.max(floor, (el.clientWidth * el.clientWidth) / el.scrollWidth)
           : 0;
+      const pad = (side: string) => Number.parseFloat(style.getPropertyValue(`padding-${side}`)) || 0;
       el.style.setProperty("--sb-vh", `${vertical}px`);
       el.style.setProperty("--sb-hw", `${horizontal}px`);
+      el.style.setProperty("--sb-ch", `${el.clientHeight - pad("top") - pad("bottom")}px`);
+      el.style.setProperty("--sb-cw", `${el.clientWidth - pad("left") - pad("right")}px`);
     };
     measure();
     const observer = new ResizeObserver(measure);

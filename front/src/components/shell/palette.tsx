@@ -1,6 +1,7 @@
 "use client";
 
 import { Overlay } from "@components/ui/overlay";
+import { ScrollThumbRail, useScrollThumbs } from "@components/ui/scroll-thumbs";
 import { KEYS, matches } from "@helpers/keys";
 import {
   commonPrefix,
@@ -140,6 +141,8 @@ export function Palette({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  /** The in-flow wrapper the rows sit in, whose height *is* the content height. */
+  const rowsRef = useRef<HTMLDivElement>(null);
 
   // Opened by a keypress, so the caret goes where the keypress meant to.
   useEffect(() => {
@@ -240,6 +243,17 @@ export function Palette({
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>("[data-current]")?.scrollIntoView({ block: "nearest" });
   }, [cursor, signature]);
+
+  /**
+   * The composited thumb (TRE-120).
+   *
+   * This list was the last scroller in the app still on the main-thread-painted
+   * bar, and the only one somebody complained about — 33 entries is close to
+   * four screens, not the three rows the exclusion assumed. `signature` is what
+   * changes when the rows do, which is the same string the cursor effect above
+   * already watches.
+   */
+  useScrollThumbs(listRef, signature, rowsRef);
 
   const move = (delta: 1 | -1) => {
     if (rows.length === 0) return;
@@ -350,33 +364,43 @@ export function Palette({
 
             <div
               ref={listRef}
-              className="max-h-palette-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-1"
+              className="scroll-composited max-h-palette-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
             >
-              {shown.map(({ item, head }, index) => (
-                <div key={item.id}>
-                  {head !== null && (
-                    <div
-                      className={`${PALETTE_LABEL_INK} px-3 pt-2 pb-1 font-sans text-3xs/none font-semibold tracking-[0.16em]`}
-                    >
-                      {head}
-                    </div>
-                  )}
-                  <Row
-                    entry={item}
-                    selected={index === cursor}
-                    onHover={() => setAt(index)}
-                    onPick={() => pick(item)}
-                  />
-                </div>
-              ))}
+              <ScrollThumbRail />
+              {/* The padding rides the wrapper rather than the scroller, the
+                  sidebar's rule: the thumb's travel is spanned in the scrollport's
+                  content box and its length is measured from `clientHeight`, and
+                  padding on the scroller is what makes those two disagree. */}
+              <div
+                ref={rowsRef}
+                className="py-1"
+              >
+                {shown.map(({ item, head }, index) => (
+                  <div key={item.id}>
+                    {head !== null && (
+                      <div
+                        className={`${PALETTE_LABEL_INK} px-3 pt-2 pb-1 font-sans text-3xs/none font-semibold tracking-[0.16em]`}
+                      >
+                        {head}
+                      </div>
+                    )}
+                    <Row
+                      entry={item}
+                      selected={index === cursor}
+                      onHover={() => setAt(index)}
+                      onPick={() => pick(item)}
+                    />
+                  </div>
+                ))}
 
-              {rows.length === 0 && (
-                <p className={`${PALETTE_QUIET_INK} px-3 py-6.5 text-center font-mono text-xs/[1.6]`}>
-                  no command matches “{query}”
-                  <br />
-                  <span className={FALLBACK_INK}>↩ runs it in the terminal instead</span>
-                </p>
-              )}
+                {rows.length === 0 && (
+                  <p className={`${PALETTE_QUIET_INK} px-3 py-6.5 text-center font-mono text-xs/[1.6]`}>
+                    no command matches “{query}”
+                    <br />
+                    <span className={FALLBACK_INK}>↩ runs it in the terminal instead</span>
+                  </p>
+                )}
+              </div>
             </div>
 
             <div
