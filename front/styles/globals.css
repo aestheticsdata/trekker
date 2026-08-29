@@ -668,6 +668,33 @@ body {
   :focus-visible {
     outline: none;
   }
+
+  /*
+   * And nothing rubber-bands.
+   *
+   * A fourth rule here for the reason the three above are here: this is not a
+   * property one component gets wrong, it is one every scroller in the app
+   * would otherwise have to remember, and the sixteen of them were never going
+   * to stay in step. The context menu is where it was reported (TRE-129) and it
+   * is the least of them — the panes, the terminal scrollback, the tail body,
+   * the sidebar and the palette all bounce the same way.
+   *
+   * `none`, not `contain`. They are not two strengths of one thing: `contain`
+   * stops the gesture chaining to the parent and *keeps* the local bounce,
+   * which is the half being complained about. Only `none` removes it.
+   *
+   * The `y` axis alone, deliberately. Horizontal overscroll is the browser's
+   * back gesture on this platform, and this app's whole layout is in the query
+   * string with `path` pushing history (TRE-18) — so a swipe back is a real
+   * navigation here and not ours to take away in a rule about a visual effect.
+   *
+   * On `*` because there is no selector for "is a scroll container", and the
+   * property is inert on everything that is not one. It costs nothing on the
+   * other elements and needs nothing remembered on the next scroller added.
+   */
+  * {
+    overscroll-behavior-y: none;
+  }
 }
 
 /*
