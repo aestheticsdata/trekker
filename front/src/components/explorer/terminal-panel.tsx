@@ -523,7 +523,7 @@ export function TerminalPanel({
           // confusion TRE-115 exists to end. An empty field behind a blinking
           // caret is what "type here" looks like; what the terminal last said
           // is one ⌥↩ away.
-          className="text-ink min-w-0 flex-1 bg-transparent outline-none"
+          className="text-ink min-w-0 flex-1 bg-transparent"
         />
 
         {!open && (

@@ -94,7 +94,7 @@ export function Toolbar({
           onChange={(event) => onGlobChange?.(event.target.value)}
           placeholder="*.log"
           aria-label="Filter by glob"
-          className="text-ink-soft placeholder:text-ink-faint caret-brand min-w-0 flex-1 bg-transparent font-mono text-xs outline-none"
+          className="text-ink-soft placeholder:text-ink-faint caret-brand min-w-0 flex-1 bg-transparent font-mono text-xs"
         />
         {globMatches !== null && (
           <span className="text-ink-dim font-mono text-2xs whitespace-nowrap">

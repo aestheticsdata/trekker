@@ -310,7 +310,7 @@ export function HostForm({
                         ? "/run/user/1000/keyring/ssh"
                         : ""
                   }
-                  className="bg-chrome border-line-strong text-ink-soft placeholder:text-ink-faint focus:border-accent-soft caret-brand w-full resize-none rounded-xs border px-2 py-1 font-mono text-xs outline-none"
+                  className="bg-chrome border-line-strong text-ink-soft placeholder:text-ink-faint focus:border-accent-soft caret-brand w-full resize-none rounded-xs border px-2 py-1 font-mono text-xs"
                 />
               </div>
             </Field>

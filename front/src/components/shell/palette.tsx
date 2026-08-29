@@ -355,7 +355,7 @@ export function Palette({
                   setChosen({ run: () => onShell(query) });
                   close();
                 }}
-                className={`${PALETTE_INPUT_INK} placeholder:text-ink-faint caret-brand min-w-0 flex-1 bg-transparent font-mono text-base/none outline-none`}
+                className={`${PALETTE_INPUT_INK} placeholder:text-ink-faint caret-brand min-w-0 flex-1 bg-transparent font-mono text-base/none`}
               />
               <span className={`${PALETTE_QUIET_INK} flex-none font-mono text-caption/none`}>
                 {rows.length}/{entries.length}

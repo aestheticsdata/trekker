@@ -313,7 +313,7 @@ export function ContextMenu({ point, label, rows, onChoose, onClose }: ContextMe
       style={
         box ? { left: box.left, top: box.top, maxHeight: box.maxHeight } : { left: 0, top: 0, visibility: "hidden" }
       }
-      className={`bg-strip border-line-strong animate-panel-in fixed z-70 overflow-y-auto border py-1 shadow-xl outline-none ${WIDTH}`}
+      className={`bg-strip border-line-strong animate-panel-in fixed z-70 overflow-y-auto border py-1 shadow-xl ${WIDTH}`}
     >
       {/* What the menu is about, which is also what it is called. Truncated
           rather than wrapped: a menu that changes height with the length of a

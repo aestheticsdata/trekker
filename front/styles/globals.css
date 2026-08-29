@@ -644,6 +644,30 @@ body {
       border-color 100ms ease-out,
       color 100ms ease-out;
   }
+
+  /*
+   * And no control shows the browser's own focus ring.
+   *
+   * A third rule here for the reason the first two are here: this one was
+   * being removed an element at a time. Eight `outline-none` utilities across
+   * eight files before this rule (TRE-122), each written by whoever hit the
+   * ring on the element in front of them, and none of them visible to the next
+   * component added — so what ended up covered was arbitrary. The fields and
+   * the prompt had it; the scrollback the prompt sits under did not, nor the
+   * tail body beside it, nor any of the hundred-odd buttons.
+   *
+   * Nothing goes in its place. The border, hover and pressed states already
+   * say where a control is (TRE-78), and a second indicator drawn over them
+   * was judged redundant rather than missing when the account chip's ring came
+   * off (TRE-118).
+   *
+   * `:focus-visible` rather than `:focus`, because it is the ring's own
+   * selector: a text field matches it whenever it is focused, so the inputs are
+   * covered without touching a state that draws nothing anyway.
+   */
+  :focus-visible {
+    outline: none;
+  }
 }
 
 /*

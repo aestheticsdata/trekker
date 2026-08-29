@@ -83,7 +83,7 @@ export function AuthField({
           disabled={disabled}
           aria-invalid={error !== undefined}
           aria-describedby={error ? `${id}-error` : undefined}
-          className={`bg-chrome text-ink placeholder:text-ink-faint focus:border-accent-soft w-full rounded-xs border px-2.5 py-1.5 font-mono text-base outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+          className={`bg-chrome text-ink placeholder:text-ink-faint focus:border-accent-soft w-full rounded-xs border px-2.5 py-1.5 font-mono text-base disabled:cursor-not-allowed disabled:opacity-50 ${
             error ? "border-danger-mid" : "border-line-strong"
           } ${secret ? "pr-14" : ""}`}
         />

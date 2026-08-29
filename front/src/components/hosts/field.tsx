@@ -48,7 +48,7 @@ export function Field({
 }
 
 export const INPUT_CLASS =
-  "bg-chrome border-line-strong text-ink-soft placeholder:text-ink-faint focus:border-accent-soft caret-brand w-full rounded-xs border px-2 py-1 font-mono text-xs outline-none disabled:opacity-50";
+  "bg-chrome border-line-strong text-ink-soft placeholder:text-ink-faint focus:border-accent-soft caret-brand w-full rounded-xs border px-2 py-1 font-mono text-xs disabled:opacity-50";
 
 export function TextInput({ invalid, ...props }: InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) {
   return (
