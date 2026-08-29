@@ -826,7 +826,7 @@ const ROOMS: readonly Room[] = [
   },
   {
     file: "components/ui/toast.tsx",
-    boxes: [{ on: [RAISED], inks: ["danger-soft", "ink-dim", "ink-soft", "success", "warning"] }],
+    boxes: [{ on: [RAISED], inks: ["danger-soft", "ink", "ink-dim", "ink-muted", "ink-soft", "success", "warning"] }],
   },
   {
     file: "components/ui/transfers.tsx",
