@@ -653,24 +653,30 @@ function formatUptime(seconds: number): string {
 }
 
 /**
- * "9.4/32" — what is in use over what the machine has, in GiB, written as mockup
- * 2a writes it. No unit on either half: the pair is the unit, and the second
- * number is what makes the first mean anything.
+ * "10/34" — what is in use over what the machine has, in GB, in the shape
+ * mockup 2a writes it. No unit on either half: the pair is the unit, and the
+ * second number is what makes the first mean anything.
+ *
+ * Gigabytes of a thousand million bytes, like every other figure in the app
+ * (TRE-133). The pair used to be gibibytes, so the machine the vendor sold as
+ * 32 GB read `32` here and now reads `34` — the same memory, under the name the
+ * rest of the strip uses. `/proc/meminfo` writes `kB` and means KiB, which is
+ * what the multiplication below is for: it converts, it does not relabel.
  */
 function formatMemory({ totalKb, availableKb }: { totalKb: number; availableKb: number }): string {
   if (totalKb <= 0) return "—";
-  const total = totalKb / 1_048_576;
-  const used = (totalKb - availableKb) / 1_048_576;
-  // A decimal on the total only where rounding would take it away: a 512 MiB
+  const total = (totalKb * 1024) / 1_000_000_000;
+  const used = ((totalKb - availableKb) * 1024) / 1_000_000_000;
+  // A decimal on the total only where rounding would take it away: a half-gig
   // container reading "0.3/0.5" is honest, "0.3/1" is generous and "0.3/0" is
   // neither.
   return `${used.toFixed(1)}/${total >= 10 ? Math.round(total) : total.toFixed(1)}`;
 }
 
-/** The file table's own ladder (`formatSize`), per second. */
+/** The file table's own ladder (`formatSize`), per second — and in tens, as it is. */
 function formatThroughput(bytesPerSec: number): string {
-  if (bytesPerSec >= 1_073_741_824) return `${(bytesPerSec / 1_073_741_824).toFixed(1)} GB/s`;
-  if (bytesPerSec >= 1_048_576) return `${Math.round(bytesPerSec / 1_048_576)} MB/s`;
-  if (bytesPerSec >= 1024) return `${Math.round(bytesPerSec / 1024)} kB/s`;
+  if (bytesPerSec >= 1_000_000_000) return `${(bytesPerSec / 1_000_000_000).toFixed(1)} GB/s`;
+  if (bytesPerSec >= 1_000_000) return `${Math.round(bytesPerSec / 1_000_000)} MB/s`;
+  if (bytesPerSec >= 1000) return `${Math.round(bytesPerSec / 1000)} kB/s`;
   return `${Math.round(bytesPerSec)} B/s`;
 }

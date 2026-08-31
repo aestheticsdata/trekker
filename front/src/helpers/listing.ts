@@ -15,6 +15,12 @@ import type { FileRow, RowType } from "@lib/api/fs";
 /**
  * The mockup's ladder: two decimals from a GB up, one below, bytes exact.
  *
+ * Powers of ten, because the labels are `kB` and `MB` (TRE-133). The division
+ * used to be by 1024 under those same names, which left every figure in the app
+ * smaller than its own unit claimed and put totals in bands a decimal ladder
+ * cannot reach — `1022 MB`, four characters wide and a gigabyte in all but
+ * name. Kibibytes are a real unit with real labels, and these are not them.
+ *
  * `null` is a size nobody knows — a directory whose `du` has not answered yet,
  * or was refused (TRE-107) — and prints as the same dash a symlink gets. The
  * pane draws a spinner over the pending case instead of calling this; every
@@ -23,10 +29,10 @@ import type { FileRow, RowType } from "@lib/api/fs";
  */
 export function formatSize(bytes: number | null, type: RowType): string {
   if (type === "link" || bytes === null) return "—";
-  if (bytes >= 1_099_511_627_776) return `${decimals(bytes / 1_099_511_627_776, 2)} TB`;
-  if (bytes >= 1_073_741_824) return `${decimals(bytes / 1_073_741_824, 2)} GB`;
-  if (bytes >= 1_048_576) return `${decimals(bytes / 1_048_576, 1)} MB`;
-  if (bytes >= 1024) return `${decimals(bytes / 1024, 1)} kB`;
+  if (bytes >= 1_000_000_000_000) return `${decimals(bytes / 1_000_000_000_000, 2)} TB`;
+  if (bytes >= 1_000_000_000) return `${decimals(bytes / 1_000_000_000, 2)} GB`;
+  if (bytes >= 1_000_000) return `${decimals(bytes / 1_000_000, 1)} MB`;
+  if (bytes >= 1000) return `${decimals(bytes / 1000, 1)} kB`;
   return `${Math.round(bytes)} B`;
 }
 
@@ -45,13 +51,18 @@ export function formatSize(bytes: number | null, type: RowType): string {
  * decide. So precision is given up from the right, one place at a time, and
  * only once the integer part has grown enough to need the room:
  *
- *   4.0 kB   28.55 GB   992.0 kB   127.1 MB   411.6 GB   1023 kB
+ *   4.0 kB   28.55 GB   992.0 kB   127.1 MB   411.6 GB   1000 kB
+ *
+ * The last of those is the only way a decimal rung reaches four integer digits:
+ * from 999_950 bytes up, 999.95 kB and over rounds to a `1000.0` the column
+ * cannot hold. Those fifty bytes give up their decimals rather than their rung
+ * — a hair under a megabyte, still counted in kilobytes, honest about both.
  *
  * Every value the mockup does show keeps exactly the shape it has there.
  */
 function decimals(value: number, places: number): string {
-  if (value >= 1000) return value.toFixed(0);
-  return value.toFixed(value >= 100 ? Math.min(places, 1) : places);
+  const shown = value.toFixed(value >= 100 ? Math.min(places, 1) : places);
+  return Number(shown) >= 1000 ? value.toFixed(0) : shown;
 }
 
 /** Bytes for the pane footer, where a directory total has no type to speak of. */
