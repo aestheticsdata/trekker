@@ -38,9 +38,15 @@ export interface PreviewImage {
   url: string | null;
   /** Replaces the caption when the refusal is worth naming. */
   note: string | null;
+  /**
+   * True from the request leaving until its answer lands (TRE-139) — never
+   * during the settle, which is the not-asking-yet state, and never for a
+   * cache recall, which costs nothing to show.
+   */
+  loading: boolean;
 }
 
-const NOTHING: PreviewImage = { url: null, note: null };
+const NOTHING: PreviewImage = { url: null, note: null, loading: false };
 
 /**
  * What a refusal says in the box. Both figures of the pair carry units, and a
@@ -67,7 +73,7 @@ export function usePreviewImage(hostId: string, path: string, row: FileRow): Pre
 
     const cached = recallPreview(key);
     if (cached !== null) {
-      setState({ key, url: cached, note: null });
+      setState({ key, url: cached, note: null, loading: false });
       return;
     }
 
@@ -75,7 +81,19 @@ export function usePreviewImage(hostId: string, path: string, row: FileRow): Pre
     let timeout: ReturnType<typeof setTimeout> | undefined;
 
     const settle = setTimeout(() => {
-      timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      // The timeout writes the stub state itself, because nothing after it
+      // will: the fetch rejects with the abort, and the catch below rightly
+      // ignores aborts. Safe to write here — cleanup clears this timer, so it
+      // only ever fires while the effect is live and the key is current. A
+      // dead host thereby degrades to the caption, not to a ring that spins
+      // until the selection moves.
+      timeout = setTimeout(() => {
+        controller.abort();
+        setState({ key, url: null, note: null, loading: false });
+      }, TIMEOUT_MS);
+
+      // The wait becomes a state the box can draw.
+      setState({ key, url: null, note: null, loading: true });
 
       fetchPreview(hostId, path, mime, controller.signal)
         .then((result) => {
@@ -83,15 +101,15 @@ export function usePreviewImage(hostId: string, path: string, row: FileRow): Pre
           if (result.kind === "image") {
             const url = URL.createObjectURL(result.blob);
             rememberPreview(key, url, result.blob.size);
-            setState({ key, url, note: null });
+            setState({ key, url, note: null, loading: false });
             return;
           }
-          setState({ key, url: null, note: refusalNote(result) });
+          setState({ key, url: null, note: refusalNote(result), loading: false });
         })
         .catch(() => {
-          // An abort lands here too, and is not a result: the effect that
-          // aborted has already cleaned up, and this closure's key is stale.
-          if (!controller.signal.aborted) setState({ key, url: null, note: null });
+          // An abort lands here too, and is not a result: whoever aborted has
+          // already written the state that abort means.
+          if (!controller.signal.aborted) setState({ key, url: null, note: null, loading: false });
         })
         .finally(() => clearTimeout(timeout));
     }, SETTLE_MS);
@@ -100,6 +118,13 @@ export function usePreviewImage(hostId: string, path: string, row: FileRow): Pre
       clearTimeout(settle);
       clearTimeout(timeout);
       controller.abort();
+      // The abort strands the loading record — both fetch branches ignore an
+      // aborted signal — and a revisited row has the *same* key, so the render
+      // guard would replay it: a ring during the settle, and a fade delay
+      // counted from the wrong mount. Cleared here, and only it: the
+      // functional form returns settled records and other keys by reference,
+      // so every ordinary unmount is a no-op bail-out.
+      setState((prev) => (prev !== null && prev.key === key && prev.loading ? null : prev));
     };
   }, [key, mime, hostId, path]);
 

@@ -445,6 +445,16 @@
    */
   --animate-measuring: measuring 0.8s linear infinite;
   /*
+   * The measuring ring arriving in the preview box (TRE-139). The 0.3s delay
+   * is the design: the element sits at opacity 0 until it elapses, so a load
+   * faster than the grace period never shows a ring at all — a spinner that
+   * flashes for a tenth of a second is worse than none. `forwards` holds it
+   * visible once earned. The reduced-motion rule below collapses the fade's
+   * duration but not its delay, so the ring simply appears, static, at the
+   * same moment.
+   */
+  --animate-preview-in: preview-in 0.15s ease-out 0.3s forwards;
+  /*
    * The collapsed prompt's stand-in caret (TRE-115). `step-end` because a
    * caret does not fade — it is lit, and then it is not, half of each second,
    * which is the cadence the field's real caret blinks at. The
@@ -769,6 +779,14 @@ body {
 @keyframes measuring {
   to {
     transform: rotate(1turn);
+  }
+}
+
+/* One frame, from wherever the element's own opacity starts — the token's
+ * delay does the actual work. See `--animate-preview-in`. */
+@keyframes preview-in {
+  to {
+    opacity: 1;
   }
 }
 

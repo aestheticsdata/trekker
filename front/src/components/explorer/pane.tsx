@@ -4,6 +4,7 @@ import { FileMark } from "@components/explorer/file-mark";
 import { canCloseTabs, cursorWindowIndex, PARENT_NAME, pathOf } from "@components/explorer/pane-state";
 import { useRowWindow } from "@components/explorer/row-window";
 import { TailStrip } from "@components/explorer/tail-strip";
+import { MeasuringRing } from "@components/ui/measuring-ring";
 import { ScrollThumbRail, useScrollThumbs } from "@components/ui/scroll-thumbs";
 import { Tooltip } from "@components/ui/tooltip";
 import { gridOf, HIDEABLE, parseHidden } from "@helpers/columns";
@@ -1157,54 +1158,6 @@ const REFUSALS: Record<string, string> = {
   ENOSYS: "This host cannot run a command, so its directories cannot be measured.",
   EIO: "This directory could not be measured.",
 };
-
-/**
- * A directory being measured (TRE-110).
- *
- * Drawn rather than typed, and that is the point of it. The first attempt
- * animated a character — a dash through `- \ | /`, advanced by an interval the
- * pane owned — which failed twice over. It collided with the two dashes this
- * column already prints, for a symlink and for a size nobody knows; and it
- * re-rendered the pane eight times a second to move one glyph, on a table whose
- * whole design is about not re-rendering rows.
- *
- * A ring costs neither. It is not a character, so it cannot be misread as one,
- * and the rotation is a compositor transform: forty of these turning is no
- * main-thread work at all.
- *
- * `currentColor`, so the wrapper's ink governs it and the muted tone applies
- * without this knowing what muted means. `aria-hidden`, because the cell it
- * sits in already says "Measuring…".
- */
-function MeasuringRing() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      aria-hidden="true"
-      className="size-2.5 animate-measuring"
-    >
-      {/* The track, faint: without it a lone arc reads as a fragment rather
-          than as something going round. */}
-      <circle
-        cx="8"
-        cy="8"
-        r="6"
-        fill="none"
-        stroke="currentColor"
-        strokeOpacity="0.3"
-        strokeWidth="2"
-      />
-      {/* A quarter turn of it, solid — the part that is visibly moving. */}
-      <path
-        d="M8 2a6 6 0 0 1 6 6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 /** Eleven staggered rows, as the mockup does — a listing arriving, not a spinner. */
 function Skeleton({ hidden, grid }: { hidden: ReadonlySet<Column>; grid: React.CSSProperties }) {

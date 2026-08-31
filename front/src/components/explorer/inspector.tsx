@@ -2,6 +2,7 @@
 
 import { useAuth } from "@auth/context/AuthContext";
 import { usePreviewImage } from "@components/explorer/use-preview-image";
+import { MeasuringRing } from "@components/ui/measuring-ring";
 import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import {
@@ -326,7 +327,12 @@ function EntryPanel({
   return (
     <>
       <Scroller>
-        <Preview image={preview.url}>{preview.note ?? previewCaption(entry, items)}</Preview>
+        <Preview
+          image={preview.url}
+          loading={preview.loading}
+        >
+          {preview.note ?? previewCaption(entry, items)}
+        </Preview>
         <Name>{entry.name}</Name>
 
         <Stats
@@ -707,8 +713,23 @@ function Notice({ children }: { children: ReactNode }) {
  * this feature's whole error state — a blank rectangle or a broken-image
  * glyph would read as a preview that failed, which is a worse answer than the
  * caption saying what the file is.
+ *
+ * A fetch in flight shows the measuring ring instead (TRE-139) — the pane's
+ * own, saying the same thing it says in the size column: being fetched, no
+ * answer yet. It rides `animate-preview-in`, whose 0.3s delay means a load
+ * faster than the grace period never flashes it; the wrapper carries that
+ * fade because the svg's own class already spends the one `animation`
+ * property on rotating.
  */
-function Preview({ image, children }: { image?: string | null; children: ReactNode }) {
+function Preview({
+  image,
+  loading = false,
+  children,
+}: {
+  image?: string | null;
+  loading?: boolean;
+  children: ReactNode;
+}) {
   // Bytes the browser cannot decode — a mistyped extension, a .png that is
   // secretly markup — report here and fall back to the caption. Keyed by URL,
   // so one bad file does not condemn the next selection.
@@ -735,6 +756,10 @@ function Preview({ image, children }: { image?: string | null; children: ReactNo
           className="absolute inset-0 h-full w-full object-contain"
           onError={() => setBroken(image)}
         />
+      ) : loading ? (
+        <span className="animate-preview-in opacity-0">
+          <MeasuringRing className="size-4" />
+        </span>
       ) : (
         children
       )}
