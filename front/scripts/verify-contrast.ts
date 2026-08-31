@@ -630,7 +630,15 @@ const ROOMS: readonly Room[] = [
   {
     file: "components/explorer/pane.tsx",
     boxes: [
-      { on: [LINE], inks: ["brand", "ink", "ink-dim", "ink-muted"], note: "the tab strip, which is the one dark box in a light pane" },
+      {
+        on: [LINE],
+        inks: ["brand", "danger-soft", "ink", "ink-dim", "ink-muted"],
+        // `danger-soft` is the × on a *background* handle (TRE-130). The one on
+        // the open handle is `danger`, in the pane box below, and the split is
+        // the point: the open tab is a light pane and the rest of the strip is
+        // this dark box, so the control has two reds because it has two rooms.
+        note: "the tab strip, which is the one dark box in a light pane",
+      },
       { on: ["bg-on-pane-muted"], inks: ["ink"], note: "the badge that says a mount is nearly full" },
       {
         on: ["bg-pane", "bg-pane-active"],

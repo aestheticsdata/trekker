@@ -1,7 +1,7 @@
 "use client";
 
 import { FileMark } from "@components/explorer/file-mark";
-import { cursorWindowIndex, PARENT_NAME, pathOf } from "@components/explorer/pane-state";
+import { canCloseTabs, cursorWindowIndex, PARENT_NAME, pathOf } from "@components/explorer/pane-state";
 import { useRowWindow } from "@components/explorer/row-window";
 import { TailStrip } from "@components/explorer/tail-strip";
 import { ScrollThumbRail, useScrollThumbs } from "@components/ui/scroll-thumbs";
@@ -73,6 +73,17 @@ export interface PaneCallbacks {
   onOpen: (row: FileRow) => void;
   onNewTab: () => void;
   onSelectTab: (tab: number) => void;
+  /** The × on a handle (TRE-130). The index, because tabs are positional. */
+  onCloseTab: (tab: number) => void;
+  /**
+   * A right-click on a tab handle (TRE-130).
+   *
+   * Separate from `onContextMenu` for the reason `onColumnMenu` is separate:
+   * that one is about a row or a directory and carries a selection with it,
+   * this one is about a handle in the strip. Folding the two together is how a
+   * right-click aimed at a tab ends up offering to paste into a folder.
+   */
+  onTabMenu: (point: Point, tab: number) => void;
   onSort: (key: SortKey) => void;
   onRowClick: (name: string, modifiers: { extend: boolean; toggle: boolean }) => void;
   onHostMenu: () => void;
@@ -517,36 +528,107 @@ function TabStrip({
   callbacks: PaneCallbacks;
   onMenu: (event: React.MouseEvent) => void;
 }) {
+  /**
+   * A right-click in the strip, routed by what it landed on (TRE-130).
+   *
+   * On a handle it is about that tab, and the pane's own menu — `new directory`,
+   * `paste`, `upload here` — has nothing to say about one. Anywhere else it is
+   * the directory menu the strip has always opened, which is what TRE-70 §1
+   * documented and what a right-click on empty furniture should still offer.
+   */
+  const openTabMenu = (event: React.MouseEvent) => {
+    const handle = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-tab]")?.dataset.tab;
+    if (handle === undefined) {
+      onMenu(event);
+      return;
+    }
+    event.preventDefault();
+    callbacks.onTabMenu({ x: event.clientX, y: event.clientY }, Number(handle));
+  };
+
+  /**
+   * Whether the handles carry a ×.
+   *
+   * Absent rather than refused on a lone tab, which is the one case in this app
+   * where that is the honest treatment: a control that explains why it cannot
+   * act (TRE-76) is for a gesture that makes sense and is unavailable, and
+   * "close the only tab" is a gesture that does not. The menu row still says it,
+   * because a menu is read rather than aimed, and `canCloseTabs` is the one
+   * predicate both of them ask.
+   */
+  const closeable = canCloseTabs(pane);
+
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: see the listing's own note — the keyboard route is in the explorer
     <div
-      onContextMenu={onMenu}
+      onContextMenu={openTabMenu}
       className="bg-line flex h-tabstrip flex-none @container"
     >
       {pane.tabs.map((tabPath, index) => {
         const current = index === pane.tab;
         const label = tabPath === "/" ? "/" : (tabPath.split("/").filter(Boolean).pop() ?? "/");
         return (
-          <button
+          <div
             // Tabs are positional and two may share a path, so the index is the identity.
             // biome-ignore lint/suspicious/noArrayIndexKey: tab identity is its position
             key={index}
-            type="button"
-            onClick={() => callbacks.onSelectTab(index)}
-            aria-current={current ? "page" : undefined}
-            className={`flex flex-none items-center gap-1.5 px-2.5 font-mono text-2xs whitespace-nowrap ${
+            data-tab={index}
+            className={`group flex flex-none items-stretch font-mono text-2xs whitespace-nowrap ${
               current
                 ? `${active ? "bg-pane-active" : "bg-pane"} text-on-pane font-medium`
                 : "text-ink-muted hover:text-ink"
             }`}
           >
-            <span
-              aria-hidden
-              className="size-1.25 rounded-full"
-              style={{ backgroundColor: current && host ? host.colour : "var(--color-ink-faint)" }}
-            />
-            {label}
-          </button>
+            <button
+              type="button"
+              onClick={() => callbacks.onSelectTab(index)}
+              aria-current={current ? "page" : undefined}
+              className={`flex items-center gap-1.5 ${closeable ? "pr-1 pl-2.5" : "px-2.5"}`}
+            >
+              <span
+                aria-hidden
+                className="size-1.25 rounded-full"
+                style={{ backgroundColor: current && host ? host.colour : "var(--color-ink-faint)" }}
+              />
+              {label}
+            </button>
+
+            {/* Standing on the open tab and revealed on the others, which is
+                where every tabbed thing this app is shaped after puts it: the
+                one you are looking at says how to leave it, and the rest do not
+                spend eight pixels of a dense strip saying so at once. It keeps
+                its width either way, so nothing moves as the pointer crosses. */}
+            {closeable && (
+              <Tooltip content="Close tab">
+                <button
+                  type="button"
+                  onClick={() => callbacks.onCloseTab(index)}
+                  aria-label={`Close tab ${tabPath}`}
+                  // Two grounds, so two reds. The open tab is a light pane and
+                  // the rest are the dark strip, which is the one place in this
+                  // app where a single ink cannot serve both sides of a
+                  // control: `danger-soft` is 2a's red *for dark boxes* and
+                  // measures nothing like AA on `pane`. `verify:contrast` knows
+                  // both boxes, and refused the first draft of this line.
+                  className={`flex items-center pr-2.25 pl-1 ${
+                    current
+                      ? "hover:text-danger"
+                      : // `pointer-events-none` while it is invisible, and not merely
+                        // faded out. Eight transparent pixels at the right-hand
+                        // edge of every background handle is eight pixels where
+                        // clicking a tab to *open* it closes it instead — the
+                        // worst possible outcome of a mis-aim, and one nothing
+                        // on screen would explain. The pointer brings it back
+                        // along with the opacity; the keyboard never lost it,
+                        // since focus does not hit-test.
+                        "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:opacity-100 hover:text-danger-soft"
+                  }`}
+                >
+                  ✕
+                </button>
+              </Tooltip>
+            )}
+          </div>
         );
       })}
 

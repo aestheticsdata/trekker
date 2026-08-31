@@ -96,6 +96,17 @@ export type ExplorerAction =
   | { type: "stacks"; pane: PaneIndex; path: string; hist: string[]; fwd: string[] }
   | { type: "newTab"; pane: PaneIndex; path: string }
   | { type: "selectTab"; pane: PaneIndex; tab: number }
+  /**
+   * Shutting one tab, and shutting all the others (TRE-130).
+   *
+   * `tab` is the handle the gesture was aimed at, which is not necessarily the
+   * open one — the × on a background tab closes that tab and leaves the pane
+   * exactly where it is. Neither may empty the strip: a pane with no tabs has
+   * nowhere to be, and that rule lives here rather than in the two surfaces
+   * that offer the gesture, which is what stops them from disagreeing about it.
+   */
+  | { type: "closeTab"; pane: PaneIndex; tab: number }
+  | { type: "closeOtherTabs"; pane: PaneIndex; tab: number }
   /** A click on a row, carrying the modifiers and the order they were seen in. */
   | { type: "click"; pane: PaneIndex; name: string; names: readonly string[]; extend: boolean; toggle: boolean }
   | { type: "move"; pane: PaneIndex; delta: number; names: readonly string[] }
@@ -160,6 +171,18 @@ export function explorerReducer(state: ExplorerState, action: ExplorerAction): E
   }
 }
 
+/**
+ * Whether a close aimed at `tab` is a close that may happen (TRE-130).
+ *
+ * One predicate for both actions and for the two surfaces that offer them, so
+ * the strip, the menu and the reducer cannot come to different conclusions
+ * about the same handle. The last tab never closes — a pane with no tabs has no
+ * path, and `tabs[tab]` is what half this module reads.
+ */
+function closable(pane: PaneMemory, tab: number): boolean {
+  return pane.tabs.length > 1 && tab >= 0 && tab < pane.tabs.length;
+}
+
 function paneReducer(pane: PaneMemory, action: PaneAction): PaneMemory {
   switch (action.type) {
     case "navigate":
@@ -178,6 +201,33 @@ function paneReducer(pane: PaneMemory, action: PaneAction): PaneMemory {
       return action.tab === pane.tab || action.tab >= pane.tabs.length
         ? pane
         : { ...pane, tab: action.tab, sel: [], cur: null };
+
+    case "closeTab": {
+      if (!closable(pane, action.tab)) return pane;
+
+      const tabs = pane.tabs.filter((_, index) => index !== action.tab);
+      // Closing the open tab lands on its neighbour to the right, or on the new
+      // last tab when the right-hand end is what closed — which is what every
+      // tabbed thing this app is shaped after does. Closing any other tab
+      // leaves the open one open, one place to the left if it was to the right.
+      const tab = action.tab < pane.tab ? pane.tab - 1 : Math.min(pane.tab, tabs.length - 1);
+
+      // The selection and the cursor go only when the pane has actually moved.
+      // They name rows in a directory nobody is looking at any more — but
+      // closing a *background* tab changes nothing on screen, and a fifty-entry
+      // selection lost to tidying up the strip would be a gesture nobody makes
+      // twice.
+      return action.tab === pane.tab ? { ...pane, tabs, tab, sel: [], cur: null } : { ...pane, tabs, tab };
+    }
+
+    case "closeOtherTabs": {
+      if (!closable(pane, action.tab)) return pane;
+      // Same rule, read the other way: the pane moves unless the tab that
+      // survives is the one it was already on.
+      return action.tab === pane.tab
+        ? { ...pane, tabs: [pane.tabs[action.tab]], tab: 0 }
+        : { ...pane, tabs: [pane.tabs[action.tab]], tab: 0, sel: [], cur: null };
+    }
 
     case "click": {
       // `..` is a row the cursor can stand on and never one the selection can
@@ -303,6 +353,36 @@ export function forwardTarget(pane: PaneView): { path: string; hist: string[]; f
   if (fwd.length === 0) return null;
   const path = fwd.shift() as string;
   return { path, hist: [...pane.hist, pane.path], fwd };
+}
+
+/**
+ * Where closing a tab leaves the pane, or null when it leaves it where it is
+ * (TRE-130).
+ *
+ * Pure and exported for `backTarget`'s reason: the URL owns the path, so the
+ * caller has to know the destination *before* dispatching in order to write the
+ * same value the reducer is about to record. Null covers both of the cases with
+ * nothing to write — a lone tab, which never closes, and a background tab,
+ * whose closing the open one does not feel.
+ */
+export function closeTabTarget(pane: PaneView, tab: number): string | null {
+  if (!closable(pane, tab) || tab !== pane.tab) return null;
+  const tabs = pane.tabs.filter((_, index) => index !== tab);
+  return tabs[Math.min(tab, tabs.length - 1)];
+}
+
+/**
+ * The same question for "close the others": the surviving tab's path, or null
+ * when it is the one the pane is already on.
+ */
+export function closeOtherTabsTarget(pane: PaneView, tab: number): string | null {
+  if (!closable(pane, tab) || tab === pane.tab) return null;
+  return pane.tabs[tab];
+}
+
+/** Whether the strip has anything to close, which is what both menu rows ask. */
+export function canCloseTabs(pane: PaneView): boolean {
+  return pane.tabs.length > 1;
 }
 
 /** Where "up" goes, or null at the root. */

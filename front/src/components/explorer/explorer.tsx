@@ -8,6 +8,9 @@ import { Inspector } from "@components/explorer/inspector";
 import { Pane } from "@components/explorer/pane";
 import {
   backTarget,
+  canCloseTabs,
+  closeOtherTabsTarget,
+  closeTabTarget,
   explorerReducer,
   forwardTarget,
   initialState,
@@ -48,7 +51,7 @@ import { useHashJob } from "@lib/query/use-hash-job";
 import { useSignedLink } from "@lib/query/use-signed-link";
 import { warmDirectory } from "@lib/query/warm-directory";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 
 import type { CompareCopy, CompareTarget } from "@components/explorer/compare-modal";
 import type { CreateMode, CreateTarget } from "@components/explorer/create-modal";
@@ -142,6 +145,30 @@ function columnRows(hide: string): readonly MenuRow[] {
   }));
 
   return hidden.size === 0 ? columns : [...columns, { rule: true }, { id: "columns:all", label: "show every column" }];
+}
+
+/**
+ * The tab menu's rows (TRE-130), for whichever handle was right-clicked.
+ *
+ * Short on purpose. A tab is a place a pane is standing, and the only things
+ * there are to say about one are open another, shut this, shut the rest —
+ * everything else a pane does is about the directory, and that menu is one
+ * right-click away on the same strip.
+ *
+ * The two closes carry a sentence rather than disappearing when the strip is
+ * down to one tab. The × takes the other treatment and is simply absent, which
+ * is the difference between a control you aim and a list you read: a menu whose
+ * rows come and go is one you have to open twice to learn, and this is the only
+ * place the rule "a pane keeps a tab" is ever stated to anybody.
+ */
+function tabRows(pane: PaneView): readonly MenuRow[] {
+  const lone = canCloseTabs(pane) ? undefined : "A pane always keeps one tab.";
+  return [
+    { id: "tabs:new", label: "new tab" },
+    { rule: true },
+    { id: "tabs:close", label: "close tab", unavailableReason: lone },
+    { id: "tabs:closeOthers", label: "close other tabs", unavailableReason: lone },
+  ];
 }
 
 /** One pane's share of the URL. */
@@ -420,6 +447,15 @@ export function Explorer({
    */
   const [columnMenu, setColumnMenu] = useState<{ pane: PaneIndex; point: Point } | null>(null);
   /**
+   * The tab menu, and which handle it was opened on (TRE-130).
+   *
+   * Its own slot beside `columnMenu` for that one's reason. `menu` above is
+   * about a row or a directory and carries a selection with it; this is about
+   * one handle in one strip, and it is the index that matters — a right-click
+   * on a background tab is aimed at *that* tab, not at the pane's current one.
+   */
+  const [tabMenu, setTabMenu] = useState<{ pane: PaneIndex; point: Point; tab: number } | null>(null);
+  /**
    * The two dialogues the terminal opens, each in its own slot (TRE-35 §1).
    *
    * Not `permissionsOpen`/`deleteOpen`, which are booleans whose target is
@@ -452,6 +488,46 @@ export function Explorer({
       hide: panes[1].hide,
     },
   ];
+
+  /**
+   * The URL moved and the reducer was not told (TRE-131).
+   *
+   * `go` issues both writes together, so every navigation *inside* the explorer
+   * keeps `tabs[tab]` equal to the query string. Several callers are not inside
+   * it and cannot be: the sidebar's volumes and favourites rails, the disk-usage
+   * treemap, session restore, the effect that seeds a pane's default host, and
+   * the browser's own Back — `path` is the one parameter carrying
+   * `history: "push"`. All of those write the URL and stop there, and what was
+   * left behind was a tab still labelled with the directory the pane had left,
+   * a `selectTab` that sent the pane somewhere it had not been since, and a
+   * back stack whose top was the wrong entry.
+   *
+   * The guard is the whole of the correctness here, and it is not "they
+   * disagree". They disagree for one render every time `go` runs, because a
+   * dispatch is urgent and nuqs writes in a transition — and a sync that fired
+   * then would drag the pane *backwards*, clearing the selection and the cursor
+   * and taking `reveal`'s freshly created entry with it. So the question asked
+   * is "did the URL move", answered against what was last seen rather than
+   * against the reducer, and null means "not yet looked at" so a link opened
+   * cold is reconciled on the first pass.
+   *
+   * `history: false`, and the browser's Back settles it: this cannot tell a
+   * navigation from a restore, a rebind or a history entry being replayed, and
+   * pushing there would make the pane's own ← undo the browser's ← by going
+   * forward. The stack stays honest either way — `tabs[tab]` is correct again
+   * by the next render, so the *next* navigation pushes the right entry.
+   */
+  const seenUrlPath = useRef<[string | null, string | null]>([null, null]);
+  useEffect(() => {
+    for (const index of [0, 1] as const) {
+      const path = panes[index].path;
+      if (path === seenUrlPath.current[index]) continue;
+      seenUrlPath.current[index] = path;
+
+      const pane = memory.panes[index];
+      if (pane.tabs[pane.tab] !== path) dispatch({ type: "navigate", pane: index, path, history: false });
+    }
+  }, [panes, memory]);
 
   /** What `⌘X` or `⌘C` is holding (TRE-71 §1), or null for nothing. */
   const clip = memory.clip;
@@ -1377,6 +1453,27 @@ export function Explorer({
     onPaneChange(index, { path });
   };
 
+  /**
+   * Shutting a tab, and shutting all but one (TRE-130).
+   *
+   * Beside `go` and shaped like it: the destination is resolved *before* the
+   * dispatch, from the pure pair in `pane-state.ts`, so the reducer's memory and
+   * the URL are written with the same value and cannot disagree. Null is the
+   * ordinary answer rather than the exceptional one — closing a background tab
+   * changes the strip and moves nothing, and there is no path to write for it.
+   */
+  const closeTab = (index: PaneIndex, tab: number) => {
+    const path = closeTabTarget(views[index], tab);
+    dispatch({ type: "closeTab", pane: index, tab });
+    if (path !== null) onPaneChange(index, { path });
+  };
+
+  const closeOtherTabs = (index: PaneIndex, tab: number) => {
+    const path = closeOtherTabsTarget(views[index], tab);
+    dispatch({ type: "closeOtherTabs", pane: index, tab });
+    if (path !== null) onPaneChange(index, { path });
+  };
+
   /** The machine the active pane is on, or null while nothing is bound to it. */
   const activeHost = hosts.find((host) => host.id === activePane.hostId) ?? null;
 
@@ -2030,6 +2127,14 @@ export function Explorer({
         dispatch({ type: "selectTab", pane: index, tab });
         onPaneChange(index, { path });
       },
+      onCloseTab: (tab) => closeTab(index, tab),
+      onTabMenu: (point, tab) => {
+        // Activated first, like the row and column menus above and for their
+        // reason: a menu standing over one pane while the toolbar and the
+        // status bar describe the other is three things saying two.
+        onActiveChange(index);
+        setTabMenu({ pane: index, point, tab });
+      },
       onSort: (key: SortKey) => {
         // Second click on the same column reverses it. A different column starts
         // ascending — except size, where the question is always "what is eating
@@ -2496,6 +2601,29 @@ export function Explorer({
             if (isColumn(column)) toggleColumn(pane, column);
           }}
           onClose={() => setColumnMenu(null)}
+        />
+      )}
+
+      {tabMenu && (
+        <ContextMenu
+          point={tabMenu.point}
+          // The handle's own path, which is what was right-clicked — and which
+          // is not the pane's path when the handle is a background one. The
+          // directory menu names the pane's directory the same way, so the two
+          // menus on this strip say what they are about in the same place.
+          label={views[tabMenu.pane].tabs[tabMenu.tab] ?? "/"}
+          rows={tabRows(views[tabMenu.pane])}
+          onChoose={(id) => {
+            const { pane, tab } = tabMenu;
+            // Closed after every row, unlike the column menu beside it: those
+            // are settings you tick two of, these are acts, and the second one
+            // would be aimed at an index the first has just moved.
+            setTabMenu(null);
+            if (id === "tabs:new") dispatch({ type: "newTab", pane, path: views[pane].path });
+            if (id === "tabs:close") closeTab(pane, tab);
+            if (id === "tabs:closeOthers") closeOtherTabs(pane, tab);
+          }}
+          onClose={() => setTabMenu(null)}
         />
       )}
 
