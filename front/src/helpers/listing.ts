@@ -310,6 +310,7 @@ const ALIASES: Record<string, keyof typeof TAGS> = {
   gif: "img",
   svg: "img",
   webp: "img",
+  avif: "img",
   ico: "img",
   mov: "mp4",
   mkv: "mp4",

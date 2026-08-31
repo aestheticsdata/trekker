@@ -18,6 +18,7 @@ import { type DeletePlan, type DeleteResult, DeleteService } from "@fs/delete.se
 import { contentDisposition, DOWNLOAD_CONTENT_TYPE, DOWNLOAD_CSP, parseRange, rangeLength } from "@fs/download-headers";
 import { sendDownload } from "@fs/download-response";
 import { DownloadService } from "@fs/download.service";
+import { PreviewService } from "@fs/preview.service";
 import type { FileRowDetail } from "@fs/file-row";
 import { type ListResult, FsService } from "@fs/fs.service";
 import {
@@ -69,6 +70,7 @@ export class FsController {
     private readonly create: CreateService,
     private readonly remove: DeleteService,
     private readonly download: DownloadService,
+    private readonly previews: PreviewService,
     private readonly upload: UploadService,
     private readonly tail: TailService,
     private readonly audit: AuditService,
@@ -290,6 +292,46 @@ export class FsController {
       status: range ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK,
       headers,
       expectBytes,
+    });
+  }
+
+  /**
+   * The bytes of one file, for the inspector's preview box (TRE-138).
+   *
+   * Not a download, and the two differences are this route's reason to exist:
+   * no audit row, and its own limit — both argued in `PreviewService`, which
+   * also owns every refusal (directory, non-regular file, over the ceiling),
+   * all thrown before the response is touched.
+   *
+   * The headers are the download's, on purpose, disposition included. The body
+   * stays an opaque attachment that cannot render on this origin — pasted into
+   * a tab, this URL saves a file — and the front fetches the bytes and types
+   * them itself, so the only place a served file becomes a document is the
+   * browser's `<img>`. See `download-headers.ts` for the argument; this is its
+   * third caller, and the warning there about callers drifting apart now
+   * covers three.
+   *
+   * No ranges: a preview is whole or it is nothing, and saying `none` beats
+   * staying silent for the same reason the archive branch above says it.
+   */
+  @Get("preview")
+  async previewPath(@Req() req: Request, @Res() res: Response, @Query() query: FsQueryDto): Promise<void> {
+    const plan = await this.previews.plan(userIdOf(req), query.hostId, query.path);
+    const size = plan.size ?? 0;
+
+    const opened = await this.previews.open(plan, req.sessionID);
+    return sendDownload(res, opened, {
+      status: HttpStatus.OK,
+      headers: {
+        "Content-Type": DOWNLOAD_CONTENT_TYPE,
+        "Content-Disposition": contentDisposition(plan.filename),
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": DOWNLOAD_CSP,
+        "Cache-Control": "private, no-store",
+        "Content-Length": String(size),
+        "Accept-Ranges": "none",
+      },
+      expectBytes: size,
     });
   }
 

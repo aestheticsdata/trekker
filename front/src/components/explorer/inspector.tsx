@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@auth/context/AuthContext";
+import { usePreviewImage } from "@components/explorer/use-preview-image";
 import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import {
@@ -47,10 +48,11 @@ import type { ReactNode } from "react";
  * the explorer's, and lifting them into the page to hand back down would be
  * three more props that can disagree with what the pane is drawing.
  *
- * What is deliberately not here: a real preview (the hatched box is a stub, as
- * the mockup draws it) and a checksum (TRE-27). The INTEGRITY block still ships
- * and says "not computed", because a panel that hides the line reads as a file
- * with nothing to verify.
+ * The hatched box began as a stub, as the mockup draws it; TRE-138 taught it
+ * to draw a selected image, and the caption stayed as the answer for
+ * everything else. The checksum was the same story (TRE-27): the INTEGRITY
+ * block shipped saying "not computed", because a panel that hides the line
+ * reads as a file with nothing to verify.
  */
 
 /** Fresh enough that a chmod shows up, slow enough not to refetch on a glance. */
@@ -317,10 +319,14 @@ function EntryPanel({
 }) {
   const isLink = entry.type === "link";
 
+  // The real thing, where the entry is an image the server will serve
+  // (TRE-138). Everything else — and every failure — keeps the caption.
+  const preview = usePreviewImage(host.id, entryPath, entry);
+
   return (
     <>
       <Scroller>
-        <Preview>{previewCaption(entry, items)}</Preview>
+        <Preview image={preview.url}>{preview.note ?? previewCaption(entry, items)}</Preview>
         <Name>{entry.name}</Name>
 
         <Stats
@@ -692,20 +698,46 @@ function Notice({ children }: { children: ReactNode }) {
 }
 
 /**
- * The hatched box. It is a stub and looks like one on purpose — real previews
- * are a later idea, and a blank rectangle would read as one that failed.
+ * The hatched box — and, for an image the server agreed to serve, the image
+ * itself (TRE-138), laid over the hatch so transparency reads as transparency
+ * rather than as a flat fill pretending to be part of the picture.
+ *
+ * Everything that is not a drawn image keeps the caption, deliberately: the
+ * stub look is the design for folders, videos and archives, and it is also
+ * this feature's whole error state — a blank rectangle or a broken-image
+ * glyph would read as a preview that failed, which is a worse answer than the
+ * caption saying what the file is.
  */
-function Preview({ children }: { children: ReactNode }) {
+function Preview({ image, children }: { image?: string | null; children: ReactNode }) {
+  // Bytes the browser cannot decode — a mistyped extension, a .png that is
+  // secretly markup — report here and fall back to the caption. Keyed by URL,
+  // so one bad file does not condemn the next selection.
+  const [broken, setBroken] = useState<string | null>(null);
+  const drawable = image != null && image !== broken;
+
   return (
     <div
-      className="border-line-strong text-ink-dim mx-2.5 my-2.25 flex h-19.5 items-center justify-center border font-mono text-caption"
+      className="border-line-strong text-ink-dim relative mx-2.5 my-2.25 flex h-19.5 items-center justify-center border font-mono text-caption"
       style={{
         // 7px stripes, in rem so the hatch scales with everything else.
         backgroundImage:
           "repeating-linear-gradient(45deg, var(--color-raised) 0 0.4375rem, var(--color-line) 0.4375rem 0.875rem)",
       }}
     >
-      {children}
+      {drawable ? (
+        // Decorative as far as a reader is concerned: the name is printed
+        // right below, and reading "gare-Montparnasse.jpeg" twice helps nobody.
+        // biome-ignore lint/performance/noImgElement: the src is a local blob URL in a fixed box — next/image exists to optimise network sources, and its loader would refuse this one
+        <img
+          src={image}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 h-full w-full object-contain"
+          onError={() => setBroken(image)}
+        />
+      ) : (
+        children
+      )}
     </div>
   );
 }

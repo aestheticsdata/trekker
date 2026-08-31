@@ -175,6 +175,26 @@ export const LIMITS = {
   download: rule("limit:dl", "downloads", 120, 60, "TREKKER_LIMIT_DOWNLOADS_PER_MIN"),
 
   /**
+   * Previews (TRE-138), per request — the inspector reading a file in order to
+   * draw it.
+   *
+   * Its own budget rather than a spend of `download` above, because the two
+   * are held apart on purpose: a download is a decision, and a selection is
+   * not. Arrowing through a directory of photographs fires one of these per
+   * row, and charging that against the download budget would burn it on
+   * looking and then refuse the copy somebody actually asked for.
+   *
+   * Twice the download's number, by the same logic that chose that one: the
+   * roots decided reach long before this counter, so what it bounds is a
+   * script enumerating file contents, and a person holding an arrow key does
+   * not sustain four selections a second for a minute.
+   *
+   * Spent inside `PreviewService.plan`, not by a route — a GET has nowhere to
+   * declare one, the same position `tail` and `download` are in.
+   */
+  preview: rule("limit:pv", "previews", 240, 60, "TREKKER_LIMIT_PREVIEWS_PER_MIN"),
+
+  /**
    * Uploads (TRE-65), per request. Harsher than the downloads above because
    * this one writes: a download can only take what the roots already granted,
    * while an upload consumes somebody's disk, and the two are not symmetrical

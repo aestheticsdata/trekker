@@ -7,6 +7,7 @@ import { FsController } from "@fs/fs.controller";
 import { FsService } from "@fs/fs.service";
 import { IdResolverService } from "@fs/id-resolver.service";
 import { PermissionSnapshotService } from "@fs/permission-snapshot.service";
+import { PreviewService } from "@fs/preview.service";
 import { PermissionsService } from "@fs/permissions.service";
 import { PermissionsUndoService } from "@fs/permissions-undo.service";
 import { LinkController } from "@fs/link.controller";
@@ -39,6 +40,7 @@ import { UploadService } from "@fs/upload.service";
     CreateService,
     DeleteService,
     DownloadService,
+    PreviewService,
     UploadService,
     LinkService,
     TailService,
@@ -55,6 +57,7 @@ import { UploadService } from "@fs/upload.service";
     CreateService,
     DeleteService,
     DownloadService,
+    PreviewService,
     UploadService,
     LinkService,
     TailService,
