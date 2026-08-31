@@ -670,7 +670,20 @@ function formatMemory({ totalKb, availableKb }: { totalKb: number; availableKb: 
   // A decimal on the total only where rounding would take it away: a half-gig
   // container reading "0.3/0.5" is honest, "0.3/1" is generous and "0.3/0" is
   // neither.
-  return `${used.toFixed(1)}/${total >= 10 ? Math.round(total) : total.toFixed(1)}`;
+  return `${gigabytes(used)}/${total >= 10 ? Math.round(total) : gigabytes(total)}`;
+}
+
+/**
+ * One decimal where there is one to show, and none where there is not — `4`,
+ * never `4.0` (TRE-135).
+ *
+ * The `.0` is width rather than precision, and this is the narrowest part of
+ * the strip. The rule follows the value and not the position: the used half
+ * moves as the machine breathes, so a decimal pinned to the slot would come and
+ * go there anyway, and it reads as a value that changed rather than a glitch.
+ */
+function gigabytes(value: number): string {
+  return String(Number(value.toFixed(1)));
 }
 
 /** The file table's own ladder (`formatSize`), per second — and in tens, as it is. */
