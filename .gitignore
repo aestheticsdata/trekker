@@ -50,7 +50,19 @@ authorized_keys*
 # credentials by any other name. Unanchored: the root is where they usually get
 # dropped, but front/ and nest-api/ are where you are standing when you drop
 # one, and the root-anchored rule ignored both.
+#
+# A dot is not the only separator anybody uses. `credentials-trekker.txt` sat
+# untracked at the root and matched none of these, the same way `prod.env`
+# walked past `.env.*` above — the pre-commit hook's filename list has the
+# identical hole. Hyphen and underscore are spelled out rather than reaching for
+# `credentials*`, which would also swallow a directory of that name.
+#
+# `secrets` deliberately keeps only its dotted form: nest-api/src/secrets/ is a
+# tracked module, and a bare `secrets*` would ignore every file added to it from
+# now on, silently. If a `secrets-something` file ever needs ignoring, name it.
 credentials.*
+credentials-*
+credentials_*
 secrets.*
 .npmrc
 .pgpass

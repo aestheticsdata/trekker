@@ -65,8 +65,15 @@ scan_infra "$diff" || fail=1
 # any other. Spelling it out this way spares ecosystem.config.example.js, which
 # ends in example.js rather than config.js, and front/ecosystem.config.cjs,
 # which holds nothing and is committed.
+#
+# `credentials` takes any of the three separators somebody actually types. It
+# was written with a dot alone, and a real `credentials-trekker.txt` at the root
+# matched neither this list nor .gitignore (TRE-134) — the same hole `prod.env`
+# went through before `*.env` replaced `.env.*` in TRE-5. `secrets` keeps its
+# dotted form here, in step with .gitignore, where widening it the same way
+# would silently ignore every new file in the tracked nest-api/src/secrets/.
 
-blocked=$(printf '%s\n' "$staged" | grep -Ei '(^|/)(\.env($|\..*)|.*\.env|credentials\..*|secrets\..*|known_hosts.*|authorized_keys|id_(rsa|dsa|ecdsa|ed25519).*|.*\.(pem|key|p12|pfx|ppk|jks)|\.npmrc|\.pgpass|\.netrc|dump\.(rdb|pm2)|ecosystem\.config\.js)$' | grep -v '\.example$' || true)
+blocked=$(printf '%s\n' "$staged" | grep -Ei '(^|/)(\.env($|\..*)|.*\.env|credentials[._-].*|secrets\..*|known_hosts.*|authorized_keys|id_(rsa|dsa|ecdsa|ed25519).*|.*\.(pem|key|p12|pfx|ppk|jks)|\.npmrc|\.pgpass|\.netrc|dump\.(rdb|pm2)|ecosystem\.config\.js)$' | grep -v '\.example$' || true)
 if [ -n "$blocked" ]; then
   note "These filenames never belong in this repo:"
   printf '%s\n' "$blocked" | sed 's/^/      /' >&2
