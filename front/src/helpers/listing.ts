@@ -13,7 +13,8 @@ import type { FileRow, RowType } from "@lib/api/fs";
 /* ---- formatting ------------------------------------------------------- */
 
 /**
- * The mockup's ladder: two decimals from a GB up, one below, bytes exact.
+ * The mockup's ladder: at most two decimals from a GB up, one below, bytes
+ * exact — and never a trailing zero among them (TRE-137).
  *
  * Powers of ten, because the labels are `kB` and `MB` (TRE-133). The division
  * used to be by 1024 under those same names, which left every figure in the app
@@ -51,18 +52,23 @@ export function formatSize(bytes: number | null, type: RowType): string {
  * decide. So precision is given up from the right, one place at a time, and
  * only once the integer part has grown enough to need the room:
  *
- *   4.0 kB   28.55 GB   992.0 kB   127.1 MB   411.6 GB   1000 kB
+ *   4 kB   28.55 GB   992 kB   127.1 MB   411.6 GB   1000 kB
  *
- * The last of those is the only way a decimal rung reaches four integer digits:
- * from 999_950 bytes up, 999.95 kB and over rounds to a `1000.0` the column
- * cannot hold. Those fifty bytes give up their decimals rather than their rung
- * — a hair under a megabyte, still counted in kilobytes, honest about both.
+ * Precision the value does not have is not printed either: the places above are
+ * a ceiling, not a shape, so `28.55 GB` keeps both digits while `1.00 GB` is
+ * written `1 GB` (TRE-137). A zero after the point holds the column's decimal
+ * points in a line, which is a real thing to want and worth less than the two
+ * characters it costs in a cell that has already had to give up precision to
+ * fit.
  *
- * Every value the mockup does show keeps exactly the shape it has there.
+ * `1000 kB` is the one way a decimal rung reaches four integer digits: from
+ * 999_950 bytes up, 999.95 kB and over rounds to a `1000.0` the column cannot
+ * hold. Those fifty bytes give up their decimals rather than their rung — a
+ * hair under a megabyte, still counted in kilobytes, honest about both.
  */
 function decimals(value: number, places: number): string {
-  const shown = value.toFixed(value >= 100 ? Math.min(places, 1) : places);
-  return Number(shown) >= 1000 ? value.toFixed(0) : shown;
+  const shown = Number(value.toFixed(value >= 100 ? Math.min(places, 1) : places));
+  return String(shown >= 1000 ? Math.round(value) : shown);
 }
 
 /** Bytes for the pane footer, where a directory total has no type to speak of. */

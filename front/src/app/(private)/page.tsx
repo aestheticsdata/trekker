@@ -696,7 +696,7 @@ function gigabytes(value: number): string {
 
 /** The file table's own ladder (`formatSize`), per second — and in tens, as it is. */
 function formatThroughput(bytesPerSec: number): string {
-  if (bytesPerSec >= 1_000_000_000) return `${(bytesPerSec / 1_000_000_000).toFixed(1)} GB/s`;
+  if (bytesPerSec >= 1_000_000_000) return `${Number((bytesPerSec / 1_000_000_000).toFixed(1))} GB/s`;
   if (bytesPerSec >= 1_000_000) return `${Math.round(bytesPerSec / 1_000_000)} MB/s`;
   if (bytesPerSec >= 1000) return `${Math.round(bytesPerSec / 1000)} kB/s`;
   return `${Math.round(bytesPerSec)} B/s`;
