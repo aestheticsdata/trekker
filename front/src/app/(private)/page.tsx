@@ -653,9 +653,17 @@ function formatUptime(seconds: number): string {
 }
 
 /**
- * "10/34" — what is in use over what the machine has, in GB, in the shape
- * mockup 2a writes it. No unit on either half: the pair is the unit, and the
- * second number is what makes the first mean anything.
+ * "0.4 GB / 4 GB" — what is in use over what the machine has.
+ *
+ * The mockup writes the pair bare, on the reading that the two numbers are each
+ * other's unit. Beside three neighbours that all name theirs — `6h`, `0%`,
+ * `1.2 MB/s` — the bare one read as an unfinished figure instead (TRE-136), so
+ * both halves carry `GB`: a unit on the second alone would leave the first the
+ * only naked number in the strip, which is where the doubt was.
+ *
+ * Spaced around the slash, which the bare form did not need. `io` is one cell
+ * away using that character to mean *per second*, and `0.4 GB/4 GB` invites the
+ * same reading for as long as it takes to notice the second `GB`.
  *
  * Gigabytes of a thousand million bytes, like every other figure in the app
  * (TRE-133). The pair used to be gibibytes, so the machine the vendor sold as
@@ -670,7 +678,7 @@ function formatMemory({ totalKb, availableKb }: { totalKb: number; availableKb: 
   // A decimal on the total only where rounding would take it away: a half-gig
   // container reading "0.3/0.5" is honest, "0.3/1" is generous and "0.3/0" is
   // neither.
-  return `${gigabytes(used)}/${total >= 10 ? Math.round(total) : gigabytes(total)}`;
+  return `${gigabytes(used)} GB / ${total >= 10 ? Math.round(total) : gigabytes(total)} GB`;
 }
 
 /**
