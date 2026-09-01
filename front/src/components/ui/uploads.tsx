@@ -2,17 +2,18 @@
 
 import { useAuth } from "@auth/context/AuthContext";
 import { useToast } from "@components/ui/toast";
+import { headDigest } from "@helpers/digest";
 import { formatSize } from "@helpers/listing";
 import { ApiError } from "@lib/api/client";
-import { UploadRefusal, uploadBatch } from "@lib/api/upload";
+import { resumeOffset, surveyUploads, UploadRefusal, uploadBatch } from "@lib/api/upload";
 import { createContext, useContext, useState } from "react";
 
 import type { PickedFile } from "@helpers/picked";
-import type { ConflictPolicy, UploadResult } from "@lib/api/upload";
+import type { ConflictPolicy, ResumeClaim, UploadResult } from "@lib/api/upload";
 import type { ReactNode } from "react";
 
 /**
- * Uploads in flight, and the tray that shows them (TRE-65, TRE-126).
+ * Uploads in flight, and the tray that shows them (TRE-65, TRE-126, TRE-142).
  *
  * A context rather than state in the explorer, for one reason: an upload
  * outlives the thing that started it. Dropping a file on the left pane and then
@@ -75,6 +76,16 @@ const BATCH_BYTES = 32 * 1024 * 1024;
 
 /** How many times one batch waits out the limit before giving up. */
 const MAX_WAITS = 10;
+
+/**
+ * And how many times a dropped connection is picked back up (TRE-142, TRE-143).
+ *
+ * For every batch, not only the resumable ones. What makes that safe is the
+ * survey: a request that answered nothing still landed some of its files, and
+ * asking which is what turns "send it all again" — duplicates under `keepBoth`,
+ * a wasted uplink under any policy — into "send what is missing".
+ */
+const MAX_RETRIES = 5;
 
 /** And the longest single wait, so a wrong header cannot hang the tray. */
 const MAX_WAIT_SECONDS = 120;
@@ -161,8 +172,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         const id = nextId++;
         return { id, picked };
       });
-      const ids = members.map((member) => member.id);
-
       // Aborting any row aborts the request it is riding in, which is every row
       // of this batch. Said out loud in the detail below rather than left for
       // somebody to deduce from ninety-nine rows going red at once.
@@ -187,17 +196,69 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         })),
       );
 
+      // What this batch could be continued from, if anything (TRE-142). Null
+      // for a packed batch and for anything too small to be worth the round
+      // trip — and null is also what leaves the retry below switched off.
+      const claim = await claimFor(batch);
+
+      // Shrinks as files are confirmed landed (TRE-143), so a retry carries
+      // what is still missing rather than what was originally asked for.
+      let pending = members;
+
       let waits = 0;
+      let retries = 0;
       let sending = true;
+      // Set by a refused offset below. Without it the next pass would ask the
+      // host the same question, be told the same length, and be refused for the
+      // same reason — a tight loop that ends only by running out of retries.
+      let restart = false;
 
       while (sending) {
-        try {
-          const started = uploadBatch(hostId, directory, batch, csrfToken, conflict, (fraction) => {
-            patchAll(ids, { progress: fraction, state: "sending" });
+        const ids = pending.map((member) => member.id);
+        const payload = pending.map((member) => member.picked);
+
+        // Asked again on every attempt rather than remembered, because the
+        // answer is a fact about the host and the attempt that just failed is
+        // exactly what changed it. On the first pass it is usually zero, and
+        // costs one small GET in front of a transfer measured in minutes.
+        const from = claim === null || restart ? 0 : await resumeOffset(hostId, directory, batch[0], claim);
+        restart = false;
+        const resume = claim === null ? undefined : { claim, from };
+
+        if (resume !== undefined && resume.from > 0) {
+          patchAll(ids, {
+            state: "sending",
+            progress: resume.from / resume.claim.size,
+            detail: `continuing — ${formatSize(resume.from, "file")} already there`,
           });
+        }
+
+        try {
+          const started = uploadBatch(
+            hostId,
+            directory,
+            payload,
+            csrfToken,
+            conflict,
+            (fraction) => {
+              patchAll(ids, { progress: fraction, state: "sending" });
+            },
+            resume,
+          );
           handle = started;
 
-          settle(members, await started.done);
+          const result = await started.done;
+
+          // The host's partial was not the length this request sliced at, so it
+          // refused and wrote nothing. Nothing is lost: ask again, and send what
+          // is missing from wherever the file actually got to.
+          if (retries < MAX_RETRIES && result.results.some((outcome) => outcome.code === "ERESUME")) {
+            retries += 1;
+            restart = true;
+            continue;
+          }
+
+          settle(pending, result);
           sending = false;
         } catch (error) {
           const waitable = error instanceof UploadRefusal && error.status === 429 && error.retryAfterSeconds !== null;
@@ -213,12 +274,68 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             return;
           }
 
+          // A dropped connection. The next pass asks the host what it kept and
+          // sends only what is missing, so this is a pause in one upload rather
+          // than the start of another.
+          const dropped = error instanceof ApiError && error.status === 0 && error.code !== "EABORTED";
+
+          // What survived a request that answered nothing (TRE-143). The route
+          // writes its parts one at a time, so some of them are on the host
+          // already — and this is the only way to find out which, since the
+          // response that would have said so never arrived.
+          const landed =
+            dropped && retries < MAX_RETRIES ? await landedOf(hostId, directory, pending, csrfToken) : null;
+
+          // Null is the survey failing, and it is why the retry is gated on it
+          // rather than merely helped by it: without an answer there is no way
+          // to tell a file that landed from one that did not, and the batch
+          // fails the way it did before this existed instead of guessing.
+          if (landed !== null) {
+            if (landed.size > 0) {
+              patchEach(
+                new Map(
+                  pending
+                    .filter((member) => landed.has(member.picked.path))
+                    .map((member) => [member.id, { state: "done" as const, progress: 1, detail: "already there" }]),
+                ),
+              );
+              pending = pending.filter((member) => !landed.has(member.picked.path));
+            }
+
+            // Everything in it landed. The response was the only casualty.
+            if (pending.length === 0) {
+              sending = false;
+              break;
+            }
+
+            retries += 1;
+            const seconds = 2 ** retries;
+            const waiting = pending.map((member) => member.id);
+            // Progress left where it stopped: on a resumable file those bytes
+            // are on the host, and a bar falling to zero would be describing a
+            // restart that is not going to happen.
+            patchAll(waiting, { state: "waiting", detail: `connection lost — continuing in ${seconds}s` });
+            await sleep(seconds * 1000);
+            if (!cancelled) continue;
+
+            patchAll(waiting, { state: "failed", detail: "Cancelled." });
+            return;
+          }
+
           const message = error instanceof ApiError ? error.message : "The upload did not complete.";
           const aborted = error instanceof ApiError && error.code === "EABORTED";
           patchAll(ids, { state: "failed", detail: aborted ? "Cancelled with its batch." : message });
           sending = false;
 
           if (aborted) return;
+
+          // The destination is full (TRE-144). Every remaining batch would
+          // fail the same way, so the run stops here rather than painting
+          // twenty rows red with one message repeated on each of them.
+          if (error instanceof ApiError && error.code === "ENOSPACE") {
+            push({ tone: "danger", message: "No room at the destination", detail: message });
+            return;
+          }
 
           // A 429 with no `Retry-After` is the hourly byte budget, and there is
           // nothing useful to wait for inside one sitting. Said once, loudly,
@@ -276,6 +393,58 @@ function pack(files: readonly PickedFile[]): PickedFile[][] {
 
   flush();
   return batches;
+}
+
+/**
+ * Whether a batch is one that can be continued, and what identifies it.
+ *
+ * Three conditions that are really one condition seen three ways. **One file**,
+ * because a request with two parts has no single partial to continue and the
+ * route refuses the combination outright. **Large enough** — the same threshold
+ * that already decides which files travel alone, since a file worth its own
+ * progress bar is a file worth not sending twice. And **a digest**, which
+ * `crypto.subtle` will not produce outside a secure context; there the honest
+ * answer is that this upload cannot be resumed, not that it cannot happen.
+ */
+async function claimFor(batch: readonly PickedFile[]): Promise<ResumeClaim | null> {
+  const only = batch.length === 1 ? batch[0] : null;
+  if (only === null || only.file.size < ALONE_BYTES) return null;
+
+  const digest = await headDigest(only.file);
+  if (digest === null) return null;
+
+  return { size: only.file.size, mtimeMs: only.file.lastModified, digest };
+}
+
+/**
+ * Which of these are already on the host, or null if it could not be asked.
+ *
+ * Names only, no claims: this runs where the question is "did it land", and the
+ * partial that answers "how far did it get" is looked up separately on the next
+ * pass, by the one file in a batch that can have one.
+ *
+ * Null rather than an empty set for a failure, and the difference is the whole
+ * safety of the retry — an empty set means "none of them landed, send them all
+ * again", which is exactly the wrong thing to do when the truth is unknown.
+ */
+async function landedOf(
+  hostId: string,
+  directory: string,
+  members: ReadonlyArray<{ picked: PickedFile }>,
+  csrfToken: string | null,
+): Promise<Set<string> | null> {
+  try {
+    const answers = await surveyUploads(
+      hostId,
+      directory,
+      members.map((member) => ({ name: member.picked.path })),
+      csrfToken,
+    );
+
+    return new Set(answers.filter((answer) => answer.there).map((answer) => answer.name));
+  } catch {
+    return null;
+  }
 }
 
 function sleep(ms: number): Promise<void> {

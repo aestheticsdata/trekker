@@ -1,4 +1,16 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpException,
+  HttpStatus,
+  Post,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from "@nestjs/common";
 import type { Request, Response } from "express";
 import { Audited, NotAudited } from "@audit/audited.decorator";
 import { AuditService } from "@audit/audit.service";
@@ -36,8 +48,20 @@ import { type RenameResult, RenameService } from "@fs/rename.service";
 import { TailService } from "@fs/tail.service";
 import { heartbeat, lastEventIdOf, openStream, sendFrame, subscriberFor } from "@fs/tail-sse";
 import { UploadQueryDto } from "@fs/dto/upload.dto";
+import { UploadResumeQueryDto } from "@fs/dto/upload-resume.dto";
+import { type SurveyFileDto, UploadSurveyDto } from "@fs/dto/upload-survey.dto";
 import { receiveMultipart } from "@fs/upload-multipart";
-import { type MadeDirectories, toRefusalException, type UploadOutcome, UploadService } from "@fs/upload.service";
+import {
+  formatBytes,
+  type MadeDirectories,
+  type ResumeRequest,
+  type SurveyAnswer,
+  type SurveyRequest,
+  toRefusalException,
+  type UploadOutcome,
+  UploadRefused,
+  UploadService,
+} from "@fs/upload.service";
 import { CsrfGuard } from "@users/guards/csrf.guard";
 import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/session-auth.guard";
 
@@ -336,6 +360,70 @@ export class FsController {
   }
 
   /**
+   * How much of a file the host already holds (TRE-142).
+   *
+   * The question the browser asks before it decides what to send. A GET, and
+   * therefore unaudited by the rule `audit-coverage.spec.ts` enforces: it reads
+   * the length of a hidden temporary file and changes nothing.
+   *
+   * It answers zero rather than 404 for everything it cannot identify — no
+   * partial, a folder not made yet, a path the guard refuses. Each of those
+   * means "send the whole file", which is a normal answer and not a failure.
+   */
+  @Get("upload/resume")
+  uploadOffset(@Req() req: Request, @Query() query: UploadResumeQueryDto): Promise<{ offset: number }> {
+    return this.upload.resumeOffset(userIdOf(req), query.hostId, query.path, query.name, {
+      // Through `Number` because the global pipe validates without
+      // transforming: `@Type(() => Number)` is what lets `@IsInt` see a number
+      // in a query string, and the handler is still handed the string. The
+      // token would survive that — it stringifies everything — but the offset
+      // comparison would not, and `6 !== "6"` refuses every valid resume.
+      size: Number(query.size),
+      mtimeMs: Number(query.mtime),
+      digest: query.digest,
+    });
+  }
+
+  /**
+   * What is free where an upload is going (TRE-144).
+   *
+   * A GET, so unaudited by the rule `audit-coverage.spec.ts` enforces: it runs
+   * `df` on a validated path and reports two numbers.
+   *
+   * Nulls mean "could not ask", never "nothing left" — a host without a usable
+   * `df` must go on accepting uploads, or a check meant to prevent a full disk
+   * becomes an outage. The modal draws nothing rather than drawing a zero.
+   */
+  @Get("space")
+  uploadSpace(@Req() req: Request, @Query() query: FsQueryDto): Promise<{ free: number | null; total: number | null }> {
+    return this.upload.spaceAt(userIdOf(req), query.hostId, query.path);
+  }
+
+  /**
+   * What the host already has, for a whole batch (TRE-143).
+   *
+   * Asked after a batch died without answering, and again by the modal when a
+   * folder is offered a second time. Both are the same question — of these
+   * names, which landed, which has bytes waiting, which never arrived — and the
+   * answer is what lets a retry send only what is missing instead of all of it.
+   *
+   * A POST for its body alone, like `rename/preview` and `delete/plan`, and
+   * exempt for the same reason they are.
+   */
+  @Post("upload/survey")
+  @UseGuards(CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  @NotAudited(
+    "Lists directories and reports what is already in them. It writes nothing, and the upload it precedes is " +
+      "the audited event — a row per interrupted batch would bury the transfer it was helping to finish.",
+  )
+  uploadSurvey(@Req() req: Request, @Body() dto: UploadSurveyDto): Promise<{ results: SurveyAnswer[] }> {
+    return this.upload
+      .survey(userIdOf(req), dto.hostId, dto.path, dto.files.map(surveyRequestOf))
+      .then((results) => ({ results }));
+  }
+
+  /**
    * A file from the laptop onto a host (TRE-65).
    *
    * Destructive, and the flag is not a formality: `conflict=overwrite` replaces
@@ -373,16 +461,58 @@ export class FsController {
     const conflict = query.conflict ?? "keepBoth";
     // Before the body is touched, which is the ordering the whole route is
     // arranged around.
-    const { driver, real } = await this.upload.destination(userId, query.hostId, query.path);
+    const { driver, real } = await this.upload.destination(userId, query.hostId, query.path, { sweep: true });
+
+    // Room, before a byte is read (TRE-144).
+    //
+    // `Content-Length` is a claim, and this is the one place a claim is worth
+    // acting on: a client saying it is about to send more than the volume holds
+    // is describing something that cannot end well, and refusing now costs one
+    // `df` instead of however many minutes it takes to fill a disk. A client
+    // that understates it gains nothing — the pump still counts real bytes, and
+    // the host still refuses when it runs out.
+    //
+    // Over SSH this is the only warning anybody gets. SFTP has no ENOSPC on the
+    // wire, so a full remote disk arrives as a bare `EIO` further down.
+    const declared = Number.parseInt(req.headers["content-length"] ?? "", 10);
+    const free = await this.upload.freeAt(driver, real);
+
+    if (free !== null && !Number.isNaN(declared) && declared > free) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.INSUFFICIENT_STORAGE,
+          code: "ENOSPACE",
+          message: `Needs ${formatBytes(declared)} and ${formatBytes(free)} is free at ${query.path}.`,
+        },
+        HttpStatus.INSUFFICIENT_STORAGE,
+      );
+    }
 
     // One memo for the whole request (TRE-126). A folder arrives as many parts
     // sharing a handful of directories, and without this each part would make
     // and re-validate every one of them.
     const made: MadeDirectories = new Map();
 
-    const { outcomes, refusal } = await receiveMultipart(req, (filename, stream) =>
-      this.upload.receive(userId, driver, real, filename, stream, conflict, req.sessionID, made),
-    );
+    // Resume describes one file (TRE-142), so it belongs to the first part and
+    // a second part alongside it is a client that has misunderstood the route.
+    // Refused rather than ignored: silently uploading the rest under the wrong
+    // offset is the failure mode this whole feature exists to avoid.
+    const resume = resumeOf(query);
+    let part = 0;
+
+    const { outcomes, refusal } = await receiveMultipart(req, (filename, stream) => {
+      const index = part++;
+      if (resume !== undefined && index > 0) {
+        stream.resume();
+        return Promise.reject(new UploadRefused("ERESUMEBATCH", "A resumed upload carries one file."));
+      }
+
+      return this.upload.receive(userId, driver, real, filename, stream, conflict, {
+        sessionId: req.sessionID,
+        made,
+        resume: index === 0 ? resume : undefined,
+      });
+    });
 
     const uploaded = outcomes.filter((outcome) => outcome.ok && outcome.code !== "ESKIPPED").length;
     const bytes = outcomes.reduce((total, outcome) => total + outcome.bytes, 0);
@@ -794,4 +924,40 @@ function userIdOf(req: Request): string {
 
 function count(n: number, singular: string, plural = `${singular}s`): string {
   return `${n} ${n === 1 ? singular : plural}`;
+}
+
+/**
+ * The resume parameters, if all of them came (TRE-142).
+ *
+ * All or nothing on purpose. Three of the four with the fourth missing is not
+ * a partial instruction to be salvaged — it is a client whose idea of which
+ * bytes it is sending does not match the server's, and the only safe reading of
+ * that is the one that starts the file again.
+ */
+function resumeOf(query: UploadQueryDto): ResumeRequest | undefined {
+  const { resumeDigest, resumeSize, resumeMtime, resumeFrom } = query;
+  if (resumeDigest === undefined || resumeSize === undefined || resumeMtime === undefined) return undefined;
+  if (resumeFrom === undefined) return undefined;
+
+  // Through `Number` for the reason the offset route gives: these arrive as
+  // strings whatever the DTO declares, and `already !== resume.from` is a
+  // strict comparison that a string always loses.
+  return {
+    claim: { size: Number(resumeSize), mtimeMs: Number(resumeMtime), digest: resumeDigest },
+    from: Number(resumeFrom),
+  };
+}
+
+/**
+ * One survey row, carrying a claim only when a whole one arrived.
+ *
+ * Three fields identify a partial and any two of them identify nothing, so a
+ * half-filled claim is dropped rather than completed with a guess — the file is
+ * then asked about by name alone, which is the honest smaller question.
+ */
+function surveyRequestOf(file: SurveyFileDto): SurveyRequest {
+  const { name, size, mtime, digest } = file;
+  if (size === undefined || mtime === undefined || digest === undefined) return { name };
+
+  return { name, claim: { size: Number(size), mtimeMs: Number(mtime), digest } };
 }

@@ -1424,6 +1424,11 @@ export function Explorer({
       ? null
       : {
           directory: views[uploadPick.pane].path,
+          // Non-null by the guard above. Carried apart from `host` because the
+          // modal asks the API about free space with it (TRE-144), and `host`
+          // is null while the host list is still loading — which would mean no
+          // answer at all on the one path a slow query makes likely.
+          hostId: views[uploadPick.pane].hostId as string,
           host: hosts.find((host) => host.id === views[uploadPick.pane].hostId) ?? null,
           initial: uploadPick.picked,
         };

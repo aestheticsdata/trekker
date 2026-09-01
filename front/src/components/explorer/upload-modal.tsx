@@ -6,9 +6,12 @@ import { Tooltip } from "@components/ui/tooltip";
 import { formatSize } from "@helpers/listing";
 import { isDotFile, MAX_PICKED, pickedFromInput } from "@helpers/picked";
 import { PRESS, SELECTED } from "@helpers/press";
+import { remainingAfter, roomFor } from "@helpers/space";
+import { uploadSpace } from "@lib/api/upload";
 import { useEffect, useRef, useState } from "react";
 
 import type { Picked, PickedFile } from "@helpers/picked";
+import type { DiskSpace } from "@helpers/space";
 import type { HostView } from "@lib/api/hosts";
 import type { ConflictPolicy } from "@lib/api/upload";
 
@@ -57,6 +60,8 @@ const POLICIES: ReadonlyArray<{ value: ConflictPolicy; label: string }> = [
 export interface UploadTarget {
   /** The directory the files land in — the pane's own, never its selection. */
   directory: string;
+  /** Which host that directory is on, for the free-space question (TRE-144). */
+  hostId: string;
   /** For the colour dot. Null while the host list is still loading. */
   host: HostView | null;
   /** What a drop arrived carrying. The toolbar button opens this modal empty. */
@@ -117,6 +122,7 @@ function UploadPanel({
    * already scrolled past.
    */
   const [skipDots, setSkipDots] = useState(false);
+  const [space, setSpace] = useState<DiskSpace>({ free: null, total: null });
 
   const filePicker = useRef<HTMLInputElement>(null);
   const folderPicker = useRef<HTMLInputElement>(null);
@@ -132,6 +138,27 @@ function UploadPanel({
   }, []);
 
   /**
+   * What is free at the destination (TRE-144).
+   *
+   * Asked once, on open, because the destination cannot change while this is up
+   * — and not awaited by anything: the modal is fully usable before the answer
+   * arrives and simply says nothing about room until it does. A `live` flag
+   * rather than an abort, since the request is cheap and the only thing worth
+   * preventing is a write to a component that has gone.
+   */
+  useEffect(() => {
+    let live = true;
+
+    void uploadSpace(target.hostId, target.directory).then((answer) => {
+      if (live) setSpace(answer);
+    });
+
+    return () => {
+      live = false;
+    };
+  }, [target.hostId, target.directory]);
+
+  /**
    * The thing to press, focused once on open — the same reasoning as the field
    * in `create-modal`: inside a dialog the keyboard has nowhere else to be, and
    * `autoFocus` is what a11y lint rejects on a page for good reason.
@@ -144,6 +171,7 @@ function UploadPanel({
   const sending = skipDots ? files.filter((picked) => !isDotFile(picked.path)) : files;
 
   const total = sending.reduce((sum, picked) => sum + picked.file.size, 0);
+  const room = roomFor(total, space);
   const shown = sending.slice(0, RENDER_LIMIT);
   const hidden = sending.length - shown.length;
 
@@ -236,6 +264,26 @@ function UploadPanel({
         </div>
       )}
 
+      {room === "full" && (
+        <div className="bg-danger-wash border-danger text-danger-soft mx-3.5 mt-2.5 border px-2.5 py-1.75 font-mono text-cmd/[1.5]">
+          {/* Blocked rather than warned about, and worded exactly as
+              `transfer-modal` words it. Two modals writing to one disk that
+              disagreed about whether it has room would be worse than either of
+              them being wrong on its own. */}
+          {`Needs ${formatSize(total, "file")} and ${formatSize(space.free ?? 0, "file")} is free at the destination.`}
+        </div>
+      )}
+
+      {room === "tight" && (
+        <div className="bg-warning-wash border-warning text-warning mx-3.5 mt-2.5 border px-2.5 py-1.75 font-mono text-cmd/[1.5]">
+          {/* Warned about rather than blocked: it fits, and it is their disk.
+              What is worth saying is the part nothing else says — that this
+              one succeeding is the problem, because a host with nothing left
+              stops doing things that have nothing to do with the upload. */}
+          {`This fits, but would leave only ${formatSize(remainingAfter(total, space), "file")} free on the host.`}
+        </div>
+      )}
+
       <div className="border-line flex flex-none flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t px-3.5 py-2.25">
         <span className="text-ink-faint font-sans text-3xs/none font-medium tracking-[0.12em] uppercase">
           if it exists
@@ -283,6 +331,15 @@ function UploadPanel({
             ? "nothing to send"
             : `${sending.length} file${sending.length === 1 ? "" : "s"}, ${formatSize(total, "file")}`}
         </span>
+        {/* Standing, not only when it is a problem. A number somebody has seen
+            before it matters is one they can act on while it still can be. */}
+        {space.free !== null && (
+          <span className="text-ink-faint font-mono text-2xs/none">
+            {space.total
+              ? `${formatSize(space.free, "file")} free of ${formatSize(space.total, "file")}`
+              : `${formatSize(space.free, "file")} free`}
+          </span>
+        )}
         <div className="flex-1" />
         {files.length > 0 && (
           <button
@@ -303,7 +360,7 @@ function UploadPanel({
         <button
           ref={commit}
           type="button"
-          disabled={sending.length === 0}
+          disabled={sending.length === 0 || room === "full"}
           onClick={() => {
             onConfirm(sending, conflict);
             close();

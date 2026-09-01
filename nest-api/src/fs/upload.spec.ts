@@ -1,10 +1,12 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { HttpException } from "@nestjs/common";
 import { RateLimitService } from "@audit/rate-limit.service";
-import { numberedName, partialName, safeRelativePath } from "@fs/upload-name";
+import { isPartialName, numberedName, partialName, safeRelativePath } from "@fs/upload-name";
+import { readFreeBytes, readSpace } from "@fs/mount-table";
+import { resumeToken } from "@fs/upload-resume";
 import { UploadRefused, UploadService } from "@fs/upload.service";
 import { LocalDriver } from "@hosts/drivers/local.driver";
 import { writeFileSync } from "node:fs";
@@ -17,6 +19,7 @@ import { SudoService } from "@hosts/sudo/sudo.service";
 
 import type { AuditService } from "@audit/audit.service";
 import type { HostDriver } from "@hosts/drivers/host-driver";
+import type { ResumeClaim } from "@fs/upload-resume";
 import type { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
 import type { PrismaService } from "../prisma/prisma.service";
 import type { RedisService } from "@redis/redis.service";
@@ -493,7 +496,7 @@ describe("uploading with sudo", () => {
       "nginx.conf",
       Readable.from([Buffer.from("server {}\n")]),
       "keepBoth",
-      SESSION_ID,
+      { sessionId: SESSION_ID },
     );
 
     expect(outcome.ok).toBe(true);
@@ -513,7 +516,7 @@ describe("uploading with sudo", () => {
       "secret.conf",
       Readable.from([Buffer.from("TOKEN=abc\n")]),
       "keepBoth",
-      SESSION_ID,
+      { sessionId: SESSION_ID },
     );
 
     expect(await readFile(join(base, "secret.conf"), "utf8")).toBe("TOKEN=abc\n");
@@ -531,7 +534,7 @@ describe("uploading with sudo", () => {
       "partly.conf",
       Readable.from([Buffer.from("data\n")]),
       "keepBoth",
-      SESSION_ID,
+      { sessionId: SESSION_ID },
     );
 
     expect(outcome.ok).toBe(true);
@@ -580,7 +583,7 @@ describe("uploading a folder", () => {
     const made = new Map<string, string>();
 
     for (const path of ["photos/a.jpg", "photos/b.jpg", "photos/2019/c.jpg"]) {
-      const outcome = await service.receive(USER_ID, driver(), base, path, body("x"), "keepBoth", undefined, made);
+      const outcome = await service.receive(USER_ID, driver(), base, path, body("x"), "keepBoth", { made });
       expect(outcome.ok).toBe(true);
     }
 
@@ -625,5 +628,522 @@ describe("uploading a folder", () => {
     expect(refused.ok).toBe(false);
     expect(landed).toMatchObject({ ok: true, name: "ok.txt" });
     expect(await readFile(join(base, "photos"), "utf8")).toBe("not a directory");
+  });
+});
+
+/**
+ * TRE-142, and the property every test here circles: **a resumed file is byte
+ * for byte the file that was picked**.
+ *
+ * Appending is the easy half. The half worth testing is every way the server
+ * could be talked into appending to the wrong prefix — a stale partial under a
+ * reused name, an offset that does not match what is on disk, a file edited
+ * between attempts without its mtime moving. Each of those produces a file that
+ * is corrupt *and looks complete*, which is worse than the failure resume was
+ * added to avoid, so each one has a test that reads the bytes back.
+ */
+describe("the resume token", () => {
+  const subject = {
+    userId: USER_ID,
+    hostId: HOST_ID,
+    root: "/srv/backup",
+    requested: "photos/a.jpg",
+    size: 1024,
+    mtimeMs: 1_700_000_000_000,
+    digest: "abc123",
+  };
+
+  it("is the same name twice, which is the whole of how a partial is found", () => {
+    expect(resumeToken(subject)).toBe(resumeToken({ ...subject }));
+  });
+
+  it("changes with every field that decides which file this is", () => {
+    const original = resumeToken(subject);
+
+    expect(resumeToken({ ...subject, size: 1025 })).not.toBe(original);
+    expect(resumeToken({ ...subject, mtimeMs: 1 })).not.toBe(original);
+    expect(resumeToken({ ...subject, digest: "abc124" })).not.toBe(original);
+    expect(resumeToken({ ...subject, requested: "photos/b.jpg" })).not.toBe(original);
+    expect(resumeToken({ ...subject, userId: "user-2" })).not.toBe(original);
+    expect(resumeToken({ ...subject, hostId: "host-b" })).not.toBe(original);
+    expect(resumeToken({ ...subject, root: "/srv/other" })).not.toBe(original);
+  });
+
+  it("keeps the directory and the path apart, so two ways of joining cannot meet", () => {
+    // `/srv/backup` + `photos/a.jpg` and `/srv` + `backup/photos/a.jpg` name the
+    // same file and are not the same upload — one has a destination the other
+    // is only passing through, and only one of them may be written into.
+    expect(resumeToken({ ...subject, root: "/srv", requested: "backup/photos/a.jpg" })).not.toBe(resumeToken(subject));
+  });
+
+  it("is a filename whatever it was given", () => {
+    expect(resumeToken(subject)).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
+describe("recognising a partial", () => {
+  it("knows its own", () => {
+    expect(isPartialName(partialName("abcdef"))).toBe(true);
+  });
+
+  it("refuses everything else, because what reads this goes on to delete", () => {
+    expect(isPartialName(".part")).toBe(false);
+    expect(isPartialName(".trekker-.part")).toBe(false);
+    expect(isPartialName(".trekker-abcdef")).toBe(false);
+    expect(isPartialName("archive.part")).toBe(false);
+    expect(isPartialName(".trekker-notes.txt")).toBe(false);
+    expect(isPartialName("trekker-abcdef.part")).toBe(false);
+  });
+});
+
+describe("resuming an interrupted upload", () => {
+  /** What the browser says about `big.bin`: eleven bytes, hashed and stamped. */
+  const claim: ResumeClaim = { size: 11, mtimeMs: 1_700_000_000_000, digest: "d00d" };
+
+  /**
+   * The realpath, not the temporary directory's own name.
+   *
+   * macOS puts `mkdtemp` under `/var/folders`, which is a symlink to
+   * `/private/var/folders`. The controller hands `receive` the path the guard
+   * resolved, so in production both sides of the token see the resolved one —
+   * and a test that passed the unresolved name would compute a different token
+   * on each side and prove nothing about either.
+   */
+  let real: string;
+
+  beforeEach(async () => {
+    real = await realpath(base);
+  });
+
+  const tokenFor = (requested: string, over: Partial<ResumeClaim> = {}): string =>
+    resumeToken({ ...claim, ...over, userId: USER_ID, hostId: HOST_ID, root: real, requested });
+
+  const partialFor = (requested: string, over: Partial<ResumeClaim> = {}): string =>
+    partialName(tokenFor(requested, over));
+
+  it("keeps what arrived, under a name the next attempt can find", async () => {
+    const outcome = await serviceFor(writeRoot()).receive(
+      USER_ID,
+      driver(),
+      real,
+      "big.bin",
+      brokenBody("hello "),
+      "keepBoth",
+      { resume: { claim, from: 0 } },
+    );
+
+    expect(outcome.ok).toBe(false);
+    // The old promise still holds — nothing under the real name — and the new
+    // one beside it. Without a resume claim this directory would be empty, as
+    // "leaves nothing behind when the upload dies partway" above still asserts.
+    expect(await entries(real)).toEqual([partialFor("big.bin")]);
+    expect(await readFile(join(real, partialFor("big.bin")), "utf8")).toBe("hello ");
+  });
+
+  it("continues from where it stopped, and the file is whole", async () => {
+    const service = serviceFor(writeRoot());
+    await service.receive(USER_ID, driver(), real, "big.bin", brokenBody("hello "), "keepBoth", {
+      resume: { claim, from: 0 },
+    });
+
+    const outcome = await service.receive(USER_ID, driver(), real, "big.bin", body("world"), "keepBoth", {
+      resume: { claim, from: 6 },
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(await readFile(join(real, "big.bin"), "utf8")).toBe("hello world");
+    // The partial became the file. Resume leaves no more behind than an
+    // uninterrupted upload does.
+    expect(await entries(real)).toEqual(["big.bin"]);
+  });
+
+  it("refuses an offset that is not the length it holds, rather than splicing", async () => {
+    const service = serviceFor(writeRoot());
+    await service.receive(USER_ID, driver(), real, "big.bin", brokenBody("hello "), "keepBoth", {
+      resume: { claim, from: 0 },
+    });
+
+    const outcome = await service.receive(USER_ID, driver(), real, "big.bin", body("world"), "keepBoth", {
+      resume: { claim, from: 3 },
+    });
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.code).toBe("ERESUME");
+    // Nothing written under the real name, and the six bytes left exactly as
+    // they were — a refusal that damaged the partial would have made the next
+    // attempt wrong too.
+    expect(await entries(real)).toEqual([partialFor("big.bin")]);
+    expect(await readFile(join(real, partialFor("big.bin")), "utf8")).toBe("hello ");
+  });
+
+  it("does not continue a file whose bytes changed under an unchanged mtime", async () => {
+    const service = serviceFor(writeRoot());
+    await service.receive(USER_ID, driver(), real, "big.bin", brokenBody("hello "), "keepBoth", {
+      resume: { claim, from: 0 },
+    });
+
+    // Same name, same size, same mtime, different leading megabyte. This is the
+    // case the digest is in the token for: nothing else about the file has
+    // moved, and appending would produce `hello goodbye`.
+    const edited: ResumeClaim = { ...claim, digest: "beef" };
+    const outcome = await service.receive(USER_ID, driver(), real, "big.bin", body("goodbye"), "keepBoth", {
+      resume: { claim: edited, from: 0 },
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(await readFile(join(real, "big.bin"), "utf8")).toBe("goodbye");
+    // The first attempt's bytes are orphaned rather than appended to — left for
+    // the sweep, which is the price of never guessing.
+    expect(await entries(real)).toEqual(["big.bin", partialFor("big.bin")].sort());
+  });
+
+  it("counts what is already there against the per-file limit", async () => {
+    process.env.TREKKER_UPLOAD_MAX_BYTES = "8";
+    const service = serviceFor(writeRoot());
+
+    await service.receive(USER_ID, driver(), real, "big.bin", brokenBody("hello "), "keepBoth", {
+      resume: { claim, from: 0 },
+    });
+
+    await expect(
+      service.receive(USER_ID, driver(), real, "big.bin", body("world"), "keepBoth", { resume: { claim, from: 6 } }),
+    ).rejects.toBeInstanceOf(UploadRefused);
+
+    // And the partial goes with it: eleven bytes will not fit in eight however
+    // many times somebody comes back for it.
+    expect(await entries(real)).toEqual([]);
+  });
+
+  it("resumes each file of a folder against its own partial", async () => {
+    const service = serviceFor(writeRoot());
+
+    for (const path of ["photos/a.jpg", "photos/b.jpg"]) {
+      await service.receive(USER_ID, driver(), real, path, brokenBody("hi"), "keepBoth", {
+        resume: { claim, from: 0 },
+      });
+    }
+
+    // Two partials, not one written over twice. The relative path is in the
+    // token precisely so that two files of the same size and stamp inside one
+    // folder are two transfers.
+    expect(await entries(join(real, "photos"))).toEqual(
+      [partialFor("photos/a.jpg"), partialFor("photos/b.jpg")].sort(),
+    );
+
+    const outcome = await service.receive(USER_ID, driver(), real, "photos/a.jpg", body("!"), "keepBoth", {
+      resume: { claim, from: 2 },
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(await readFile(join(real, "photos", "a.jpg"), "utf8")).toBe("hi!");
+    expect(await entries(join(real, "photos"))).toEqual(["a.jpg", partialFor("photos/b.jpg")].sort());
+  });
+});
+
+describe("asking how much is already there", () => {
+  const claim: ResumeClaim = { size: 11, mtimeMs: 1_700_000_000_000, digest: "d00d" };
+  let real: string;
+
+  beforeEach(async () => {
+    real = await realpath(base);
+  });
+
+  it("answers with the partial's length", async () => {
+    const service = serviceFor(writeRoot());
+    await service.receive(USER_ID, driver(), real, "big.bin", brokenBody("hello "), "keepBoth", {
+      resume: { claim, from: 0 },
+    });
+
+    expect(await service.resumeOffset(USER_ID, HOST_ID, base, "big.bin", claim)).toEqual({ offset: 6 });
+  });
+
+  it("answers zero when there is nothing to continue", async () => {
+    const service = serviceFor(writeRoot());
+    expect(await service.resumeOffset(USER_ID, HOST_ID, base, "big.bin", claim)).toEqual({ offset: 0 });
+  });
+
+  it("answers zero for a folder that has not been made yet", async () => {
+    const service = serviceFor(writeRoot());
+    expect(await service.resumeOffset(USER_ID, HOST_ID, base, "photos/2019/a.jpg", claim)).toEqual({ offset: 0 });
+  });
+
+  it("answers zero for a partial longer than the file it claims to be", async () => {
+    const service = serviceFor(writeRoot());
+    // Interrupted holding six bytes while claiming three — however that came
+    // about, appending to it cannot produce the file being offered.
+    const short: ResumeClaim = { ...claim, size: 3 };
+    await service.receive(USER_ID, driver(), real, "big.bin", brokenBody("hello "), "keepBoth", {
+      resume: { claim: short, from: 0 },
+    });
+
+    expect(await service.resumeOffset(USER_ID, HOST_ID, base, "big.bin", short)).toEqual({ offset: 0 });
+  });
+
+  it("finds one inside a subdirectory, so a folder is resumed file by file", async () => {
+    const service = serviceFor(writeRoot());
+    await service.receive(USER_ID, driver(), real, "photos/a.jpg", brokenBody("hi"), "keepBoth", {
+      resume: { claim, from: 0 },
+    });
+
+    expect(await service.resumeOffset(USER_ID, HOST_ID, base, "photos/a.jpg", claim)).toEqual({ offset: 2 });
+  });
+
+  it("refuses to look outside the roots through a symlinked segment", async () => {
+    const elsewhere = await mkdtemp(join(tmpdir(), "trekker-elsewhere-"));
+    await symlink(elsewhere, join(base, "photos"));
+
+    try {
+      const service = serviceFor(writeRoot());
+      expect(await service.resumeOffset(USER_ID, HOST_ID, base, "photos/a.jpg", claim)).toEqual({ offset: 0 });
+    } finally {
+      await rm(elsewhere, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("sweeping partials nobody came back for", () => {
+  /** Older than the week a partial is kept for. */
+  const ancient = (): number => Date.now() / 1000 - 8 * 24 * 60 * 60;
+
+  it("takes the abandoned one and leaves the fresh one", async () => {
+    const abandoned = partialName("a".repeat(32));
+    const fresh = partialName("b".repeat(32));
+
+    await writeFile(join(base, abandoned), "old");
+    await writeFile(join(base, fresh), "new");
+    // Named like ours and not ours. The predicate is narrow on purpose, and
+    // this is the file that proves it: what runs here deletes.
+    await writeFile(join(base, ".trekker-notes.txt"), "keep me");
+    await utimes(join(base, abandoned), ancient(), ancient());
+    await utimes(join(base, ".trekker-notes.txt"), ancient(), ancient());
+
+    await serviceFor(writeRoot()).destination(USER_ID, HOST_ID, base, { sweep: true });
+
+    expect(await entries(base)).toEqual([".trekker-notes.txt", fresh].sort());
+  });
+
+  it("leaves everything alone when only asked where to write", async () => {
+    const abandoned = partialName("a".repeat(32));
+    await writeFile(join(base, abandoned), "old");
+    await utimes(join(base, abandoned), ancient(), ancient());
+
+    // What the offset lookup does, once per large file. A listing per question
+    // would be the cost of tidying paid by the transfers it is meant to help.
+    await serviceFor(writeRoot()).destination(USER_ID, HOST_ID, base);
+
+    expect(await entries(base)).toEqual([abandoned]);
+  });
+
+  it("reaches the subdirectories a folder upload walks into", async () => {
+    await mkdir(join(base, "photos"));
+    const abandoned = partialName("c".repeat(32));
+    await writeFile(join(base, "photos", abandoned), "old");
+    await utimes(join(base, "photos", abandoned), ancient(), ancient());
+
+    await serviceFor(writeRoot()).receive(USER_ID, driver(), base, "photos/x.txt", body("x"), "keepBoth");
+
+    // An interrupted folder leaves a partial wherever it had reached, and this
+    // is the only moment anything looks in there.
+    expect(await entries(join(base, "photos"))).toEqual(["x.txt"]);
+  });
+});
+
+/**
+ * TRE-143. What the host already has, asked about a whole batch at once.
+ *
+ * The thing this protects is the retry after a dropped connection: a request
+ * that answered nothing still landed some of its files, because the route
+ * writes them one at a time, and re-sending those would duplicate them under
+ * `keepBoth` and spend the uplink twice under any policy. So the tests care
+ * about two properties — that the answer is *right*, and that it comes back one
+ * for one in the order asked, since a caller reconciling a shorter list against
+ * its own is a caller with a new way to go wrong.
+ */
+describe("surveying a batch", () => {
+  const claim: ResumeClaim = { size: 11, mtimeMs: 1_700_000_000_000, digest: "d00d" };
+  let real: string;
+
+  beforeEach(async () => {
+    real = await realpath(base);
+  });
+
+  it("says which names are taken and which are free", async () => {
+    await writeFile(join(base, "there.txt"), "already");
+
+    const answers = await serviceFor(writeRoot()).survey(USER_ID, HOST_ID, base, [
+      { name: "there.txt" },
+      { name: "missing.txt" },
+    ]);
+
+    expect(answers).toEqual([
+      { name: "there.txt", there: true, offset: 0 },
+      { name: "missing.txt", there: false, offset: 0 },
+    ]);
+  });
+
+  it("counts a directory as a name that is taken", async () => {
+    // The upload would refuse to write here too, so reporting it free would
+    // send a file that cannot land.
+    await mkdir(join(base, "notes"));
+
+    expect(await serviceFor(writeRoot()).survey(USER_ID, HOST_ID, base, [{ name: "notes" }])).toEqual([
+      { name: "notes", there: true, offset: 0 },
+    ]);
+  });
+
+  it("reports a partial's length, but only when asked with a claim", async () => {
+    const service = serviceFor(writeRoot());
+    await service.receive(USER_ID, driver(), real, "big.bin", brokenBody("hello "), "keepBoth", {
+      resume: { claim, from: 0 },
+    });
+
+    expect(await service.survey(USER_ID, HOST_ID, base, [{ name: "big.bin", claim }])).toEqual([
+      { name: "big.bin", there: false, offset: 6 },
+    ]);
+
+    // Without a claim there is no token, so there is nothing to look for —
+    // which is the right answer for a packed file, whose partial is
+    // random-named and was discarded when its request died.
+    expect(await service.survey(USER_ID, HOST_ID, base, [{ name: "big.bin" }])).toEqual([
+      { name: "big.bin", there: false, offset: 0 },
+    ]);
+  });
+
+  it("answers across subdirectories in one go", async () => {
+    await mkdir(join(base, "photos"));
+    await writeFile(join(base, "photos", "a.jpg"), "landed");
+    await writeFile(join(base, "top.txt"), "landed");
+
+    const answers = await serviceFor(writeRoot()).survey(USER_ID, HOST_ID, base, [
+      { name: "photos/a.jpg" },
+      { name: "photos/b.jpg" },
+      { name: "top.txt" },
+      { name: "nowhere/c.jpg" },
+    ]);
+
+    expect(answers).toEqual([
+      { name: "photos/a.jpg", there: true, offset: 0 },
+      { name: "photos/b.jpg", there: false, offset: 0 },
+      { name: "top.txt", there: true, offset: 0 },
+      // A directory that does not exist yet holds nothing, which is not an
+      // error — it is the ordinary answer for a folder about to be made.
+      { name: "nowhere/c.jpg", there: false, offset: 0 },
+    ]);
+  });
+
+  it("answers one for one and in order, including for a name it would refuse", async () => {
+    await writeFile(join(base, "b.txt"), "landed");
+
+    const answers = await serviceFor(writeRoot()).survey(USER_ID, HOST_ID, base, [
+      { name: "a.txt" },
+      { name: "../escape.txt" },
+      { name: "b.txt" },
+    ]);
+
+    expect(answers.map((answer) => answer.name)).toEqual(["a.txt", "../escape.txt", "b.txt"]);
+    expect(answers.map((answer) => answer.there)).toEqual([false, false, true]);
+  });
+
+  it("reports nothing through a segment that leaves the roots", async () => {
+    const elsewhere = await mkdtemp(join(tmpdir(), "trekker-elsewhere-"));
+    await writeFile(join(elsewhere, "secret.txt"), "not yours");
+    await symlink(elsewhere, join(base, "photos"));
+
+    try {
+      expect(await serviceFor(writeRoot()).survey(USER_ID, HOST_ID, base, [{ name: "photos/secret.txt" }])).toEqual([
+        { name: "photos/secret.txt", there: false, offset: 0 },
+      ]);
+    } finally {
+      await rm(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to answer at all for a destination outside the roots", async () => {
+    const elsewhere = await mkdtemp(join(tmpdir(), "trekker-elsewhere-"));
+
+    try {
+      await expect(
+        serviceFor(writeRoot()).survey(USER_ID, HOST_ID, elsewhere, [{ name: "a.txt" }]),
+      ).rejects.toBeTruthy();
+    } finally {
+      await rm(elsewhere, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * TRE-144. Whether there is room, asked before anything is sent.
+ *
+ * The reason this is worth a check rather than a failure to recover from is in
+ * `transfer-runner.service.ts`: **SFTP has no ENOSPC on the wire**, so a full
+ * remote disk arrives as a bare `EIO` after however long it took to fill. The
+ * numbers below are the only warning anybody gets.
+ */
+describe("room at the destination", () => {
+  /** `df -Pk`, in the POSIX format `-P` exists to guarantee. */
+  const DF = [
+    "Filesystem 1024-blocks     Used Available Capacity Mounted on",
+    "/dev/vda1     51475068 39675068  10800000      79% /",
+  ].join("\n");
+
+  /** A driver that answers `df` and nothing else, which is all this reads. */
+  const speaking = (stdout: string): HostDriver =>
+    ({ exec: () => Promise.resolve({ stdout, stderr: "", code: 0 }) }) as unknown as HostDriver;
+
+  const refusing = (): HostDriver =>
+    ({ exec: () => Promise.reject(new Error("df: not found")) }) as unknown as HostDriver;
+
+  it("reads both figures off the line, in bytes", async () => {
+    expect(await readSpace(speaking(DF), "/srv")).toEqual({
+      freeBytes: 10_800_000 * 1024,
+      totalBytes: 51_475_068 * 1024,
+    });
+  });
+
+  it("skips the header rather than counting lines", async () => {
+    // Some systems print a warning above it, and "drop the first line" would
+    // then drop a filesystem and keep the header.
+    const noisy = `df: /net: Operation not permitted\n${DF}`;
+    expect((await readSpace(speaking(noisy), "/srv"))?.freeBytes).toBe(10_800_000 * 1024);
+  });
+
+  it("answers null when df says nothing usable, and null is not zero", async () => {
+    // The distinction the callers rest on: null means the question could not be
+    // asked and the upload proceeds. Zero would refuse every upload to a host
+    // whose `df` is missing, which turns a safety check into an outage.
+    expect(await readSpace(speaking("Filesystem 1024-blocks Used Available Capacity Mounted on"), "/srv")).toBeNull();
+    expect(await readSpace(refusing(), "/srv")).toBeNull();
+  });
+
+  it("still answers the older question the transfer engine asks", async () => {
+    expect(await readFreeBytes(speaking(DF), "/srv")).toBe(10_800_000 * 1024);
+    expect(await readFreeBytes(refusing(), "/srv")).toBeNull();
+  });
+
+  it("keeps the free figure when the total will not parse", async () => {
+    // The fraction is a nicety; the fit check is the point, and withholding it
+    // over a missing denominator would refuse to answer the useful half.
+    const odd = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vda1 - 39675068 10800000 79% /";
+    expect(await readSpace(speaking(odd), "/srv")).toEqual({ freeBytes: 10_800_000 * 1024, totalBytes: 0 });
+  });
+
+  it("reports the real volume behind a validated destination", async () => {
+    const space = await serviceFor(writeRoot()).spaceAt(USER_ID, HOST_ID, base);
+
+    expect(space.free).not.toBeNull();
+    expect(space.free ?? 0).toBeGreaterThan(0);
+    expect(space.total ?? 0).toBeGreaterThanOrEqual(space.free ?? 0);
+  });
+
+  it("refuses to describe a disk outside the roots", async () => {
+    const elsewhere = await mkdtemp(join(tmpdir(), "trekker-elsewhere-"));
+
+    try {
+      // A volume is a fact about a machine. Answering here would describe a
+      // disk this user was never given access to.
+      await expect(serviceFor(writeRoot()).spaceAt(USER_ID, HOST_ID, elsewhere)).rejects.toBeTruthy();
+    } finally {
+      await rm(elsewhere, { recursive: true, force: true });
+    }
   });
 });

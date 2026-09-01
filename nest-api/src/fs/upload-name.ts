@@ -122,10 +122,41 @@ export function numberedName(name: string, attempt: number): string {
  * destination. This is the whole reason the ticket asks for a temporary name
  * rather than a temporary file.
  *
- * Leading dot so it is hidden from a listing, `.part` so anything that finds
- * one knows what it is, and the random middle so two uploads of the same name
- * at the same moment do not write over each other.
+ * Leading dot so it is hidden from a listing, and `.part` so anything that
+ * finds one knows what it is.
+ *
+ * The middle is the caller's, and which caller it is decides everything about
+ * the file's life. An ordinary upload passes random bytes: nothing can name
+ * that file again, so it is removed when the attempt ends, and two uploads of
+ * one name at one moment cannot write over each other. A resumable upload
+ * passes `resumeToken`, which is derived from the file — so the same file
+ * offered twice names the same partial, which is the whole of how TRE-142
+ * continues rather than restarts, and why the sweep exists.
  */
 export function partialName(token: string): string {
-  return `.trekker-${token}.part`;
+  return `${PARTIAL_PREFIX}${token}${PARTIAL_SUFFIX}`;
+}
+
+const PARTIAL_PREFIX = ".trekker-";
+const PARTIAL_SUFFIX = ".part";
+
+/**
+ * Whether a listing entry is one of ours (TRE-142).
+ *
+ * Since TRE-142 a partial outlives the attempt that made it, so that a second
+ * attempt can continue where the first stopped. That is only safe paired with
+ * something that takes away the ones nobody comes back for, and this is what
+ * that sweep recognises.
+ *
+ * Deliberately narrow. It matches the shape this file writes and nothing else,
+ * because the sweep it feeds *deletes*, and a predicate that also matched
+ * `.partial` or `.trekker-notes` would be a data-loss bug wearing a tidying
+ * function's clothes.
+ */
+export function isPartialName(name: string): boolean {
+  return (
+    name.startsWith(PARTIAL_PREFIX) &&
+    name.endsWith(PARTIAL_SUFFIX) &&
+    name.length > PARTIAL_PREFIX.length + PARTIAL_SUFFIX.length
+  );
 }

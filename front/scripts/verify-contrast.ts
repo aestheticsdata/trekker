@@ -706,13 +706,19 @@ const ROOMS: readonly Room[] = [
   },
 
   {
-    // No danger wash: this modal refuses nothing of its own. The server's
-    // refusals land in the tray, and the one thing it says for itself — that a
-    // drop was bigger than the cap — is a warning rather than a failure.
+    // It refuses one thing of its own since TRE-144: a selection larger than
+    // the destination has room for. Everything else it says for itself is a
+    // warning — the walk stopping at the cap, the disk about to get tight —
+    // and the server's own refusals still land in the tray rather than here.
     file: "components/explorer/upload-modal.tsx",
     boxes: [
       { on: [APP, CHROME_BG], inks: ["ink-dim", "ink-faint", "ink-label", "ink-muted", "ink-soft"] },
-      { on: [WARNING_WASH], inks: ["warning"], note: "the line saying the walk stopped at the cap (TRE-126)" },
+      {
+        on: [WARNING_WASH],
+        inks: ["warning"],
+        note: "the walk stopped at the cap (TRE-126), and what little would be left afterwards (TRE-144)",
+      },
+      { on: [DANGER_WASH], inks: ["danger-soft"], note: "no room at the destination (TRE-144)" },
     ],
   },
 

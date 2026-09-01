@@ -146,6 +146,30 @@ const DF_FREE_ARGS = ["-Pk"] as const;
  * worth having: `df` with no argument omits filesystems it cannot stat.
  */
 export async function readFreeBytes(driver: HostDriver, path: string): Promise<number | null> {
+  return (await readSpace(driver, path))?.freeBytes ?? null;
+}
+
+export interface DiskSpace {
+  /** Bytes a non-privileged write may still use. */
+  freeBytes: number;
+  /** The filesystem's size, for saying how much of it that is (TRE-144). */
+  totalBytes: number;
+}
+
+/**
+ * The same `df` line, read whole (TRE-144).
+ *
+ * `readFreeBytes` was enough while the only question was "does this fit". An
+ * upload also has to answer "and what will be left", which is a fraction and
+ * therefore needs the denominator: 900 MB free is comfortable on a laptop and
+ * an emergency on the 50 GB volume this feature exists for, and the difference
+ * is not visible from the numerator.
+ *
+ * Null, and never zero, when `df` could not answer — the callers must tell
+ * those apart, or a host without `df` refuses every upload and a full one
+ * accepts them all.
+ */
+export async function readSpace(driver: HostDriver, path: string): Promise<DiskSpace | null> {
   try {
     const result = await driver.exec("df", [...DF_FREE_ARGS, path], { timeoutMs: DF_TIMEOUT_MS });
 
@@ -153,9 +177,15 @@ export async function readFreeBytes(driver: HostDriver, path: string): Promise<n
       const fields = DF_LINE.exec(line.trimEnd());
       // The header's sixth field is "Mounted on", which does not start with `/`.
       if (!fields || !fields[6].startsWith("/")) continue;
-      const kib = Number.parseInt(fields[4], 10);
-      if (Number.isNaN(kib) || kib < 0) return null;
-      return kib * 1024;
+
+      const total = Number.parseInt(fields[2], 10);
+      const free = Number.parseInt(fields[4], 10);
+      if (Number.isNaN(free) || free < 0) return null;
+      // A total that will not parse is not a reason to withhold the free space;
+      // it only costs the fraction, and the fit check is the important half.
+      const totalBytes = Number.isNaN(total) || total < 0 ? 0 : total * 1024;
+
+      return { freeBytes: free * 1024, totalBytes };
     }
     return null;
   } catch {
