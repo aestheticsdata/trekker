@@ -104,7 +104,19 @@ function UploadPanel({
   const [files, setFiles] = useState<readonly PickedFile[]>(() => merge([], target.initial.files));
   const [truncated, setTruncated] = useState(target.initial.truncated);
   const [conflict, setConflict] = useState<ConflictPolicy>("keepBoth");
-  const [skipDots, setSkipDots] = useState(true);
+  /**
+   * Dot-files travel by default (TRE-141).
+   *
+   * TRE-126 had this the other way round, on the strength of `.DS_Store` being
+   * in every directory a Mac has ever opened. That is right about `.DS_Store`
+   * and wrong about everything else: the destination this was built for is a
+   * backup, and the names beginning with a dot — `.env`, `.gitignore`,
+   * `.ssh/config` — are the ones hardest to reconstruct and easiest not to
+   * notice missing. Leaving them behind is a tidying somebody asks for, not
+   * one the app performs on their behalf and mentions in a checkbox they have
+   * already scrolled past.
+   */
+  const [skipDots, setSkipDots] = useState(false);
 
   const filePicker = useRef<HTMLInputElement>(null);
   const folderPicker = useRef<HTMLInputElement>(null);
@@ -250,8 +262,9 @@ function UploadPanel({
           })}
         </fieldset>
 
-        {/* Only once there is something to skip. A checkbox about `.DS_Store`
-            on an empty panel is a question nobody has yet. */}
+        {/* Only once there is something to skip: a checkbox about `.DS_Store`
+            on an empty panel is a question nobody has yet. Unchecked, so it
+            offers the tidying rather than reporting one already done. */}
         {dotted > 0 && (
           <label className="text-ink-muted flex cursor-pointer items-center gap-1.5 font-mono text-2xs">
             <input
