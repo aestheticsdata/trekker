@@ -1,7 +1,7 @@
 {
   "name": "trekker",
   "private": true,
-  "packageManager": "pnpm@11.9.0",
+  "packageManager": "pnpm@12.2.1",
   "scripts": {
     "dev": "pnpm --parallel --filter \"./front\" --filter \"./nest-api\" dev",
     "build": "pnpm --filter \"./nest-api\" build && pnpm --filter \"./front\" build",
