@@ -170,7 +170,9 @@ cd "$STAGING_DIR"
 # Nothing to carry forward: the front has no environment. Behind nginx the API
 # is same-origin under /api/, so there is nothing to point it at.
 # --filter keeps the API's dependencies out of the front's install.
-pnpm install --frozen-lockfile --filter ./front --prod=false
+# --no-prod rather than --prod=false since TRE-145: pnpm 12's CLI takes no
+# value for --prod, and refuses the whole command rather than ignoring it.
+pnpm install --frozen-lockfile --filter ./front --no-prod
 pnpm --filter ./front build
 EOF
 

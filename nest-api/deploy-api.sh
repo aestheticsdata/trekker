@@ -235,10 +235,13 @@ export PATH="$REMOTE_PATH:$PATH"
 export NODE_ENV=production
 command -v pnpm >/dev/null 2>&1 || { echo "❌ ERROR: pnpm not found on the server" >&2; exit 1; }
 cd "$NEST_DIR"
-# --prod=false explicitly: the build needs the Prisma CLI and the Nest CLI,
-# which are devDependencies, and NODE_ENV=production would otherwise skip them.
+# --no-prod explicitly: the build needs the Prisma CLI and the Nest CLI, which
+# are devDependencies, and the NODE_ENV=production above would otherwise skip
+# them. Spelt --prod=false until TRE-145 — pnpm 12's CLI takes no value for
+# --prod and refuses the whole command rather than ignoring the argument, so
+# the old spelling failed the deploy before anything was installed.
 # --filter keeps the front's dependencies out of this install.
-pnpm install --frozen-lockfile --filter ./nest-api --prod=false
+pnpm install --frozen-lockfile --filter ./nest-api --no-prod
 pnpm --filter ./nest-api build
 EOF
 
