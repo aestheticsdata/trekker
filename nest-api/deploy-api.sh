@@ -68,7 +68,44 @@ chmod 600 "$HOME/.pm2/dump.pm2" 2>/dev/null || true
 EOF
 }
 
+# The pnpm version is deliberately not written down here. Each project pins it
+# in package.json ("packageManager") and both machines switch to that version on
+# their own. What this guards is the *baseline* pnpm — the binary that performs
+# the switch. A server baseline older than this machine's may not honour the pin
+# at all, in which case the build would quietly run on the wrong pnpm.
+#
+# npm_config_manage_package_manager_versions=false bypasses the pin: without it
+# both sides would report the pinned version and the comparison would prove
+# nothing. It has to be the environment variable — the equivalent
+# `--config.manage-package-manager-versions=false` flag is silently ignored
+# here, because the version switch happens before flags are parsed.
+check_pnpm_baseline() {
+  local local_v remote_v oldest
+
+  local_v=$(npm_config_manage_package_manager_versions=false pnpm -v 2>/dev/null) || {
+    echo "❌ ERROR: pnpm not found on this machine" >&2
+    exit 1
+  }
+
+  remote_v=$(ssh "$TREKKER_DEPLOY_HOST" \
+    'export PATH="$HOME/.local/share/pnpm:$PATH"; npm_config_manage_package_manager_versions=false pnpm -v' \
+    2>/dev/null) || {
+    echo "❌ ERROR: pnpm not found on the server" >&2
+    exit 1
+  }
+
+  oldest=$(printf '%s\n%s\n' "$local_v" "$remote_v" | sort -V | head -1)
+  if [ "$remote_v" != "$local_v" ] && [ "$oldest" = "$remote_v" ]; then
+    echo "❌ ERROR: the server's pnpm ($remote_v) is older than this machine's ($local_v)." >&2
+    echo "   Update pnpm on the server before deploying." >&2
+    exit 1
+  fi
+
+  log "➡️  pnpm baseline — local $local_v / server $remote_v"
+}
+
 deploy() {
+  check_pnpm_baseline
   cd "$SCRIPT_DIR"
   # Setup problems before readiness problems: "you haven't configured this" is a
   # different kind of failure from "you're not ready to ship", and hitting them
