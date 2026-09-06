@@ -48,6 +48,7 @@ export function Sparkline({
     <span
       role="img"
       aria-label={label}
+      data-testid="sparkline"
       // The gap is an arbitrary rem rather than a scale step: Tailwind's
       // numeric scale stops at two decimals, and 1.5px is 0.09375rem.
       className={`flex h-2.75 items-end gap-[0.09375rem] ${className}`}

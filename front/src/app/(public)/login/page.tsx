@@ -61,6 +61,7 @@ export default function LoginPage() {
     >
       <form
         onSubmit={handleSubmit(onSubmit)}
+        data-testid="login-form"
         className="flex flex-col gap-3"
         noValidate
       >
@@ -71,6 +72,7 @@ export default function LoginPage() {
           autoFocus
           registration={register("email")}
           error={errors.email?.message}
+          testId="login-email"
         />
         <AuthField
           label="Key"
@@ -78,11 +80,15 @@ export default function LoginPage() {
           autoComplete="current-password"
           registration={register("password")}
           error={errors.password?.message}
+          testId="login-password"
+          revealTestId="login-reveal"
         />
 
         <button
           type="submit"
           disabled={isSubmitting}
+          // `CONNECT` reads `CONNECTING…` for the length of the request.
+          data-testid="login-submit"
           className="border-accent text-ink hover:bg-accent/20 mt-1 rounded-xs border py-1.5 text-sm tracking-caps disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSubmitting ? "CONNECTING…" : "CONNECT"}

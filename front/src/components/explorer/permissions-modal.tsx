@@ -90,6 +90,7 @@ export function PermissionsModal({
     <Overlay
       label={`Permissions for ${subject}`}
       onClosed={onClose}
+      testId="permissions-modal"
       panelClassName="bg-app border-line-strong w-full max-w-[30rem] overflow-hidden rounded-sm border shadow-2xl"
     >
       {(close) => (
@@ -248,6 +249,7 @@ function PermissionsPanel({
             type="button"
             onClick={close}
             aria-label="Close"
+            data-testid="permissions-close"
             className="text-ink-dim font-mono text-2xs"
           >
             esc ✕
@@ -271,6 +273,8 @@ function PermissionsPanel({
                   // digit alone: a preset is a permission set, and silently
                   // clearing a setuid bit would be a security change nobody
                   // asked this button for.
+                  data-testid="permissions-preset"
+                  data-preset={preset}
                   onClick={() => setBits((current) => (current & 0o7000) | (Number.parseInt(preset, 8) & 0o777))}
                   className={`border px-1.75 py-1 font-mono text-2xs/none ${
                     active ? `${ON_FILL} border-accent-fill` : "text-ink-muted border-line-strong"
@@ -307,6 +311,9 @@ function PermissionsPanel({
                       type="button"
                       aria-pressed={on}
                       aria-label={`${COLUMNS[column]} for ${who}`}
+                      data-testid="permissions-bit"
+                      data-who={who}
+                      data-bit={COLUMNS[column]}
                       onClick={() => setBits((current) => current ^ bit)}
                       className={`border py-1.75 text-center font-medium ${
                         on ? `${ON_FILL} border-accent-fill` : "bg-chrome text-ink-faint border-line-strong"
@@ -332,6 +339,8 @@ function PermissionsPanel({
                   key={special.label}
                   type="button"
                   aria-pressed={on}
+                  data-testid="permissions-special"
+                  data-bit={special.label}
                   onClick={() => setBits((current) => current ^ special.bit)}
                   className={`border px-1.75 py-1 font-mono text-2xs/none ${
                     on
@@ -354,6 +363,7 @@ function PermissionsPanel({
               onChange={(event) => setOwner(event.target.value)}
               placeholder={mixedOwners ? "mixed — user:group" : startingOwner}
               aria-label="Owner and group"
+              data-testid="permissions-owner"
               className="bg-chrome border-line-strong text-ink w-full border px-2 py-1.5 font-mono text-cmd"
             />
           </div>
@@ -361,7 +371,12 @@ function PermissionsPanel({
       </div>
 
       <div className="px-3.5 pb-3">
-        <label className="flex items-center gap-2">
+        {/* On the label, not the `sr-only` input: the label is the box a
+            pointer can land on, and a click here toggles the input inside. */}
+        <label
+          data-testid="permissions-recursive"
+          className="flex items-center gap-2"
+        >
           <input
             type="checkbox"
             checked={recursive}
@@ -453,6 +468,7 @@ function PermissionsPanel({
         <button
           type="button"
           onClick={close}
+          data-testid="permissions-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
           cancel
@@ -461,6 +477,9 @@ function PermissionsPanel({
           type="button"
           onClick={() => apply.mutate()}
           disabled={apply.isPending}
+          // The label carries the octal (`apply 0755`), which is the very
+          // thing the grid changes — so the name is what a script holds.
+          data-testid="permissions-apply"
           className={`${PRESS} px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:opacity-60`}
         >
           {apply.isPending ? "applying…" : `apply ${octal}`}

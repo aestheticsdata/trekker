@@ -82,6 +82,7 @@ export function UploadModal({
     <Overlay
       label={`Upload into ${target.directory}`}
       onClosed={onClose}
+      testId="upload-modal"
       panelClassName="bg-app border-line-strong flex max-h-[80vh] w-full max-w-[32rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
     >
       {(close) => (
@@ -200,6 +201,7 @@ function UploadPanel({
             type="button"
             onClick={close}
             aria-label="Close"
+            data-testid="upload-close"
             className="text-ink-dim flex-none font-mono text-2xs"
           >
             esc ✕
@@ -219,6 +221,7 @@ function UploadPanel({
               <button
                 type="button"
                 onClick={() => filePicker.current?.click()}
+                data-testid="upload-pick-files"
                 className={`${PRESS} px-3.5 py-1.75 font-mono text-xs/none font-medium`}
               >
                 choose files…
@@ -226,6 +229,7 @@ function UploadPanel({
               <button
                 type="button"
                 onClick={() => folderPicker.current?.click()}
+                data-testid="upload-pick-folder"
                 className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
               >
                 choose a folder…
@@ -238,6 +242,8 @@ function UploadPanel({
             {shown.map((picked) => (
               <div
                 key={fingerprint(picked)}
+                data-testid="upload-row"
+                data-path={picked.path}
                 className="border-raised flex items-baseline gap-2 border-t px-3.5 py-1.5 first:border-t-0"
               >
                 {/* The path, not the name: in a folder upload the name alone
@@ -299,6 +305,8 @@ function UploadPanel({
                 key={policy.value}
                 type="button"
                 aria-pressed={active}
+                data-testid="upload-policy"
+                data-policy={policy.value}
                 onClick={() => setConflict(policy.value)}
                 className={`border-line-strong flex items-center border-l px-2.25 font-mono text-2xs first:border-l-0 ${
                   active ? `${SELECTED} font-medium` : "text-ink-muted"
@@ -314,7 +322,10 @@ function UploadPanel({
             on an empty panel is a question nobody has yet. Unchecked, so it
             offers the tidying rather than reporting one already done. */}
         {dotted > 0 && (
-          <label className="text-ink-muted flex cursor-pointer items-center gap-1.5 font-mono text-2xs">
+          <label
+            data-testid="upload-skip-dots"
+            className="text-ink-muted flex cursor-pointer items-center gap-1.5 font-mono text-2xs"
+          >
             <input
               type="checkbox"
               checked={skipDots}
@@ -345,6 +356,10 @@ function UploadPanel({
           <button
             type="button"
             onClick={() => filePicker.current?.click()}
+            // Its own name, not `upload-pick-files` again: with every chosen
+            // file a dot-file and the skip box ticked, `sending` is empty
+            // while `files` is not, and both buttons are on screen at once.
+            data-testid="upload-add-more"
             className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
           >
             add more…
@@ -353,6 +368,7 @@ function UploadPanel({
         <button
           type="button"
           onClick={close}
+          data-testid="upload-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
           cancel
@@ -365,6 +381,7 @@ function UploadPanel({
             onConfirm(sending, conflict);
             close();
           }}
+          data-testid="upload-submit"
           className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
           upload
@@ -375,11 +392,14 @@ function UploadPanel({
           on screen right up to the moment the system dialogue covers it.
           Hidden rather than absent: `.click()` on an input that is not in the
           document opens nothing. */}
+      {/* Named as well as the buttons that click them: a script cannot answer
+          the system dialogue, so it hands files to these inputs directly. */}
       <input
         ref={filePicker}
         type="file"
         multiple
         hidden
+        data-testid="upload-file-input"
         onChange={(event) => {
           choose(event.target.files);
           // Cleared so choosing the same file twice fires `change` twice. An
@@ -392,6 +412,7 @@ function UploadPanel({
         type="file"
         multiple
         hidden
+        data-testid="upload-folder-input"
         onChange={(event) => {
           choose(event.target.files);
           event.target.value = "";

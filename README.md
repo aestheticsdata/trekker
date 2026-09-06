@@ -144,11 +144,16 @@ Then apply the schema and start:
 
 ```bash
 pnpm --filter ./nest-api exec prisma migrate deploy
-pnpm --filter ./nest-api seed
 pnpm dev
 ```
 
-The seed makes `demo@example.com` with two placeholder hosts and prints a generated password.
+`pnpm dev` does the rest on first run: it seeds the house dev account (`local.dev@mock.io`, the
+same on every project — the password is in the gitignored `ACCOUNTS.md` and printed the day it
+is created), writes a fake server tree under `~/.trekker-mock/tree`, and loads a database that
+describes it — bookmarks, saved views, a treemap, checksums, a transfer history, an activity log.
+The dev LOCAL host is locked inside that tree by its own roots allowlist, so **in development the
+application never shows this machine's real content**. See `nest-api/mock/README.md`; `pnpm
+--filter ./nest-api mock` is the reset.
 
 `GET /api/health` reports uptime and each dependency separately — a probe that says "ok" while the
 database is down is worse than none, so MySQL and Redis are reported as their own fields and the
@@ -221,7 +226,9 @@ imported relatively.
 | `pnpm lint` | Biome on the front, ESLint on the API |
 | `pnpm typecheck` | `tsc --noEmit`, both sides |
 | `pnpm --filter ./nest-api migrate` | new migration from a schema change |
-| `pnpm --filter ./nest-api seed` | rebuild the demo account |
+| `pnpm --filter ./nest-api seed` | rebuild the house dev account |
+| `pnpm --filter ./nest-api mock` | rewrite the fake tree and reload the mock fixtures against it — the only reset |
+| `pnpm --filter ./nest-api mock:tree` | write the fake tree under `~/.trekker-mock` on its own (`--force` to redo it; then `pnpm mock`) |
 | `pnpm --filter ./nest-api test:db` | schema tests — needs a real MySQL |
 | `pnpm --filter ./nest-api verify:fs` | listing cost and driver parity — run on the deploy host |
 

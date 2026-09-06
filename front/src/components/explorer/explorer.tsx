@@ -2306,7 +2306,10 @@ export function Explorer({
     // it is the inspector's — left flat, a solo pane would stack the panel
     // underneath itself rather than beside it. And the row inside *that* is the
     // split's.
-    <div className="flex h-full min-h-0 flex-col">
+    <div
+      className="flex h-full min-h-0 flex-col"
+      data-testid="explorer"
+    >
       <div className="flex min-h-0 flex-1">
         {/* A query container, so a pane that is collapsing can hold its width in
           `cqw` (TRE-62): half of this row is what a pane in a split is, and a
@@ -2316,6 +2319,7 @@ export function Explorer({
         <div
           className="pane-row @container flex min-h-0 min-w-0 flex-1"
           data-motion={splitMode === "split" ? "open" : "close"}
+          data-testid="panes"
         >
           {([0, 1] as const).map((index) => {
             const shown = splitMode === "split" || (splitMode === "left" ? index === 0 : index === 1);
@@ -2338,11 +2342,18 @@ export function Explorer({
                   // Named so ⇧F10 can find the cursor row inside *this* pane: two
                   // panes can be showing the same directory, and the same name.
                   data-pane={index}
+                  // The slot, apart from the pane inside it: this is the box the
+                  // `CollapsiblePane` above animates, and the one to wait on when
+                  // a split change is still moving. The pane's root carries the
+                  // same `data-pane`, so a descendant selector through either
+                  // lands on the same rows.
+                  data-testid="pane-slot"
                   className="flex min-h-0 min-w-0 flex-1"
                   onMouseOver={(event) => prefetchFromEvent(pane, view.rows, event.target)}
                   onFocus={(event) => prefetchFromEvent(pane, view.rows, event.target)}
                 >
                   <Pane
+                    index={index}
                     pane={pane}
                     active={active === index}
                     host={hosts.find((host) => host.id === pane.hostId) ?? null}

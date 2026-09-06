@@ -93,3 +93,25 @@ export function volumeFor(path: string, disks: readonly DiskMount[]): DiskMount 
 
   return best;
 }
+
+/**
+ * A mount point, shortened from the FRONT for the rail's seventeen or so
+ * characters: `/var/lib/mysql` is shown whole, `/System/Volumes/Data` as
+ * `…/Volumes/Data`, a dev tree's `/path/to/checkout/.mock/tree/srv/media` as
+ * `…/tree/srv/media`. The end is the half that names the thing — the head is
+ * the same on every row of a machine that mounts everything under one prefix,
+ * and `truncate` used to keep exactly that half and lose the name. The tooltip
+ * carries the whole path.
+ */
+export function shortMount(mountPoint: string, limit = 18): string {
+  if (mountPoint.length <= limit) return mountPoint;
+  const segments = mountPoint.split("/").filter(Boolean);
+  let tail = "";
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const longer = `/${segments[index]}${tail}`;
+    if (longer.length + 1 > limit) break;
+    tail = longer;
+  }
+  // Not even the last segment fits: keep its end, which is still the name.
+  return `…${tail || mountPoint.slice(-(limit - 1))}`;
+}

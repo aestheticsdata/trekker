@@ -112,7 +112,10 @@ export function AppShell({
         <TransferProvider>
           <TooNarrowNotice />
 
-          <div className="flex h-screen flex-col max-usable:hidden">
+          <div
+            className="flex h-screen flex-col max-usable:hidden"
+            data-testid="app-shell"
+          >
             <TopBar
               host={host}
               stats={stats}
@@ -141,8 +144,17 @@ export function AppShell({
             it belongs between the toolbar and the status bar, as the mockup
             draws it, and it goes with the panes below the `panes:` breakpoint. */}
             <div className="flex min-h-0 flex-1 overflow-hidden">
-              <div className="hidden panes:flex">{sidebar}</div>
-              <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+              {/* The slot, not the rail: the `aside` inside is the sidebar's own. */}
+              <div
+                className="hidden panes:flex"
+                data-testid="shell-sidebar"
+              >
+                {sidebar}
+              </div>
+              <main
+                className="min-h-0 min-w-0 flex-1 overflow-hidden"
+                data-testid="shell-main"
+              >
                 <FootSlotProvider value={foot}>{children}</FootSlotProvider>
               </main>
             </div>
@@ -164,6 +176,7 @@ export function AppShell({
             <div
               ref={setFoot}
               className="flex-none"
+              data-testid="shell-foot"
             />
           </div>
         </TransferProvider>
@@ -180,7 +193,10 @@ export function AppShell({
  */
 function TooNarrowNotice() {
   return (
-    <div className="hidden h-screen flex-col items-center justify-center gap-2 px-8 text-center max-usable:flex">
+    <div
+      className="hidden h-screen flex-col items-center justify-center gap-2 px-8 text-center max-usable:flex"
+      data-testid="too-narrow-notice"
+    >
       <p className="text-ink text-sm tracking-caps">TREKKER</p>
       <p className="text-ink-muted text-xs">This app needs a wider screen.</p>
       <p className="text-ink-faint text-2xs">

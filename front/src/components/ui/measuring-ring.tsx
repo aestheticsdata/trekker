@@ -31,6 +31,9 @@ export function MeasuringRing({ className = "size-2.5" }: { className?: string }
     <svg
       viewBox="0 0 16 16"
       aria-hidden="true"
+      // So a scripted take can wait for the ring to be gone before it reads the
+      // cell it was standing in for.
+      data-testid="measuring-ring"
       className={`animate-measuring ${className}`}
     >
       {/* The track, faint: without it a lone arc reads as a fragment rather

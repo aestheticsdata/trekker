@@ -105,6 +105,14 @@ export function Inspector({
   const one = selected.length === 1 ? selected[0] : null;
 
   /**
+   * Which of the three panels is up, for a scripted take to wait on. Null while
+   * a notice stands in for a panel. The captions are no substitute: `folder ·
+   * 6 items` is a count, and `3 selected` is another.
+   */
+  const panel =
+    loading || error || host === null ? null : selected.length === 0 ? "directory" : one ? "entry" : "selection";
+
+  /**
    * The panel's own download (TRE-26), which needs no callback out of here.
    *
    * The toolbar's button has to ask the explorer because the selection lives
@@ -162,6 +170,8 @@ export function Inspector({
       // nothing to open. That gate now sits on the box that opens this one
       // (TRE-62), which is where the width it would animate lives.
       className="bg-chrome border-line flex w-inspector flex-none flex-col border-l"
+      data-testid="inspector"
+      data-panel={panel ?? undefined}
     >
       <header className="bg-line text-brand flex h-6 flex-none items-center justify-between px-2.5 font-sans text-caps font-semibold tracking-[0.16em]">
         <span>INSPECTOR</span>
@@ -170,6 +180,7 @@ export function Inspector({
             type="button"
             onClick={onClose}
             className="text-ink-dim hover:text-ink-muted font-normal"
+            data-testid="inspector-close"
           >
             ⌘I
           </button>
@@ -447,6 +458,8 @@ function SelectionPanel({
           <div
             key={row.name}
             className="border-raised flex h-4.5 items-center gap-2 border-b font-mono text-2xs"
+            data-testid="inspector-selection-row"
+            data-name={row.name}
           >
             <Tooltip content={row.name}>
               <span className="text-ink-soft min-w-0 flex-1 truncate">{row.name}</span>
@@ -592,15 +605,23 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
   };
 
   return (
-    <section className="border-line flex-none border-t px-2.5 py-2.25">
+    <section
+      className="border-line flex-none border-t px-2.5 py-2.25"
+      data-testid="integrity"
+    >
       <div className="flex items-baseline justify-between">
         <Heading>INTEGRITY</Heading>
+        {/* ⚠️ One slot, three tenants, and none of them is safe to reach by
+            text: `stop` cancels a job, `copy` writes the clipboard, `compute`
+            POSTs one — and the digest a take hovers sits directly under
+            whichever is showing. A name each, so nothing fuzzy lands here. */}
         {isFile &&
           (busy ? (
             <button
               type="button"
               onClick={stop}
               className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
+              data-testid="integrity-stop"
             >
               stop
             </button>
@@ -609,6 +630,7 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
               type="button"
               onClick={() => void copy()}
               className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
+              data-testid="integrity-copy"
             >
               copy
             </button>
@@ -617,6 +639,7 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
               type="button"
               onClick={() => hashJob.mutate({ hostId, paths: [entryPath] })}
               className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
+              data-testid="integrity-compute"
             >
               compute
             </button>
@@ -637,7 +660,10 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
       ) : hash ? (
         <>
           <Tooltip content={hash.digest}>
-            <p className="text-ink-soft font-mono text-caption break-all">
+            <p
+              className="text-ink-soft font-mono text-caption break-all"
+              data-testid="integrity-digest"
+            >
               sha256 <span className="text-ink">{shortDigest(hash.digest)}…</span>
             </p>
           </Tooltip>
@@ -696,11 +722,27 @@ function parseProgress(data: string): HashProgress | null {
 /* ---- the parts every panel is built from -------------------------------- */
 
 function Scroller({ children }: { children: ReactNode }) {
-  return <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">{children}</div>;
+  // The one element in the panel that scrolls — INTEGRITY and the actions are
+  // its siblings, pinned below — so a take wheels this, not the aside.
+  return (
+    <div
+      className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
+      data-testid="inspector-scroll"
+    >
+      {children}
+    </div>
+  );
 }
 
 function Notice({ children }: { children: ReactNode }) {
-  return <p className="text-ink-faint px-2.5 py-2.25 font-mono text-2xs">{children}</p>;
+  return (
+    <p
+      className="text-ink-faint px-2.5 py-2.25 font-mono text-2xs"
+      data-testid="inspector-notice"
+    >
+      {children}
+    </p>
+  );
 }
 
 /**
@@ -739,6 +781,7 @@ function Preview({
   return (
     <div
       className="border-line-strong text-ink-dim relative mx-2.5 my-2.25 flex h-19.5 items-center justify-center border font-mono text-caption"
+      data-testid="inspector-preview"
       style={{
         // 7px stripes, in rem so the hatch scales with everything else.
         backgroundImage:
@@ -769,7 +812,14 @@ function Preview({
 
 /** Breaks mid-token, as the mockup does: a long name must not widen the panel. */
 function Name({ children }: { children: ReactNode }) {
-  return <div className="text-ink px-2.5 font-mono text-name font-medium break-all">{children}</div>;
+  return (
+    <div
+      className="text-ink px-2.5 font-mono text-name font-medium break-all"
+      data-testid="inspector-name"
+    >
+      {children}
+    </div>
+  );
 }
 
 interface StatCell {
@@ -796,7 +846,14 @@ function Stats({ cells }: { cells: readonly StatCell[] }) {
             key={cell.label}
             content={cell.hint}
           >
-            <div className="bg-chrome px-1.75 py-1.25">
+            <div
+              className="bg-chrome px-1.75 py-1.25"
+              data-testid="inspector-stat"
+              // The label, lowered and hyphenated: `ON DISK` → `on-disk`. The
+              // value is a reading and the panels disagree about which four
+              // cells they carry, so the label is the only stable handle.
+              data-stat={cell.label.toLowerCase().replace(/\s+/g, "-")}
+            >
               {/* `leading-none` because the mockup sets these two at /1 and /1.4,
                   while `text-3xs` and `text-xs` both default to a 1rem line box —
                   unset, the label floats 7px above the value it belongs to. */}
@@ -834,7 +891,11 @@ function MetaRow({ label, children }: { label: string; children: ReactNode }) {
   const full = typeof children === "string" ? children : undefined;
 
   return (
-    <div className="border-raised flex h-4.5 items-center gap-2 border-b font-mono text-2xs">
+    <div
+      className="border-raised flex h-4.5 items-center gap-2 border-b font-mono text-2xs"
+      data-testid="inspector-meta"
+      data-key={label}
+    >
       <dt className="text-ink-faint w-14 flex-none">{label}</dt>
       <Tooltip content={full}>
         <dd className="text-ink-soft min-w-0 flex-1 truncate">{children}</dd>
@@ -873,11 +934,15 @@ function Permissions({
           heading, not a control floating beside it. */}
       <div className="flex items-baseline justify-between">
         <Heading>PERMISSIONS</Heading>
+        {/* ⚠️ Opens the chmod dialog, and sits on the heading row directly
+            above the grid a take sweeps cell by cell. Its own name, so no
+            sweep that overshoots by a row can read as a click on it. */}
         {onEdit && (
           <button
             type="button"
             onClick={onEdit}
             className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
+            data-testid="permissions-edit"
           >
             edit
           </button>
@@ -895,6 +960,9 @@ function Permissions({
             // 2px padding either side. `text-2xs` otherwise carries a 1rem line
             // box, which would inflate the panel's signature element by 40%.
             className="text-ink-muted grid grid-cols-[2.625rem_1fr_1fr_1fr] items-center gap-0.75 font-mono text-2xs leading-none"
+            // Named because the accessible name is the mode spelled out, and
+            // so changes with every selection.
+            data-testid="permissions-grid"
           >
             <span />
             {["r", "w", "x"].map((column) => (
@@ -916,7 +984,14 @@ function Permissions({
                     key={index}
                     content={cell.note}
                   >
-                    <span className={`py-0.5 text-center ${cell.granted ? ON_FILL : "bg-raised"}`}>{cell.glyph}</span>
+                    <span
+                      className={`py-0.5 text-center ${cell.granted ? ON_FILL : "bg-raised"}`}
+                      data-testid="permission-cell"
+                      data-who={row.who}
+                      data-bit={"rwx"[index]}
+                    >
+                      {cell.glyph}
+                    </span>
                   </Tooltip>
                 ))}
               </Fragment>
@@ -959,6 +1034,10 @@ function Actions({
 
   return (
     <div className="grid flex-none grid-cols-2 gap-1.5 px-2.5 pb-2.5">
+      {/* ⚠️ `download` starts a real browser download and `signed link` mints
+          and copies one, neither behind a dialog — and they sit directly under
+          the permission grid a take sweeps. Addressed by the registry id, never
+          by text: the link's label turns into `signing…` while it works. */}
       {ENTRY_ACTIONS.map((action) => {
         const press = handlers[action.id] ?? null;
         const busy = action.id === "link" && minting;
@@ -984,6 +1063,8 @@ function Actions({
                     }`
                   : `${PRESS} border-accent-fill border py-1.5 text-center font-mono text-cmd font-medium`
               }
+              data-testid="inspector-action"
+              data-action={action.id}
             >
               {busy ? "signing…" : action.label}
             </button>

@@ -67,6 +67,11 @@ export function SudoBadge({ host }: { host: HostView }) {
               ? `Drop sudo on ${host.label}, ${formatWindow(remainingMs)} left`
               : `Elevate with sudo on ${host.label}`
           }
+          // ⚠️ The accessible name above changes every second while a window
+          // is open, and the same click that opens the dialog DROPS the window
+          // once there is one. One stable name, and a script reads
+          // `aria-pressed` before it presses.
+          data-testid="sudo-badge"
           onClick={() => (open ? drop.mutate() : setAsking(true))}
           className={`flex h-5.5 flex-none items-center gap-1.25 rounded-sm border px-2 font-mono text-xs ${
             open

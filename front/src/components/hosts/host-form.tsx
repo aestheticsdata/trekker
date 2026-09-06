@@ -170,6 +170,7 @@ export function HostForm({
   return (
     <form
       onSubmit={handleSubmit(onSubmit)}
+      data-testid="host-form"
       className="flex min-h-0 flex-1 flex-col"
       noValidate
     >
@@ -184,6 +185,7 @@ export function HostForm({
             autoFocus
             placeholder="web server"
             invalid={Boolean(errors.label)}
+            data-testid="host-form-label"
             {...register("label")}
           />
         </Field>
@@ -219,6 +221,10 @@ export function HostForm({
                   type="button"
                   aria-label={`Colour ${swatch}`}
                   aria-pressed={colour === swatch}
+                  // The hex is the value the host row stores in `colour`, not a
+                  // tone describing state — so it is the member's name here.
+                  data-testid="host-form-colour"
+                  data-swatch={swatch}
                   onClick={() => setValue("colour", swatch)}
                   style={{ backgroundColor: swatch }}
                   className={`size-4 rounded-xs ${colour === swatch ? "ring-ink ring-1 ring-offset-1 ring-offset-transparent" : "opacity-60 hover:opacity-100"}`}
@@ -243,6 +249,7 @@ export function HostForm({
                     spellCheck={false}
                     autoComplete="off"
                     invalid={Boolean(errors.address)}
+                    data-testid="host-form-address"
                     {...register("address")}
                   />
                 </Field>
@@ -257,6 +264,7 @@ export function HostForm({
                     id="host-port"
                     inputMode="numeric"
                     invalid={Boolean(errors.port)}
+                    data-testid="host-form-port"
                     {...register("port")}
                   />
                 </Field>
@@ -272,6 +280,7 @@ export function HostForm({
                     spellCheck={false}
                     autoComplete="off"
                     invalid={Boolean(errors.username)}
+                    data-testid="host-form-username"
                     {...register("username")}
                   />
                 </Field>
@@ -303,6 +312,7 @@ export function HostForm({
                   rows={watch("credentialKind") === "PRIVATE_KEY" ? 4 : 1}
                   spellCheck={false}
                   autoComplete="off"
+                  data-testid="host-form-secret"
                   placeholder={
                     watch("credentialKind") === "PRIVATE_KEY"
                       ? "-----BEGIN OPENSSH PRIVATE KEY-----"
@@ -344,6 +354,7 @@ export function HostForm({
             spellCheck={false}
             autoComplete="off"
             invalid={Boolean(errors.homePath)}
+            data-testid="host-form-home"
             {...register("homePath")}
           />
         </Field>
@@ -373,12 +384,18 @@ export function HostForm({
                 placeholder={host.label}
                 aria-label="Type the host name to confirm deletion"
                 autoComplete="off"
+                data-testid="host-form-delete-name"
               />
+              {/* ⚠️ Two buttons in this footer read `delete`: this one removes
+                  the host, the one below only arms this row. Never mounted
+                  together, but text alone cannot tell them apart — and this one
+                  sits one gap from `keep`. */}
               <Button
                 type="button"
                 tone="danger"
                 disabled={typedName !== host.label}
                 onClick={remove}
+                data-testid="host-form-delete-confirm"
               >
                 delete
               </Button>
@@ -388,6 +405,7 @@ export function HostForm({
                   setConfirmDelete(false);
                   setTypedName("");
                 }}
+                data-testid="host-form-delete-keep"
               >
                 keep
               </Button>
@@ -399,12 +417,15 @@ export function HostForm({
               type="submit"
               tone="primary"
               disabled={isSubmitting}
+              // `save`, `add host` or `saving…` by state; the name holds still.
+              data-testid="host-form-save"
             >
               {isSubmitting ? "saving…" : host ? "save" : "add host"}
             </Button>
             <Button
               type="button"
               onClick={onCancel}
+              data-testid="host-form-cancel"
             >
               cancel
             </Button>
@@ -414,6 +435,7 @@ export function HostForm({
                 type="button"
                 tone="danger"
                 onClick={() => setConfirmDelete(true)}
+                data-testid="host-form-delete"
               >
                 delete
               </Button>
@@ -466,6 +488,7 @@ function ProbePanel({
           type="button"
           onClick={onTest}
           disabled={probing}
+          data-testid="host-form-test"
         >
           {probing ? "connecting…" : "test connection"}
         </Button>
@@ -524,6 +547,7 @@ function ProbePanel({
               type="button"
               onClick={onAcceptKey}
               disabled={accepting}
+              data-testid="host-form-accept-key"
             >
               {accepting ? "accepting…" : "accept the offered key"}
             </Button>
@@ -535,6 +559,7 @@ function ProbePanel({
         <button
           type="button"
           onClick={() => onUseHome(probe.homeDir as string)}
+          data-testid="host-form-use-home"
           className="text-ink-label self-start font-mono text-2xs hover:underline"
         >
           use {probe.homeDir} as the home

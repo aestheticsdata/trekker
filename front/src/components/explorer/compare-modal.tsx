@@ -98,6 +98,7 @@ export function CompareModal({
       label={`Compare ${target.a.path} with ${target.b.path}`}
       onClosed={onClose}
       panelClassName="bg-app border-line-strong flex w-full max-w-[62rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
+      testId="compare-modal"
     >
       {(close) => (
         <ComparePanel
@@ -229,7 +230,10 @@ function ComparePanel({
 
   return (
     <>
-      <header className="bg-strip border-line flex h-topbar flex-none items-center gap-2 border-b px-3">
+      <header
+        className="bg-strip border-line flex h-topbar flex-none items-center gap-2 border-b px-3"
+        data-testid="compare-header"
+      >
         <span className="text-brand font-mono text-xs font-semibold tracking-label">compare</span>
         <span className="text-ink-muted min-w-0 flex-1 truncate font-mono text-cmd">
           {target.a.label}:{target.a.path} <span className="text-ink-faint">⇄</span> {target.b.label}:{target.b.path}
@@ -237,7 +241,10 @@ function ComparePanel({
       </header>
 
       {refusal !== null && (
-        <div className="bg-danger-wash border-danger text-danger-soft mx-3.5 mt-2.5 border px-2.5 py-1.75 font-mono text-cmd/[1.5]">
+        <div
+          className="bg-danger-wash border-danger text-danger-soft mx-3.5 mt-2.5 border px-2.5 py-1.75 font-mono text-cmd/[1.5]"
+          data-testid="compare-refusal"
+        >
           {refusal}
         </div>
       )}
@@ -256,7 +263,10 @@ function ComparePanel({
         </>
       )}
 
-      <div className="border-line max-h-96 min-h-24 flex-1 overflow-y-auto border-t border-b">
+      <div
+        className="border-line max-h-96 min-h-24 flex-1 overflow-y-auto border-t border-b"
+        data-testid="compare-list"
+      >
         {compare.isPending && <div className="text-ink-faint px-3.5 py-3 font-mono text-xs">walking both trees…</div>}
 
         {result && shown.length === 0 && (
@@ -301,6 +311,10 @@ function ComparePanel({
               onClick={resolveByHash}
               disabled={resolving}
               className={`${PRESS} border-accent-fill border px-3 py-1.5 font-mono text-cmd font-medium`}
+              // Two POST hash jobs, and a label that reads `resolving…` while
+              // they run — named so neither the text nor the neighbouring
+              // `close` can be mistaken for it.
+              data-testid="compare-resolve"
             >
               {/* The wait, not the request. The two POSTs are answered in
                   milliseconds and the reading takes as long as it takes, so a
@@ -312,6 +326,7 @@ function ComparePanel({
             type="button"
             onClick={close}
             className="border-line-strong text-ink-muted hover:text-ink border px-3 py-1.5 font-mono text-cmd"
+            data-testid="compare-close"
           >
             close
           </button>
@@ -335,7 +350,10 @@ function Summary({ result }: { result: CompareResult }) {
   if (summary.inconclusive > 0) parts.push(`${summary.inconclusive} unchecked`);
 
   return (
-    <p className="text-ink-soft px-3.5 pt-2.5 font-mono text-xs">
+    <p
+      className="text-ink-soft px-3.5 pt-2.5 font-mono text-xs"
+      data-testid="compare-summary"
+    >
       {parts.join(" · ")}
       <span className="text-ink-faint"> · {result.depth} levels deep</span>
     </p>
@@ -352,7 +370,10 @@ function Bounds({ result }: { result: CompareResult }) {
   if (!result.truncated && result.unreadableCount === 0) return null;
 
   return (
-    <div className="bg-warning-wash border-warning text-warning mx-3.5 mt-2 border px-2.5 py-1.75 font-mono text-2xs/[1.6]">
+    <div
+      className="bg-warning-wash border-warning text-warning mx-3.5 mt-2 border px-2.5 py-1.75 font-mono text-2xs/[1.6]"
+      data-testid="compare-bounds"
+    >
       {result.truncated && (
         <p>
           This comparison stopped early — at {result.maxEntries} rows, or at the {result.depth}-level depth limit. What
@@ -392,6 +413,8 @@ function Filters({
   return (
     <div className="flex items-center gap-2 px-3.5 py-2">
       <div className="flex gap-1">
+        {/* The verdict key, not its label: `onlyB` reads `only right` on the
+            chip, and which chips exist at all depends on the comparison. */}
         {available.map((value) => (
           <button
             key={value}
@@ -402,6 +425,8 @@ function Filters({
                 ? `${SELECTED} border-accent-soft`
                 : "border-line-strong text-ink-dim hover:text-ink-soft"
             }`}
+            data-testid="compare-filter"
+            data-filter={value}
           >
             {value === "all" ? "all" : VERDICT_LABEL[value]}
           </button>
@@ -414,6 +439,7 @@ function Filters({
         placeholder="filter by name"
         aria-label="Filter the comparison by name"
         className="bg-chrome border-line text-ink-soft placeholder:text-ink-faint min-w-0 flex-1 border px-2 py-1 font-mono text-2xs"
+        data-testid="compare-name-filter"
       />
     </div>
   );
@@ -443,7 +469,12 @@ function Row({
   const joined = (root: string) => (parent === "" ? root : `${root}/${parent}`);
 
   return (
-    <div className="border-raised grid grid-cols-[1fr_7rem_6.5rem_7rem_auto] items-center gap-2 border-t px-3.5 py-1.5">
+    <div
+      className="border-raised grid grid-cols-[1fr_7rem_6.5rem_7rem_auto] items-center gap-2 border-t px-3.5 py-1.5"
+      data-testid="compare-row"
+      data-path={entry.path}
+      data-verdict={entry.verdict}
+    >
       {/* The path is the button: clicking a row is how it becomes a selection
           in both panes, and a row-wide click target beats a hit area the width
           of the text. */}
@@ -451,6 +482,7 @@ function Row({
         type="button"
         onClick={() => onReveal(entry, result)}
         className="min-w-0 text-left"
+        data-testid="compare-reveal"
       >
         <span className="text-ink-muted block truncate font-mono text-xs/[1.3]">{entry.path}</span>
         <span className="text-ink-faint block truncate font-mono text-2xs/none">{explain(entry)}</span>
@@ -467,6 +499,7 @@ function Row({
       <div className="flex gap-1">
         <Arrow
           label="→"
+          direction="right"
           hint={entry.a ? `Copy this to ${joined(result.b.path)}` : "Nothing on the left to copy"}
           disabled={entry.a === null}
           onClick={() =>
@@ -480,6 +513,7 @@ function Row({
         />
         <Arrow
           label="←"
+          direction="left"
           hint={entry.b ? `Copy this to ${joined(result.a.path)}` : "Nothing on the right to copy"}
           disabled={entry.b === null}
           onClick={() =>
@@ -512,17 +546,23 @@ function Side({ facts }: { facts: CompareEntry["a"] }) {
 
 function Arrow({
   label,
+  direction,
   hint,
   disabled,
   onClick,
 }: {
   label: string;
+  /** Which way the copy goes — the glyph, as a word a selector can hold. */
+  direction: "right" | "left";
   hint: string;
   disabled: boolean;
   onClick: () => void;
 }) {
   return (
     <Tooltip content={hint}>
+      {/* ⚠️ Hover only, on camera. A click closes this modal and opens a
+          transfer preloaded with the row, and the two arrows are a gap apart —
+          which is why each carries its direction rather than sharing a name. */}
       <button
         type="button"
         // `aria-disabled`, not `disabled` (TRE-76): the hint is the whole value
@@ -530,6 +570,8 @@ function Arrow({
         // mouse event and takes no focus, so the explanation reaches nobody.
         aria-disabled={disabled}
         onClick={disabled ? undefined : onClick}
+        data-testid="compare-arrow"
+        data-direction={direction}
         className={`border px-1.5 py-0.5 font-mono text-2xs/none ${
           disabled
             ? "border-line text-ink-ghost cursor-not-allowed"

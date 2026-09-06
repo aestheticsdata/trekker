@@ -282,6 +282,7 @@ export function Palette({
     <Overlay
       label="Command palette"
       align="top"
+      testId="palette"
       onClosed={() => {
         chosen?.run();
         onClosed();
@@ -311,6 +312,7 @@ export function Palette({
                 type="text"
                 value={query}
                 aria-label="Command palette"
+                data-testid="palette-input"
                 placeholder="go to a path, run an action, search…"
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
@@ -357,13 +359,17 @@ export function Palette({
                 }}
                 className={`${PALETTE_INPUT_INK} placeholder:text-ink-faint caret-brand min-w-0 flex-1 bg-transparent font-mono text-base/none`}
               />
-              <span className={`${PALETTE_QUIET_INK} flex-none font-mono text-caption/none`}>
+              <span
+                data-testid="palette-count"
+                className={`${PALETTE_QUIET_INK} flex-none font-mono text-caption/none`}
+              >
                 {rows.length}/{entries.length}
               </span>
             </div>
 
             <div
               ref={listRef}
+              data-testid="palette-list"
               className="scroll-composited max-h-palette-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
             >
               <ScrollThumbRail />
@@ -379,6 +385,8 @@ export function Palette({
                   <div key={item.id}>
                     {head !== null && (
                       <div
+                        data-testid="palette-group"
+                        data-group={head}
                         className={`${PALETTE_LABEL_INK} px-3 pt-2 pb-1 font-sans text-3xs/none font-semibold tracking-[0.16em]`}
                       >
                         {head}
@@ -394,7 +402,10 @@ export function Palette({
                 ))}
 
                 {rows.length === 0 && (
-                  <p className={`${PALETTE_QUIET_INK} px-3 py-6.5 text-center font-mono text-xs/[1.6]`}>
+                  <p
+                    data-testid="palette-empty"
+                    className={`${PALETTE_QUIET_INK} px-3 py-6.5 text-center font-mono text-xs/[1.6]`}
+                  >
                     no command matches “{query}”
                     <br />
                     <span className={FALLBACK_INK}>↩ runs it in the terminal instead</span>
@@ -410,7 +421,12 @@ export function Palette({
               <span className="whitespace-nowrap">↩ run</span>
               <span className="whitespace-nowrap">⇥ autocomplete</span>
               <span className="whitespace-nowrap">⎋ close</span>
-              <span className="min-w-0 flex-1 truncate text-right">{cwd}</span>
+              <span
+                className="min-w-0 flex-1 truncate text-right"
+                data-testid="palette-cwd"
+              >
+                {cwd}
+              </span>
             </div>
           </>
         );
@@ -444,6 +460,12 @@ function Row({
     <button
       type="button"
       data-current={selected ? "" : undefined}
+      // The id, which is what nothing else in the DOM carried: `action:rm`,
+      // `go:<bookmark>`, `views:restore:<id>`. ⚠️ A `path:` row's id is what was
+      // typed, and a typed `"` inside `[data-entry="…"]` fails to *parse*, not
+      // to match — reach those by `[data-entry^="path:"]` plus their text.
+      data-testid="palette-row"
+      data-entry={entry.id}
       aria-disabled={off}
       onMouseEnter={onHover}
       onMouseDown={(event) => {

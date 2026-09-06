@@ -40,7 +40,10 @@ export function CommandLine({
 
   return (
     <>
-      <div className={`${COMMAND_SURFACE} border-line border px-2.5 py-2 font-mono text-cmd/[1.6] ${className}`}>
+      <div
+        data-testid="command-line"
+        className={`${COMMAND_SURFACE} border-line border px-2.5 py-2 font-mono text-cmd/[1.6] ${className}`}
+      >
         {/* Hidden from assistive technology: read aloud, `#` is "number sign",
             which says nothing. The note below carries the same fact in words,
             and the badge in the top bar carries it in the chrome. */}
@@ -54,7 +57,10 @@ export function CommandLine({
       </div>
 
       {open && (
-        <p className={`${PROMPT_ELEVATED_INK} mt-1.5 font-mono text-2xs/[1.6]`}>
+        <p
+          data-testid="command-line-note"
+          className={`${PROMPT_ELEVATED_INK} mt-1.5 font-mono text-2xs/[1.6]`}
+        >
           sudo is open on {host?.label ?? "this host"}. Entries {host?.username ?? "this account"} is refused on are
           retried as root; everything else runs unelevated, as it would with the window closed.
         </p>

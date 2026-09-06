@@ -68,6 +68,7 @@ export function HostManager({
     <Overlay
       label="Hosts"
       onClosed={onClose}
+      testId="host-manager"
       panelClassName="bg-app border-line-strong flex h-full max-h-[36rem] w-full max-w-[46rem] overflow-hidden rounded-sm border shadow-2xl"
     >
       {(close) => (
@@ -78,7 +79,10 @@ export function HostManager({
               <span className="text-ink-faint">{hosts.length}</span>
             </header>
 
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div
+              data-testid="hosts-list"
+              className="min-h-0 flex-1 overflow-y-auto"
+            >
               {hosts.map((host) => (
                 <HostRow
                   key={host.id}
@@ -103,6 +107,7 @@ export function HostManager({
               <Button
                 type="button"
                 onClick={() => setMode({ kind: "create" })}
+                data-testid="host-new"
                 className="w-full justify-center"
               >
                 + new host
@@ -118,6 +123,7 @@ export function HostManager({
                   type="button"
                   onClick={close}
                   aria-label="Close"
+                  data-testid="host-manager-close"
                   className="text-ink-faint hover:text-ink px-1 font-mono text-sm"
                 >
                   ✕
@@ -170,7 +176,11 @@ function HostRow({
   onPick: () => void;
 }) {
   return (
+    // `hosts-row`, not `server-row`: the sidebar lists the same hosts under
+    // that name, and the slug is the companion on both.
     <div
+      data-testid="hosts-row"
+      data-host={host.slug}
       className={`border-line flex items-center gap-1.5 border-b px-2 py-1.5 ${selected ? "bg-raised" : "hover:bg-raised/60"}`}
     >
       <span
@@ -181,6 +191,7 @@ function HostRow({
       <button
         type="button"
         onClick={onEdit}
+        data-testid="hosts-edit"
         className="flex min-w-0 flex-1 flex-col items-start text-left"
       >
         <span className="text-ink-soft w-full truncate font-mono text-xs">{host.label}</span>
@@ -191,6 +202,10 @@ function HostRow({
           type="button"
           onClick={onPick}
           aria-label={`Open ${host.label} in this pane`}
+          // The glyph is `→` or `●` by state and the accessible name embeds the
+          // label, so the slug is what a script binds by.
+          data-testid="hosts-bind"
+          data-host={host.slug}
           className={`flex-none px-1 font-mono text-2xs ${bound ? "text-ink-dim" : "text-ink-muted hover:text-ink"}`}
         >
           {bound ? "●" : "→"}

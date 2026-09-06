@@ -79,9 +79,15 @@ export function Sidebar({
   useScrollThumbs(body, null, grows);
 
   return (
-    <aside className="bg-chrome border-line flex w-44 flex-none flex-col border-r">
+    <aside
+      data-testid="sidebar"
+      className="bg-chrome border-line flex w-44 flex-none flex-col border-r"
+    >
+      {/* The rail's own scroller, and the only one there is: nothing in this
+          app scrolls the page, so a scripted take wheels this element. */}
       <div
         ref={body}
+        data-testid="sidebar-scroll"
         className="scroll-composited min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
       >
         <ScrollThumbRail />
@@ -196,7 +202,13 @@ export function Sidebar({
  */
 function Section({ title, counter, children }: { title: string; counter?: string; children: ReactNode }) {
   return (
-    <section>
+    <section
+      // One family for the six; the member is the heading, lowercased the way
+      // anything read off UI text is spelled (`views`, `servers`…). Scoping by
+      // it is what tells the two `AddButton`s and the two `Empty`s apart.
+      data-testid="sidebar-section"
+      data-section={title.toLowerCase()}
+    >
       <h2 className="text-ink-label flex items-baseline px-2.5 pt-1.5 pb-1 font-sans text-caps font-semibold tracking-[0.16em]">
         {title}
         {counter && <span className="text-ink-dim ml-auto font-mono font-normal tracking-normal">{counter}</span>}
@@ -216,7 +228,14 @@ function Rule() {
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <p className="text-ink-dim px-2.5 py-1 font-mono text-2xs">{children}</p>;
+  return (
+    <p
+      data-testid="sidebar-empty"
+      className="text-ink-dim px-2.5 py-1 font-mono text-2xs"
+    >
+      {children}
+    </p>
+  );
 }
 
 /**
@@ -253,6 +272,11 @@ function ServerRow({
 
   return (
     <div
+      // The slug (`local`, `demo-remote`) rather than the label: the label is
+      // what the host form renames, and the same host is a row here, a chip in
+      // each pane's path row and a row of the host manager — all `data-host`.
+      data-testid="server-row"
+      data-host={host.slug}
       className={`hover:bg-raised flex h-6 items-center gap-1.75 border-l-2 pr-1.75 pl-2 ${
         here ? "bg-raised" : "border-transparent"
       }`}
@@ -268,6 +292,7 @@ function ServerRow({
         <button
           type="button"
           onClick={onPick}
+          data-testid="server-open"
           className={`min-w-0 flex-1 truncate text-left font-mono text-xs ${
             here ? "text-ink font-medium" : "text-ink-soft"
           }`}
@@ -291,6 +316,12 @@ function ServerRow({
               type="button"
               onClick={() => onBind(pane)}
               aria-pressed={boundTo[pane]}
+              // `data-pane` is the explorer's own number for a pane (0 | 1 on
+              // each wrapper), reused so one value names a pane everywhere.
+              // Its `[data-pane="N"] [data-row]` lookup is a descendant query
+              // and cannot land on a button with no children.
+              data-testid="server-bind"
+              data-pane={pane}
               className="flex size-3.25 items-center justify-center border font-mono text-[0.5rem] font-semibold"
               style={
                 boundTo[pane]
@@ -345,7 +376,11 @@ function Favourites({
         if (mine.length === 0) return null;
 
         return (
-          <div key={host.id}>
+          <div
+            key={host.id}
+            data-testid="favourite-group"
+            data-host={host.slug}
+          >
             {/* The host is named only when more than one has favourites — a
                 single-host install should not read as a grouped list. */}
             {hosts.filter((candidate) => bookmarks.some((b) => b.hostId === candidate.id)).length > 1 && (
@@ -362,12 +397,19 @@ function Favourites({
             {mine.map((bookmark) => (
               <div
                 key={bookmark.id}
+                // The label verbatim (`Backups`, `MySQL data`). It is typed
+                // text, so a take that interpolates it into a selector escapes
+                // it or matches on `:has-text()`; and it is unique per host,
+                // not per account — scope by `favourite-group` where two share.
+                data-testid="favourite-row"
+                data-label={bookmark.label}
                 className="hover:bg-raised group flex items-center gap-1.5 pr-1 pl-2.5"
               >
                 <Tooltip content={bookmark.path}>
                   <button
                     type="button"
                     onClick={() => onNavigate(host, bookmark.path)}
+                    data-testid="favourite-open"
                     className="flex min-w-0 flex-1 flex-col items-start py-0.75 text-left"
                   >
                     <span className="text-ink-soft w-full truncate font-mono text-xs">{bookmark.label}</span>
@@ -381,6 +423,11 @@ function Favourites({
                     type="button"
                     onClick={() => remove.mutate(bookmark.id)}
                     aria-label={`Remove ${bookmark.label} from favourites`}
+                    // ⚠️ Its own name, and a take never clicks a favourite by
+                    // its row's box: this sits at the row's right edge,
+                    // invisible until the row is hovered, and a click that
+                    // lands on it deletes the bookmark. Aim at `favourite-open`.
+                    data-testid="favourite-remove"
                     className="text-ink-dim hover:text-danger-soft flex-none px-1 font-mono text-2xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                   >
                     ✕

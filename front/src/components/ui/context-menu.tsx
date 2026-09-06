@@ -333,6 +333,11 @@ export function ContextMenu({ point, label, rows, onChoose, onClose }: ContextMe
       ref={panel}
       role="menu"
       aria-label={label}
+      // The family, and which menu this is. `label` is the header text — a file
+      // name for a row menu — so a take quotes it or matches on `:has-text()`
+      // rather than interpolating it into a selector.
+      data-testid="context-menu"
+      data-menu={label}
       // Focus stays on the panel and the active row is named rather than
       // focused — the roving pattern a menu wants, and what lets one `keydown`
       // handler serve every entry instead of one per row.
@@ -382,7 +387,10 @@ export function ContextMenu({ point, label, rows, onChoose, onClose }: ContextMe
           is already a floating layer, and a bubble over a menu is a second one
           over the first (TRE-76). */}
       {reason !== null && (
-        <div className="text-ink-faint border-line mt-1 border-t px-2.75 pt-1.5 pb-0.5 font-mono text-caption">
+        <div
+          data-testid="menu-reason"
+          className="text-ink-faint border-line mt-1 border-t px-2.75 pt-1.5 pb-0.5 font-mono text-caption"
+        >
           {reason}
         </div>
       )}
@@ -423,6 +431,13 @@ function Item({
     // biome-ignore lint/a11y/useAriaPropsSupportedByRole: `aria-checked` is set on exactly the rows whose role is `menuitemcheckbox` — one ternary decides both, which the rule cannot see through
     <div
       id={id}
+      // The family and the member. `row.id` is the registry's own id, verbatim:
+      // `copyTo`, `columns:share`, `tabs:new`, `view.delete`, `account.signOut`.
+      // ⚠️ Address a row by `data-action`, never by position or accessible name:
+      // `rm` is the last row of every entries menu, one row under `favourite`,
+      // and a disabled row's `aria-label` below becomes `label — reason`.
+      data-testid="menu-item"
+      data-action={row.id}
       // A setting says so to a screen reader rather than being an act that
       // happens to draw a tick — `menuitemcheckbox` is what makes `aria-checked`
       // mean anything, and without it the tick is decoration nobody is told

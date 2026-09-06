@@ -81,6 +81,7 @@ function ToastViewport() {
     <div
       aria-live="polite"
       aria-relevant="additions"
+      data-testid="toast-viewport"
       className="pointer-events-none fixed right-3 bottom-[calc(var(--spacing-statusbar)+0.5rem)] z-50 flex w-72 flex-col gap-1.5"
     >
       {toasts.map((toast) => (
@@ -103,6 +104,8 @@ function ToastRow({ toast }: { toast: Toast }) {
 
   return (
     <output
+      data-testid="toast"
+      data-tone={toast.tone}
       // 2a's `tkToast`: up from below, over .18s. Slower than the panels on
       // purpose — a toast arrives unasked, in the corner, and has to catch the
       // eye of someone looking somewhere else.
@@ -113,6 +116,10 @@ function ToastRow({ toast }: { toast: Toast }) {
       {toast.action && (
         <button
           type="button"
+          // The one control a toast can carry, and it writes — `Undo` after a
+          // chmod posts the reversal. Named on its own so nothing reaches it by
+          // its label.
+          data-testid="toast-action"
           onClick={() => {
             toast.action?.onClick();
             dismiss(toast.id);

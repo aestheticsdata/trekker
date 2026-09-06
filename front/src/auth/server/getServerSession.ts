@@ -45,6 +45,8 @@ export const getServerSession = cache(async (): Promise<AuthResponse | null> => 
  * and only the API's is fixed.
  */
 async function serverApiBaseUrl(): Promise<string> {
+  // The same opt-in as `lib/api/client.ts`: a laptop production build with no nginx in front.
+  if (process.env.NEXT_PUBLIC_API_ORIGIN) return process.env.NEXT_PUBLIC_API_ORIGIN;
   if (process.env.NODE_ENV !== "production") return "http://localhost:6800";
 
   const requestHeaders = await headers();

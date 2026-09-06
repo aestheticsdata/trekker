@@ -51,6 +51,9 @@ export function ViewStrip({
   return (
     <nav
       aria-label="Saved views"
+      // The same views sit in the sidebar as `view-row`s; this nav and the
+      // rail's `[data-section="views"]` are the two scopes.
+      data-testid="view-strip"
       className="flex min-w-0 items-center gap-1.25"
     >
       <span className="text-ink-label flex-none font-sans text-3xs font-semibold tracking-[0.16em]">VIEWS</span>
@@ -71,6 +74,11 @@ export function ViewStrip({
                 onMenu(view.id, { x: box.left, y: box.bottom + 3 });
               }}
               aria-current={on ? "true" : undefined}
+              // The name verbatim (`Releases ↔ logs`, capitals kept). Named at
+              // all because nothing else here holds still: the tooltip grows
+              // `· unsaved changes` and `aria-current` moves with each restore.
+              data-testid="view-chip"
+              data-view={view.name}
               className={`flex h-5 max-w-32 flex-none items-center gap-1.25 rounded-sm border px-2 font-mono text-cmd ${
                 on
                   ? `bg-line border-accent ${CHIP_ON_INK} font-medium`
@@ -90,6 +98,7 @@ export function ViewStrip({
                 <span
                   role="img"
                   aria-label="unsaved changes"
+                  data-testid="view-dirty"
                   className={`size-1 flex-none rounded-full ${DIRTY_DOT}`}
                 />
               )}
@@ -103,6 +112,7 @@ export function ViewStrip({
           <button
             type="button"
             onClick={onOverflow}
+            data-testid="view-overflow"
             className="border-line-strong text-ink-muted hover:bg-raised flex h-5 flex-none items-center rounded-sm border px-1.75 font-mono text-2xs"
           >
             +{hidden}
@@ -114,6 +124,9 @@ export function ViewStrip({
         <button
           type="button"
           onClick={onSave}
+          // Opens the save form, whose `save view` writes the account's views.
+          // The rail's `＋ save current view…` is the same act, under `add-button`.
+          data-testid="save-view"
           className="border-line-strong text-ink-muted hover:bg-raised flex h-5 flex-none items-center gap-1 rounded-sm border px-2 font-mono text-cmd"
         >
           ＋ save view

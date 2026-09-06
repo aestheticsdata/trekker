@@ -31,6 +31,8 @@ import type { Point } from "@helpers/menu";
  */
 
 /** The one id this menu dispatches. Local to the file: no registry has it. */
+// It is also the row's handle on screen: `ContextMenu` writes each row's id
+// as `data-action`, so the door out is `menu-item[data-action="account.signOut"]`.
 const SIGN_OUT = "account.signOut";
 
 /**
@@ -145,6 +147,9 @@ export function AccountMenu({ onOpenChange }: { onOpenChange?: (open: boolean) =
         }}
         aria-haspopup="menu"
         aria-expanded={point !== null}
+        // Named because its text is the address until it is `signing out…`,
+        // and `aria-expanded` flips with the panel.
+        data-testid="account-menu-trigger"
         className="border-line-strong text-ink-muted hover:bg-raised flex h-5.5 max-w-40 items-center gap-1.5 rounded-sm border px-2 font-mono text-xs"
       >
         {/* The address, not a name: it is what was typed to get in, and it is

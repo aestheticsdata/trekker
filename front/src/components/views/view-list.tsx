@@ -57,6 +57,10 @@ export function ViewList({
               const box = event.currentTarget.getBoundingClientRect();
               onMenu(view.id, { x: box.right - 20, y: box.bottom + 3 });
             }}
+            // The strip's `view-chip` and this row carry the same `data-view`,
+            // the name verbatim, so one value finds a view from either side.
+            data-testid="view-row"
+            data-view={view.name}
             className={`hover:bg-raised group flex h-5.75 items-center gap-1.75 border-l-2 pr-1.75 pl-2 ${
               on ? "bg-raised border-accent" : "border-transparent"
             }`}
@@ -73,6 +77,7 @@ export function ViewList({
                 type="button"
                 onClick={() => onRestore(view.id)}
                 aria-current={on ? "true" : undefined}
+                data-testid="view-open"
                 className={`min-w-0 flex-1 truncate text-left font-mono text-xs ${
                   on ? `${ROW_ON_INK} font-medium` : ROW_INK
                 }`}
@@ -85,6 +90,7 @@ export function ViewList({
               <span
                 role="img"
                 aria-label="unsaved changes"
+                data-testid="view-dirty"
                 className={`size-1 flex-none rounded-full ${DIRTY_DOT}`}
               />
             )}
@@ -101,6 +107,11 @@ export function ViewList({
                   onMenu(view.id, { x: box.right + 4, y: box.top });
                 }}
                 aria-label={`More for ${view.name}`}
+                // ⚠️ Opens the menu whose last row is `Delete view`. Hidden
+                // until the row is hovered, and named rather than reached
+                // through the `aria-label` above, which embeds the name.
+                data-testid="view-more"
+                data-view={view.name}
                 className="text-ink-dim hover:text-ink flex size-3.5 flex-none items-center justify-center font-mono text-xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
               >
                 ⋯

@@ -26,7 +26,14 @@ import type { HostView } from "@lib/api/hosts";
  */
 export function HostPath({ host, path }: { host: HostView | null; path: string }) {
   return (
-    <span className="flex min-w-0 flex-1 items-center gap-1.5">
+    // Drawn twice in the transfer modal, source and destination; `data-path`
+    // tells the two apart, and the modal scopes them further.
+    <span
+      data-testid="host-path"
+      data-host={host?.slug}
+      data-path={path}
+      className="flex min-w-0 flex-1 items-center gap-1.5"
+    >
       <span
         aria-hidden
         className="size-1.5 flex-none rounded-full"

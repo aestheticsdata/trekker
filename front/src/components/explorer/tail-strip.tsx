@@ -176,7 +176,13 @@ function TailFeedView({
             />
           }
         >
-          <span className="min-w-0 truncate font-mono">{name}</span>
+          <span
+            className="min-w-0 truncate font-mono"
+            data-testid="tail-file"
+            data-file={name}
+          >
+            {name}
+          </span>
         </Tooltip>
       }
       controls={
@@ -188,16 +194,20 @@ function TailFeedView({
               type="button"
               onClick={() => setAttempt((previous) => previous + 1)}
               className={`${TAIL_BUTTON_FILL} ${TAIL_BUTTON_INK} px-1.5 py-0.5 font-medium whitespace-nowrap`}
+              data-testid="tail-retry"
             >
               retry
             </button>
           )}
 
+          {/* Named because the label is the count: `↓ follow`, then `↓ 3 new`
+              the moment a line lands. */}
           {pausedAt !== null && (
             <button
               type="button"
               onClick={follow}
               className={`${TAIL_BUTTON_FILL} ${TAIL_BUTTON_INK} px-1.5 py-0.5 font-medium whitespace-nowrap`}
+              data-testid="tail-follow"
             >
               ↓ {pending > 0 ? `${pending} new` : "follow"}
             </button>
@@ -208,6 +218,7 @@ function TailFeedView({
             onClick={() => onTail(null)}
             aria-label="Stop following this file"
             className={`${TAIL_HEADER_INK} px-1 font-mono hover:opacity-70`}
+            data-testid="tail-stop"
           >
             ×
           </button>
@@ -228,6 +239,7 @@ function TailFeedView({
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box with no other keyboard route has to be focusable, or its content is reachable by pointer alone
         tabIndex={0}
         className={`${TAIL_BODY_INK} scroll-composited h-tailbody overflow-x-hidden overflow-y-auto font-mono text-caption leading-log`}
+        data-testid="tail-body"
       >
         <ScrollThumbRail />
         {feed.entries.length === 0 ? (
@@ -279,6 +291,8 @@ function TailPicker({
               type="button"
               onClick={() => onTail(joinPath(directory, row.name))}
               className="border-pane-line text-on-pane-data hover:bg-pane-hover border px-1.5 py-0.5"
+              data-testid="tail-picker-chip"
+              data-file={row.name}
             >
               {row.name}
             </button>
@@ -306,7 +320,13 @@ function Frame({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`${TAIL_SURFACE} border-accent mx-2.25 mb-2.25 flex-none border-l-2 px-2 py-1.75`}>
+    // One strip per pane, and both panes can stand in log directories at once —
+    // scope by the pane wrapper's `[data-pane]` before reaching for anything in
+    // here.
+    <section
+      className={`${TAIL_SURFACE} border-accent mx-2.25 mb-2.25 flex-none border-l-2 px-2 py-1.75`}
+      data-testid="tail-strip"
+    >
       {/* The small caps are the label's, not the header's. `tracking-caps` and
           `uppercase` on the row would take the file name with them, and
           `ACCESS.LOG` at 0.14em is not the name of anything on the host. */}
@@ -328,21 +348,50 @@ function Frame({
 
 /** What the stream is doing, in one word, and only when it is not simply live. */
 function StatusWord({ feed }: { feed: ReturnType<typeof useTail> }) {
+  // `tail-status` on every word and on none of the silence: a take that finds
+  // it absent is looking at a live, healthy tail — the one state this slot
+  // deliberately says nothing about, below.
   if (feed.status === "ended") {
     return (
       <Tooltip content={feed.ended}>
-        <span className="text-log-server whitespace-nowrap">ended</span>
+        <span
+          className="text-log-server whitespace-nowrap"
+          data-testid="tail-status"
+        >
+          ended
+        </span>
       </Tooltip>
     );
   }
 
-  if (feed.status === "reconnecting") return <span className="text-log-client whitespace-nowrap">reconnecting…</span>;
-  if (feed.status === "connecting") return <span className="whitespace-nowrap opacity-70">connecting…</span>;
+  if (feed.status === "reconnecting")
+    return (
+      <span
+        className="text-log-client whitespace-nowrap"
+        data-testid="tail-status"
+      >
+        reconnecting…
+      </span>
+    );
+  if (feed.status === "connecting")
+    return (
+      <span
+        className="whitespace-nowrap opacity-70"
+        data-testid="tail-status"
+      >
+        connecting…
+      </span>
+    );
 
   if (feed.warning !== null) {
     return (
       <Tooltip content={feed.warning}>
-        <span className="text-log-server whitespace-nowrap">host not answering</span>
+        <span
+          className="text-log-server whitespace-nowrap"
+          data-testid="tail-status"
+        >
+          host not answering
+        </span>
       </Tooltip>
     );
   }

@@ -36,6 +36,7 @@ export function SudoModal({ host, onClose }: { host: HostView; onClose: () => vo
     <Overlay
       label={`Elevate with sudo on ${host.label}`}
       onClosed={onClose}
+      testId="sudo-modal"
       panelClassName="bg-app border-warning flex w-full max-w-[30rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
     >
       {(close) => (
@@ -149,6 +150,7 @@ function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
               autoComplete="off"
               spellCheck={false}
               aria-label={host.username ? `Password for ${host.username}` : "Account password"}
+              data-testid="sudo-password"
               className="bg-chrome border-line-strong text-ink focus:border-warning w-full border px-2.25 py-1.75 font-mono text-name/none"
             />
           </label>
@@ -171,6 +173,7 @@ function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
         <button
           type="button"
           onClick={close}
+          data-testid="sudo-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
           cancel
@@ -180,6 +183,7 @@ function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
             type="button"
             onClick={() => elevate.mutate()}
             disabled={!armed}
+            data-testid="sudo-elevate"
             // Amber rather than the accent, and amber while inert: this is the
             // button that makes the next `rm` run as root, and it should never
             // look like the save on a settings form.

@@ -31,7 +31,13 @@ export function Field({
   children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-1">
+    // `host-`, not `field-`: the toolbar has a segmented control of its own,
+    // and one name across the two would match both when the host form is open.
+    <div
+      data-testid="host-field"
+      data-field={label.toLowerCase()}
+      className="flex flex-col gap-1"
+    >
       <div className="flex items-baseline justify-between gap-2">
         <label
           htmlFor={htmlFor}
@@ -39,7 +45,12 @@ export function Field({
         >
           {label}
         </label>
-        <span className="text-danger-soft truncate text-right font-mono text-2xs">{error ?? ""}</span>
+        <span
+          data-testid="host-field-error"
+          className="text-danger-soft truncate text-right font-mono text-2xs"
+        >
+          {error ?? ""}
+        </span>
       </div>
       {children}
       {hint && <span className="text-ink-faint font-mono text-2xs">{hint}</span>}
@@ -53,6 +64,8 @@ export const INPUT_CLASS =
 export function TextInput({ invalid, ...props }: InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) {
   return (
     <input
+      // The spread is what lets a call site's `data-testid` reach the input —
+      // this and `Button` below are the two primitives in the app that do.
       {...props}
       aria-invalid={invalid || undefined}
       className={`${INPUT_CLASS} ${invalid ? "border-danger-mid" : ""} ${props.className ?? ""}`}
@@ -82,6 +95,8 @@ export function Segmented<T extends string>({
   return (
     <fieldset
       aria-label={label}
+      data-testid="host-segmented"
+      data-segment={label.toLowerCase()}
       className="border-line-strong flex h-6 overflow-hidden rounded-xs border"
     >
       {options.map((option) => {
@@ -95,6 +110,8 @@ export function Segmented<T extends string>({
             <button
               type="button"
               aria-pressed={active}
+              data-testid="host-segmented-option"
+              data-value={option.value}
               // `aria-disabled`, not `disabled` (TRE-76): an option that is off
               // is the one whose hint says why, and a control disabled by the
               // attribute is neither hoverable nor a tab stop.

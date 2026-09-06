@@ -75,9 +75,13 @@ export function Toolbar({
   actions?: readonly Action[];
 }) {
   return (
-    <div className="bg-app border-line flex h-toolbar shrink-0 items-center gap-2.25 border-b px-2.5">
+    <div
+      className="bg-app border-line flex h-toolbar shrink-0 items-center gap-2.25 border-b px-2.5"
+      data-testid="toolbar"
+    >
       <Segmented
         label="View mode"
+        testId="view-mode"
         value={viewMode}
         onChange={(value) => onViewModeChange?.(value as ViewMode)}
         options={[
@@ -101,10 +105,14 @@ export function Toolbar({
           onChange={(event) => onGlobChange?.(event.target.value)}
           placeholder="*.log"
           aria-label="Filter by glob"
+          data-testid="glob-input"
           className="text-ink-soft placeholder:text-ink-faint caret-brand min-w-0 flex-1 bg-transparent font-mono text-xs"
         />
         {globMatches !== null && (
-          <span className="text-ink-dim font-mono text-2xs whitespace-nowrap">
+          <span
+            className="text-ink-dim font-mono text-2xs whitespace-nowrap"
+            data-testid="glob-hits"
+          >
             {globMatches} {globMatches === 1 ? "hit" : "hits"}
           </span>
         )}
@@ -112,6 +120,7 @@ export function Toolbar({
 
       <Toggle
         label="heat"
+        testId="heat-toggle"
         pressed={heat}
         onChange={() => onHeatChange?.(!heat)}
       />
@@ -120,6 +129,7 @@ export function Toolbar({
           nothing to open below the inspector breakpoint. */}
       <Toggle
         label="inspector"
+        testId="inspector-toggle"
         hint="Show the inspector (⌘I)"
         tone="accent"
         className="hidden inspector:flex"
@@ -129,7 +139,10 @@ export function Toolbar({
 
       <div className="flex-1" />
 
-      <div className="hidden items-center gap-1.25 panes:flex">
+      <div
+        className="hidden items-center gap-1.25 panes:flex"
+        data-testid="toolbar-actions"
+      >
         {actions.map((action) => (
           <ActionButton
             key={action.id}
@@ -158,6 +171,13 @@ function ActionButton({ action }: { action: Action }) {
         // all. Inert either way: the click below returns before `onSelect`.
         aria-disabled={disabled}
         onClick={disabled ? undefined : action.onSelect}
+        // ⚠️ By id, never by text. Every button in this row opens a mutating
+        // flow, and three of them — `duplicate`, `download`, `upload` — fire
+        // with no dialog in between. The accessible name is the label *and* the
+        // chord (`copy F5`), and `aria-disabled` flips with the selection, so a
+        // fuzzy text match here is one keystroke from a real transfer.
+        data-testid="toolbar-action"
+        data-action={action.id}
         className={[
           "flex h-5 items-center gap-1 rounded-sm border px-2 font-mono text-xs whitespace-nowrap",
           // Danger stays red even while disabled: rm should never look routine.
@@ -182,11 +202,14 @@ function ActionButton({ action }: { action: Action }) {
 
 function Segmented({
   label,
+  testId,
   value,
   options,
   onChange,
 }: {
   label: string;
+  /** The family name its buttons carry; each one's `data-mode` is its value. */
+  testId?: string;
   value: string;
   options: ReadonlyArray<{ value: string; label: string }>;
   onChange: (value: string) => void;
@@ -206,6 +229,8 @@ function Segmented({
             type="button"
             aria-pressed={active}
             onClick={() => onChange(option.value)}
+            data-testid={testId}
+            data-mode={option.value}
             className={`border-line-strong flex items-center border-l px-2.25 font-mono text-xs first:border-l-0 ${
               active ? `${SELECTED} font-medium` : "text-ink-muted hover:text-ink"
             }`}
@@ -247,6 +272,8 @@ function SplitControl({ value, onChange }: { value: SplitMode; onChange: (mode: 
               aria-pressed={active}
               aria-label={option.label}
               onClick={() => onChange(option.value)}
+              data-testid="split-control"
+              data-split={option.value}
               className={`flex h-4.5 w-6 border ${
                 active
                   ? "border-accent bg-line text-ink-soft"
@@ -288,6 +315,7 @@ function Rule() {
 function Toggle({
   label,
   hint,
+  testId,
   pressed,
   tone = "warning",
   className = "flex",
@@ -297,6 +325,8 @@ function Toggle({
   /** `hint`, not `title`: a prop called `title` that is not one is how the
    *  attribute finds its way back into this file (TRE-76). */
   hint?: string;
+  /** Per call site: the label is stable but `aria-pressed` is not. */
+  testId?: string;
   pressed: boolean;
   tone?: "warning" | "accent";
   className?: string;
@@ -311,6 +341,7 @@ function Toggle({
         type="button"
         aria-pressed={pressed}
         onClick={onChange}
+        data-testid={testId}
         className={`h-5 items-center rounded-sm border px-2 font-mono text-xs ${className} ${
           pressed ? lit : "border-line-strong text-ink-faint hover:text-ink-muted"
         }`}

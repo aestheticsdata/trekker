@@ -271,6 +271,7 @@ export function DiskUsage({
   return (
     <section
       aria-label="Disk usage"
+      data-testid="disk-usage"
       className={`${STRIP_SURFACE} border-line h-strip flex-none border-t px-2.5 py-2`}
     >
       <div className="flex items-baseline gap-2.25">
@@ -279,6 +280,7 @@ export function DiskUsage({
             whole it would push `scan` and `hide` off the right edge of the bar
             on any deep directory. */}
         <h2
+          data-testid="du-title"
           className={`${STRIP_LABEL_INK} flex min-w-0 items-baseline gap-1 font-sans text-caps leading-none font-semibold tracking-[0.16em]`}
         >
           <span className="flex-none whitespace-nowrap">DISK USAGE</span>
@@ -304,12 +306,17 @@ export function DiskUsage({
           failed={isError}
         />
 
+        {/* ⚠️ Three controls at the right end of the one line a sweep across
+            the bands ends under. `scan` runs a real `du` on the host and pins
+            the URL, `cancel` POSTs, `hide` reshapes the layout — each named on
+            its own, so a take can check its pointer path against them. */}
         {host &&
           (running ? (
             <Action
               onClick={() => stop.mutate()}
               disabled={stop.isPending}
               hint="Stop the scan running on this host"
+              testId="du-cancel"
             >
               cancel ✕
             </Action>
@@ -318,6 +325,7 @@ export function DiskUsage({
               onClick={() => begin.mutate(panePath)}
               disabled={begin.isPending}
               hint={`Walk ${panePath} with du and keep the result`}
+              testId="du-scan"
             >
               scan ⟳
             </Action>
@@ -326,6 +334,7 @@ export function DiskUsage({
         <Action
           onClick={onHide}
           hint="Collapse the strip and give the space back to the panes"
+          testId="du-hide"
         >
           hide ▾
         </Action>
@@ -389,7 +398,16 @@ function Summary({
 }) {
   const line = "min-w-0 flex-1 truncate font-mono text-caption leading-none";
 
-  if (!host) return <p className={`${line} ${STRIP_QUIET_INK}`}>No host in the active pane.</p>;
+  // The same name on every arm: which sentence is up is the state itself.
+  if (!host)
+    return (
+      <p
+        data-testid="du-summary"
+        className={`${line} ${STRIP_QUIET_INK}`}
+      >
+        No host in the active pane.
+      </p>
+    );
 
   if (running) {
     const counted = live
@@ -397,7 +415,10 @@ function Summary({
       : null;
 
     return (
-      <p className={`${line} ${STRIP_QUIET_INK} flex items-center gap-1.5`}>
+      <p
+        data-testid="du-summary"
+        className={`${line} ${STRIP_QUIET_INK} flex items-center gap-1.5`}
+      >
         <span
           aria-hidden
           className="bg-accent-soft h-1.25 w-5 flex-none animate-shimmer"
@@ -412,13 +433,37 @@ function Summary({
     );
   }
 
-  if (pending) return <p className={`${line} ${STRIP_QUIET_INK}`}>Looking for a kept scan…</p>;
+  if (pending)
+    return (
+      <p
+        data-testid="du-summary"
+        className={`${line} ${STRIP_QUIET_INK}`}
+      >
+        Looking for a kept scan…
+      </p>
+    );
   // Before the "never scanned" arm, because they are different claims and only
   // one of them is about the disk: a request that failed knows nothing about
   // whether this root has ever been walked, and saying so would be an assertion
   // built out of a network error.
-  if (failed) return <p className={`${line} ${STRIP_ALARM_INK}`}>Could not read this host's scans.</p>;
-  if (!scan) return <p className={`${line} ${STRIP_QUIET_INK}`}>Never scanned.</p>;
+  if (failed)
+    return (
+      <p
+        data-testid="du-summary"
+        className={`${line} ${STRIP_ALARM_INK}`}
+      >
+        Could not read this host's scans.
+      </p>
+    );
+  if (!scan)
+    return (
+      <p
+        data-testid="du-summary"
+        className={`${line} ${STRIP_QUIET_INK}`}
+      >
+        Never scanned.
+      </p>
+    );
 
   const parts = [
     volume
@@ -433,10 +478,16 @@ function Summary({
   ].filter((part): part is string => part !== null);
 
   return (
-    <p className={`${line} ${STRIP_QUIET_INK} flex items-baseline gap-1.5`}>
+    <p
+      data-testid="du-summary"
+      className={`${line} ${STRIP_QUIET_INK} flex items-baseline gap-1.5`}
+    >
       {scan.stale && (
         <Tooltip content={`This install calls a scan current for ${formatDuration(scan.staleAfterSeconds)}.`}>
-          <span className={`${WARN_CHIP_FILL} ${WARN_CHIP_INK} flex-none rounded-xs px-1 py-0.5 leading-none`}>
+          <span
+            data-testid="du-stale"
+            className={`${WARN_CHIP_FILL} ${WARN_CHIP_INK} flex-none rounded-xs px-1 py-0.5 leading-none`}
+          >
             ⚠ stale
           </span>
         </Tooltip>
@@ -500,7 +551,10 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
   if (bands.length === 0) return <Note>This directory holds nothing to divide up.</Note>;
 
   return (
-    <div className="flex h-7.5 gap-0.5">
+    <div
+      className="flex h-7.5 gap-0.5"
+      data-testid="du-treemap"
+    >
       {bands.map((band, index) => {
         const percent = Math.round(band.share * 100);
         // A pane cannot be pointed at a file, so a band standing for one takes
@@ -542,6 +596,10 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
               // guarded, and now reachable by keyboard, which it never was.
               aria-disabled={target === null}
               onClick={() => target && onNavigate(target)}
+              // `rest` for the fold, which is the one band without a path — the
+              // same word the React key already uses for it.
+              data-testid="du-band"
+              data-path={band.path ?? "rest"}
               // `flexBasis: 0` with a grow of the band's share is the whole
               // geometry: the row's width, minus its gaps, divided in proportion.
               // `min-w-0` is what lets a sliver actually be a sliver rather than
@@ -598,6 +656,7 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
 function Working({ live }: { live: ScanProgress | null }) {
   return (
     <div
+      data-testid="du-working"
       className={`border-line-strong ${STRIP_QUIET_INK} flex h-7.5 items-center gap-2.25 border px-2 font-mono text-caption leading-none`}
     >
       <span
@@ -645,7 +704,10 @@ function Blank({
   if (!host) return <Note>Bind the active pane to a host and its disk usage appears here.</Note>;
 
   return (
-    <div className="border-pane-dash flex h-7.5 items-center gap-2.5 border border-dashed px-2">
+    <div
+      className="border-pane-dash flex h-7.5 items-center gap-2.5 border border-dashed px-2"
+      data-testid="du-blank"
+    >
       <Tooltip content={failure ?? undefined}>
         <p
           className={`min-w-0 flex-1 truncate font-mono text-caption leading-none ${
@@ -660,6 +722,8 @@ function Blank({
           type="button"
           onClick={onScan}
           disabled={pending}
+          // Its text is one of three, by state — and it starts a scan.
+          data-testid="du-blank-scan"
           className={`${PRESS} flex-none px-2.5 py-1 font-mono text-2xs leading-none font-medium disabled:opacity-60`}
         >
           {pending ? "starting…" : failure ? "try again" : "scan now"}
@@ -683,10 +747,12 @@ function Facts({ scan }: { scan: ScanView | null }) {
 
   return (
     <div
+      data-testid="du-facts"
       className={`${STRIP_QUIET_INK} mt-1.5 flex gap-4 overflow-hidden font-mono text-caption leading-none whitespace-nowrap`}
     >
       <Fact
         label="largest"
+        fact="largest"
         hint={largest?.path}
       >
         {largest ? `${lastSegment(largest.path)} ${formatTotal(Number(largest.bytes))}` : null}
@@ -694,6 +760,7 @@ function Facts({ scan }: { scan: ScanView | null }) {
 
       <Fact
         label="duplicates"
+        fact="duplicates"
         hint={
           duplicates ? (
             <TooltipBlock
@@ -720,6 +787,8 @@ function Facts({ scan }: { scan: ScanView | null }) {
 
       <Fact
         label="files > 1 year"
+        // The payload's own key, not the label: `>` in a selector is a combinator.
+        fact="old-files"
         hint={
           old ? (
             <TooltipBlock
@@ -740,10 +809,25 @@ function Facts({ scan }: { scan: ScanView | null }) {
 
 /** `hint`, not `title`: a prop called `title` that is not a title is how the
  *  attribute finds its way back in (TRE-76). */
-function Fact({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+function Fact({
+  label,
+  fact,
+  hint,
+  children,
+}: {
+  label: string;
+  /** The stable key this fact is addressed by — `data-fact`, beside the label it wears. */
+  fact?: string;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <Tooltip content={hint}>
-      <span className="min-w-0 truncate">
+      <span
+        className="min-w-0 truncate"
+        data-testid="du-fact"
+        data-fact={fact}
+      >
         {label}: <span className={STRIP_VALUE_INK}>{children ?? "—"}</span>
       </span>
     </Tooltip>
@@ -763,11 +847,14 @@ function Action({
   onClick,
   disabled = false,
   hint,
+  testId,
   children,
 }: {
   onClick: () => void;
   disabled?: boolean;
   hint: string;
+  /** Per call site — the three are told apart by their text alone otherwise. */
+  testId?: string;
   children: ReactNode;
 }) {
   return (
@@ -776,6 +863,7 @@ function Action({
         type="button"
         onClick={onClick}
         disabled={disabled}
+        data-testid={testId}
         className={`${STRIP_ACTION_INK} hover:text-ink flex-none font-mono text-caption leading-none whitespace-nowrap disabled:opacity-60`}
       >
         {children}

@@ -477,6 +477,7 @@ function UploadTray() {
   return (
     <section
       aria-label="Uploads"
+      data-testid="upload-tray"
       className="bg-app border-line-strong fixed bottom-[calc(var(--spacing-statusbar)+0.5rem)] left-3 z-50 flex w-76 flex-col rounded-sm border shadow-2xl"
     >
       <header className="border-line flex items-center gap-2 border-b px-2.5 py-1.5">
@@ -491,6 +492,9 @@ function UploadTray() {
         <div className="flex-1" />
         <button
           type="button"
+          // `cancel all` while anything is in flight, `clear` after: the label
+          // moves with the tray, and the first of the two aborts live requests.
+          data-testid="upload-tray-clear"
           onClick={() => {
             for (const row of rows) {
               if (row.state === "sending" || row.state === "waiting") row.abort();
@@ -503,7 +507,10 @@ function UploadTray() {
         </button>
       </header>
 
-      <div className="max-h-50 overflow-y-auto">
+      <div
+        data-testid="upload-tray-list"
+        className="max-h-50 overflow-y-auto"
+      >
         {rows.map((row) => (
           <UploadTrayRow
             key={row.id}
@@ -530,13 +537,22 @@ function UploadTrayRow({ row, onDismiss }: { row: UploadRow; onDismiss: () => vo
           : "text-ink-muted";
 
   return (
-    <div className="border-raised flex flex-col gap-1 border-t px-2.5 py-1.5">
+    // `data-name` is the path as picked, which somebody chose on their own disk:
+    // match it with `:has-text()`, never by interpolating it into a selector.
+    <div
+      data-testid="upload-row"
+      data-name={row.name}
+      className="border-raised flex flex-col gap-1 border-t px-2.5 py-1.5"
+    >
       <div className="flex items-baseline gap-2">
         <span className={`min-w-0 flex-1 truncate font-mono text-xs/[1.3] ${tone}`}>{row.name}</span>
         <span className="text-ink-dim font-mono text-2xs/none">{formatSize(row.bytes, "file")}</span>
         <button
           type="button"
           aria-label={row.state === "sending" || row.state === "waiting" ? `Cancel ${row.name}` : `Dismiss ${row.name}`}
+          // Aborts the whole batch while the row is in flight; the label above
+          // says which it is doing, and changes.
+          data-testid="upload-dismiss"
           onClick={onDismiss}
           className="text-ink-faint hover:text-ink font-mono text-2xs/none"
         >

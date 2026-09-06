@@ -45,7 +45,10 @@ export function AuthCard({
 }) {
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="border-line w-full max-w-[26rem] border">
+      <div
+        data-testid="auth-card"
+        className="border-line w-full max-w-[26rem] border"
+      >
         <header className="border-line bg-chrome border-b px-5 py-3.5">
           <h1 className="text-ink text-lg font-semibold tracking-caps">{title}</h1>
           <p className="text-ink-faint mt-0.5 text-xs tracking-label">{subtitle}</p>
@@ -58,11 +61,19 @@ export function AuthCard({
 
         <footer className="border-line bg-chrome flex items-center justify-between gap-3 border-t px-5 py-2">
           <span className="flex min-w-0 items-baseline gap-2">
-            <span className={`shrink-0 font-mono text-xs tracking-label ${STATUS_CLASS[status]}`}>{status}</span>
+            {/* The word is the state (`IDLE` → `WORKING` → `AUTHENTICATED`),
+                which is exactly what a script waits on — by this name. */}
+            <span
+              data-testid="auth-status"
+              className={`shrink-0 font-mono text-xs tracking-label ${STATUS_CLASS[status]}`}
+            >
+              {status}
+            </span>
             {/* Always present, empty when there is nothing wrong. */}
             <Tooltip content={failure ?? undefined}>
               <span
                 role={failure ? "alert" : undefined}
+                data-testid="auth-failure"
                 className="text-danger-soft min-w-0 truncate text-xs"
               >
                 {failure ?? ""}
@@ -94,11 +105,16 @@ export function AuthNotice({ tone, children }: { tone: "error" | "warning" | "in
 
 export function AuthLinks({ links }: { links: ReadonlyArray<{ href: string; label: string }> }) {
   return (
-    <nav className="flex shrink-0 items-center gap-3">
+    <nav
+      data-testid="auth-links"
+      className="flex shrink-0 items-center gap-3"
+    >
       {links.map((link) => (
         <Link
           key={link.href}
           href={link.href}
+          data-testid="auth-link"
+          data-href={link.href}
           className="text-ink-faint hover:text-ink-muted text-xs tracking-label"
         >
           {link.label}

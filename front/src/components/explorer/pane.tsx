@@ -25,7 +25,7 @@ import { isLogDirectory } from "@helpers/tail";
 import { ApiError } from "@lib/api/client";
 import { useState } from "react";
 
-import type { PaneView } from "@components/explorer/pane-state";
+import type { PaneIndex, PaneView } from "@components/explorer/pane-state";
 import type { DirSize, DirSizes } from "@components/explorer/use-dir-sizes";
 import type { Column } from "@helpers/columns";
 import type { Crumb, SortKey } from "@helpers/listing";
@@ -123,6 +123,7 @@ export interface PaneCallbacks {
 }
 
 export function Pane({
+  index,
   pane,
   active,
   host,
@@ -140,6 +141,15 @@ export function Pane({
   now,
   callbacks,
 }: {
+  /**
+   * Which of the two this is, for the `data-pane` on the root and nothing else.
+   *
+   * The explorer's wrapper already carries the same value, and keeps it — ⇧F10
+   * finds the cursor row through that one. This copy is for a script driving
+   * the console, which addresses a pane by `[data-testid="pane"][data-pane=N]`
+   * and never by a wrapper it cannot see the edge of.
+   */
+  index: PaneIndex;
   pane: PaneView;
   active: boolean;
   host: HostView | null;
@@ -305,6 +315,11 @@ export function Pane({
       // The active pane wears its host's colour. Without a host the class
       // above still supplies one, so the edge is never `currentColor`.
       style={active && host ? { borderLeftColor: host.colour } : undefined}
+      // ⚠️ Everything below renders once per pane, and both panes can show the
+      // same directory — so `row`, `tab`, `path-crumb` and the rest are only
+      // ever addressed *inside* one of these, never from the page.
+      data-testid="pane"
+      data-pane={index}
     >
       <TabStrip
         pane={pane}
@@ -341,6 +356,10 @@ export function Pane({
         ref={list.scrollRef}
         onContextMenu={openMenu}
         className="scroll-composited relative min-h-16.5 flex-auto overflow-x-hidden overflow-y-auto"
+        // The element that scrolls, named apart from the pane: a row outside
+        // the window is not in the DOM, so a script reaches it by scrolling
+        // *this* by `rowHeight × index` rather than by asking the row to appear.
+        data-testid="pane-scroll"
       >
         <ScrollThumbRail />
         {/* The row height, asked of the browser rather than written down here.
@@ -359,6 +378,7 @@ export function Pane({
           />
         ) : host === null ? (
           <Placeholder
+            state="unbound"
             title="no host"
             detail="This pane has nothing to browse yet. Add the machine the API runs on, or an SSH host."
             action={{ label: "add a host", onSelect: callbacks.onHostMenu }}
@@ -411,6 +431,7 @@ export function Pane({
                       // virtualised, so the DOM is the only thing that knows
                       // (TRE-19).
                       data-parent-row
+                      data-testid="parent-row"
                       onMouseDown={(event) => pressRow(event, PARENT_NAME, callbacks.onRowClick)}
                       onDoubleClick={callbacks.onUp}
                       // Two columns, not the listing's: there is no size, mode,
@@ -490,24 +511,44 @@ export function Pane({
         />
       )}
 
-      <footer className="bg-pane-bar border-pane-line text-on-pane-muted flex h-panefoot flex-none items-center gap-2.5 border-t px-2.25 font-mono text-2xs">
+      <footer
+        className="bg-pane-bar border-pane-line text-on-pane-muted flex h-panefoot flex-none items-center gap-2.5 border-t px-2.25 font-mono text-2xs"
+        data-testid="pane-footer"
+      >
         {meta && !loading && !error && host && (
           <>
-            <span className="whitespace-nowrap">
+            <span
+              className="whitespace-nowrap"
+              data-testid="pane-footer-counts"
+            >
               {directories} folders · {rows.length - directories} files
             </span>
-            <span className="whitespace-nowrap">{formatTotal(shownBytes)}</span>
+            <span
+              className="whitespace-nowrap"
+              data-testid="pane-footer-total"
+            >
+              {formatTotal(shownBytes)}
+            </span>
           </>
         )}
         <div className="flex-1" />
         {/* The slot is never empty: with nothing selected it says how the
             listing is ordered, which is the other thing you ask of a pane. */}
+        {/* Two names for one slot, because its text is the state: a script
+            waiting for "3 selected" or "sorted by size ▼" reads the one it
+            means rather than a sentence that just changed shape. */}
         {pane.sel.length > 0 ? (
-          <span className="text-on-pane truncate whitespace-nowrap">
+          <span
+            className="text-on-pane truncate whitespace-nowrap"
+            data-testid="pane-footer-selection"
+          >
             {pane.sel.length} selected · {formatTotal(selectedBytes)}
           </span>
         ) : (
-          <span className="truncate whitespace-nowrap">
+          <span
+            className="truncate whitespace-nowrap"
+            data-testid="pane-footer-sort"
+          >
             sorted by {pane.sort} {pane.dir === 1 ? "▲" : "▼"}
           </span>
         )}
@@ -564,6 +605,7 @@ function TabStrip({
     <div
       onContextMenu={openTabMenu}
       className="bg-line flex h-tabstrip flex-none @container"
+      data-testid="tab-strip"
     >
       {pane.tabs.map((tabPath, index) => {
         const current = index === pane.tab;
@@ -574,6 +616,11 @@ function TabStrip({
             // biome-ignore lint/suspicious/noArrayIndexKey: tab identity is its position
             key={index}
             data-tab={index}
+            // ⚠️ The handle is the label *and* the ×. On the open tab both are
+            // hit-testable, so a click aimed at the handle's centre lands on
+            // the × once the label is a character or two wide — `tab-select`
+            // below is what a script clicks; this one is for reading state.
+            data-testid="tab"
             className={`group flex flex-none items-stretch font-mono text-2xs whitespace-nowrap ${
               current
                 ? `${active ? "bg-pane-active" : "bg-pane"} text-on-pane font-medium`
@@ -585,6 +632,7 @@ function TabStrip({
               onClick={() => callbacks.onSelectTab(index)}
               aria-current={current ? "page" : undefined}
               className={`flex items-center gap-1.5 ${closeable ? "pr-1 pl-2.5" : "px-2.5"}`}
+              data-testid="tab-select"
             >
               <span
                 aria-hidden
@@ -605,6 +653,10 @@ function TabStrip({
                   type="button"
                   onClick={() => callbacks.onCloseTab(index)}
                   aria-label={`Close tab ${tabPath}`}
+                  // Its own name, and its own `data-tab`: the accessible name
+                  // above carries the path, which moves with every navigation.
+                  data-testid="tab-close"
+                  data-tab={index}
                   // Two grounds, so two reds. The open tab is a light pane and
                   // the rest are the dark strip, which is the one place in this
                   // app where a single ink cannot serve both sides of a
@@ -638,6 +690,7 @@ function TabStrip({
         onClick={callbacks.onNewTab}
         aria-label="New tab"
         className="text-ink-dim hover:text-ink-muted flex items-center px-2.25 font-mono text-sm"
+        data-testid="tab-new"
       >
         +
       </button>
@@ -645,7 +698,10 @@ function TabStrip({
       <div className="flex-1" />
 
       {active && (
-        <span className="text-brand hidden items-center px-2.5 font-mono text-2xs whitespace-nowrap @[32.5rem]:flex">
+        <span
+          className="text-brand hidden items-center px-2.5 font-mono text-2xs whitespace-nowrap @[32.5rem]:flex"
+          data-testid="pane-active-badge"
+        >
           ACTIVE PANE · ⇥ to switch
         </span>
       )}
@@ -685,6 +741,7 @@ function PathRow({
       className={`border-pane-line text-on-pane-data flex h-pathrow flex-none items-center gap-1.5 overflow-hidden border-b px-1.75 font-mono text-xs @container ${
         active ? "bg-pane-bar-active" : "bg-pane-bar"
       }`}
+      data-testid="path-row"
     >
       <button
         type="button"
@@ -693,6 +750,9 @@ function PathRow({
           active ? "bg-pane-chip text-on-pane" : "text-on-pane-muted border-pane-line"
         }`}
         style={active && host ? { borderColor: host.colour } : undefined}
+        // Named rather than found by its text, which is the host's label — or
+        // "no host", which is the one state a script must be able to tell apart.
+        data-testid="path-host-chip"
       >
         <span
           aria-hidden
@@ -708,18 +768,21 @@ function PathRow({
         glyph="←"
         enabled={pane.hist.length > 0}
         onClick={callbacks.onBack}
+        testId="nav-back"
       />
       <NavButton
         label="Forward"
         glyph="→"
         enabled={pane.fwd.length > 0}
         onClick={callbacks.onForward}
+        testId="nav-forward"
       />
       <NavButton
         label="Up one level"
         glyph="↰"
         enabled
         onClick={callbacks.onUp}
+        testId="nav-up"
       />
 
       <span
@@ -736,6 +799,7 @@ function PathRow({
         aria-label="Breadcrumb"
         data-native-menu
         className="flex min-w-0 flex-auto items-center justify-end overflow-hidden"
+        data-testid="path-crumbs"
       >
         <span className="flex flex-none items-center">
           {crumbs.map((crumb) => (
@@ -746,6 +810,11 @@ function PathRow({
               className={`flex-none whitespace-nowrap hover:underline ${
                 crumb.last ? "text-on-pane font-semibold" : "text-on-pane-muted"
               }`}
+              // The absolute path and not the label: `releases/` is a segment
+              // of half the paths in the corpus, and the leading segments fall
+              // off the left of a long path anyway.
+              data-testid="path-crumb"
+              data-crumb={crumb.path}
             >
               {crumb.label}
             </button>
@@ -759,6 +828,9 @@ function PathRow({
             className={`hidden flex-none rounded-xs px-1.5 py-0.5 text-2xs whitespace-nowrap @[25rem]:inline ${
               badge.alarming ? "bg-on-pane-muted text-ink" : "bg-pane-chip text-on-pane"
             }`}
+            // One box, three sentences (`badgeFor` below) — the name is what
+            // stays put while the text says total, volume or truncation.
+            data-testid="path-badge"
           >
             {badge.label}
           </span>
@@ -822,11 +894,14 @@ function NavButton({
   glyph,
   enabled,
   onClick,
+  testId,
 }: {
   label: string;
   glyph: string;
   enabled: boolean;
   onClick: () => void;
+  /** `nav-back` / `nav-forward` / `nav-up`, per call site — three arrows, one component. */
+  testId: string;
 }) {
   return (
     // `disabled` stays rather than becoming `aria-disabled` (TRE-76): the hint
@@ -841,6 +916,7 @@ function NavButton({
         disabled={!enabled}
         aria-label={label}
         className={`flex-none px-1 py-0.5 ${enabled ? "text-on-pane" : "text-pane-line cursor-not-allowed"}`}
+        data-testid={testId}
       >
         {glyph}
       </button>
@@ -893,25 +969,41 @@ function ColumnHeader({
       }}
       style={grid}
       className={`bg-pane-bar border-pane-line text-on-pane-label grid h-row-tight flex-none items-center border-b font-sans text-3xs font-medium tracking-[0.11em] ${CELLS}`}
+      data-testid="column-bar"
     >
       <span />
+      {/* `data-column` and not the text: the arrow rides on the label, so
+          `SIZE` is `SIZE ▼` the moment it is clicked, and `AGE ▼` a click later. */}
       <button
         type="button"
         onClick={() => onSort("name")}
         className={`text-left ${tone("name")}`}
+        data-testid="column-header"
+        data-column="name"
       >
         NAME{arrow("name")}
       </button>
       <span />
       {/* Not a button, because it is not a sort: the bar is each row's share of
           the largest one in the listing, and `SORT_KEYS` has never held it. */}
-      {!hidden.has("share") && <span>SHARE</span>}
+      {/* In the family all the same, so which columns are up can be read off
+          one selector — a click on it does nothing, and that is correct. */}
+      {!hidden.has("share") && (
+        <span
+          data-testid="column-header"
+          data-column="share"
+        >
+          SHARE
+        </span>
+      )}
       {COLUMNS.filter((column) => !hidden.has(column.key)).map((column) => (
         <button
           key={column.key}
           type="button"
           onClick={() => onSort(column.key)}
           className={`${column.align === "right" ? "text-right" : "text-left"} ${tone(column.key)}`}
+          data-testid="column-header"
+          data-column={column.key}
         >
           {column.label}
           {arrow(column.key)}
@@ -997,6 +1089,10 @@ function Row({
     // biome-ignore lint/a11y/noStaticElementInteractions: rows are driven by the pane's roving cursor and ⏎, not by per-row tab stops — a thousand-row listing must not add a thousand of them
     <div
       data-row={row.name}
+      // ⚠️ `data-row` is the member and it is a file name: two panes on one
+      // directory hold two rows of every name, so this is never addressed from
+      // the page — only inside a `[data-testid="pane"][data-pane=N]`.
+      data-testid="row"
       onMouseDown={(event) => pressRow(event, row.name, onClick)}
       onDoubleClick={() => onOpen(row)}
       style={grid}
@@ -1015,6 +1111,7 @@ function Row({
         type={row.type}
         extension={row.extension}
         ink={MARK_ON_PANE}
+        data-testid="row-mark"
       />
 
       {/* Weight, not hue, now that the gutter carries the type: a directory and
@@ -1032,6 +1129,7 @@ function Row({
         className={`truncate ${
           row.type === "dir" || row.type === "link" ? "text-on-pane font-semibold" : "text-on-pane-muted"
         }`}
+        data-testid="row-name"
       >
         {row.name}
         {row.type === "dir" && <span className="text-on-pane-faint font-normal">/</span>}
@@ -1048,7 +1146,10 @@ function Row({
       <span />
 
       {!hidden.has("share") && (
-        <span className="bg-pane-block block h-1.5">
+        <span
+          className="bg-pane-block block h-1.5"
+          data-testid="row-share"
+        >
           <span
             className={`block h-1.5 ${heat ? paint.bar : HEAT_OFF_BAR}`}
             style={{ width: `${share}%` }}
@@ -1062,7 +1163,10 @@ function Row({
           `h-row` and lands on the row below. Nothing here may wrap, whatever a
           future format decides to put in it. */}
       {!hidden.has("size") && (
-        <span className="text-on-pane-data text-right whitespace-nowrap">
+        <span
+          className="text-on-pane-data text-right whitespace-nowrap"
+          data-testid="row-size"
+        >
           <SizeCell
             row={row}
             size={size}
@@ -1070,9 +1174,19 @@ function Row({
           />
         </span>
       )}
-      {!hidden.has("mode") && <span className="text-on-pane-muted">{row.mode}</span>}
+      {!hidden.has("mode") && (
+        <span
+          className="text-on-pane-muted"
+          data-testid="row-mode"
+        >
+          {row.mode}
+        </span>
+      )}
       {!hidden.has("owner") && (
-        <span className={`truncate ${row.ownerResolved ? "text-on-pane-muted" : "text-on-pane-faint"}`}>
+        <span
+          className={`truncate ${row.ownerResolved ? "text-on-pane-muted" : "text-on-pane-faint"}`}
+          data-testid="row-owner"
+        >
           {row.owner}
         </span>
       )}
@@ -1084,7 +1198,10 @@ function Row({
           modified/accessed rows already print (TRE-103). */}
       {!hidden.has("age") && (
         <Tooltip content={formatInstant(row.mtime)}>
-          <span className={`px-1 py-0.5 text-right text-2xs ${chip ?? ""} ${heat ? paint.ink : HEAT_OFF_INK}`}>
+          <span
+            className={`px-1 py-0.5 text-right text-2xs ${chip ?? ""} ${heat ? paint.ink : HEAT_OFF_INK}`}
+            data-testid="row-age"
+          >
             {formatAge(days)}
           </span>
         </Tooltip>
@@ -1162,7 +1279,10 @@ const REFUSALS: Record<string, string> = {
 /** Eleven staggered rows, as the mockup does — a listing arriving, not a spinner. */
 function Skeleton({ hidden, grid }: { hidden: ReadonlySet<Column>; grid: React.CSSProperties }) {
   return (
-    <div aria-busy="true">
+    <div
+      aria-busy="true"
+      data-testid="pane-skeleton"
+    >
       {Array.from({ length: 11 }, (_, index) => (
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length placeholder, never reordered
@@ -1192,33 +1312,55 @@ function Skeleton({ hidden, grid }: { hidden: ReadonlySet<Column>; grid: React.C
   );
 }
 
+/**
+ * Which of the four things the placeholder is standing in for. Each caller
+ * says its own, so a script can wait on `[data-state="filtered"]` rather than
+ * on a title that is the glob's text or the API's message.
+ */
+type PlaceholderState = "empty" | "error" | "unbound" | "filtered";
+
 function Placeholder({
+  state,
   title,
   detail,
   action,
   onUp,
 }: {
+  state: PlaceholderState;
   title: string;
   detail: string;
   action?: { label: string; onSelect: () => void };
   onUp: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2.25 p-7">
+    <div
+      className="flex h-full flex-col items-center justify-center gap-2.25 p-7"
+      data-testid="pane-placeholder"
+      data-state={state}
+    >
       <div
         aria-hidden
         className="border-pane-dash relative h-10 w-13 border border-dashed"
       >
         <span className="border-pane-dash absolute -top-1.75 left-0 h-1.75 w-5 border border-b-0 border-dashed" />
       </div>
-      <p className="text-on-pane-label font-mono text-sm font-medium">{title}</p>
+      <p
+        className="text-on-pane-label font-mono text-sm font-medium"
+        data-testid="placeholder-title"
+      >
+        {title}
+      </p>
       <p className="text-on-pane-faint max-w-70 text-center font-mono text-xs/relaxed">{detail}</p>
       <div className="mt-0.5 flex gap-1.5">
+        {/* One name for the action, whichever it is: the state above already
+            says which one is on offer (`unbound` → add a host, `filtered` →
+            clear filter), so it is scoped rather than given a companion. */}
         {action && (
           <button
             type="button"
             onClick={action.onSelect}
             className={`${PRESS} px-2.5 py-1.25 font-mono text-xs font-medium`}
+            data-testid="placeholder-action"
           >
             {action.label}
           </button>
@@ -1227,6 +1369,7 @@ function Placeholder({
           type="button"
           onClick={onUp}
           className="border-pane-dash text-on-pane-label border px-2.5 py-1.25 font-mono text-xs"
+          data-testid="placeholder-up"
         >
           go up ↰
         </button>
@@ -1256,6 +1399,7 @@ function EmptyState({
   if (hiddenByGlob > 0) {
     return (
       <Placeholder
+        state="filtered"
         title={`no match for ${glob}`}
         detail={`${hiddenByGlob} ${hiddenByGlob === 1 ? "entry" : "entries"} hidden by the glob filter.`}
         action={{ label: "clear filter", onSelect: onClearGlob }}
@@ -1266,6 +1410,7 @@ function EmptyState({
 
   return (
     <Placeholder
+      state="empty"
       title="empty directory"
       detail={`Nothing here. ${path} contains no files or folders.`}
       onUp={onUp}
@@ -1300,6 +1445,7 @@ function ErrorState({ error, onUp }: { error: unknown; onUp: () => void }) {
 
   return (
     <Placeholder
+      state="error"
       title={title}
       detail={message}
       onUp={onUp}

@@ -77,6 +77,7 @@ export function RenameModal({
     <Overlay
       label={`Rename ${subject}`}
       onClosed={onClose}
+      testId="rename-modal"
       panelClassName="bg-app border-line-strong flex w-full max-w-[46.25rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
     >
       {(close) => (
@@ -253,6 +254,8 @@ function RenamePanel({
                   // the attribute is neither hoverable nor a tab stop, so it was
                   // the one cell nobody could ask.
                   aria-disabled={disabled}
+                  data-testid="rename-mode"
+                  data-mode={option}
                   onClick={() => !disabled && setMode(option)}
                   className={`border-line-strong flex items-center border-l px-2.25 font-mono text-2xs first:border-l-0 aria-disabled:opacity-40 ${
                     active ? `${SELECTED} font-medium` : "text-ink-muted"
@@ -269,6 +272,7 @@ function RenamePanel({
             type="button"
             onClick={close}
             aria-label="Close"
+            data-testid="rename-close"
             className="text-ink-dim font-mono text-2xs"
           >
             esc ✕
@@ -287,6 +291,7 @@ function RenamePanel({
               if (event.key === "Enter" && renameable && !apply.isPending) apply.mutate();
             }}
             aria-label="New name"
+            data-testid="rename-name"
             className="bg-chrome border-accent text-ink w-full border px-2.25 py-1.75 font-mono text-name/none"
           />
         </div>
@@ -300,6 +305,7 @@ function RenamePanel({
               onChange={(event) => setPattern(event.target.value)}
               placeholder="^dump-(\d{4})-(\d{2})-(\d{2})"
               aria-label="Pattern"
+              data-testid="rename-pattern"
               className={`bg-chrome text-ink w-full border px-2.25 py-1.75 font-mono text-name/none ${
                 plan?.error ? "border-danger" : "border-accent"
               }`}
@@ -312,6 +318,7 @@ function RenamePanel({
               onChange={(event) => setReplacement(event.target.value)}
               placeholder="atlas_$1$2$3"
               aria-label="Replacement"
+              data-testid="rename-replacement"
               className="bg-chrome border-line-strong text-ink w-full border px-2.25 py-1.75 font-mono text-name/none"
             />
           </div>
@@ -349,13 +356,17 @@ function RenamePanel({
       </div>
 
       <footer className="bg-chrome flex h-11 flex-none items-center gap-2 px-3.5">
-        <span className="text-ink-muted font-mono text-2xs/none">
+        <span
+          data-testid="rename-summary"
+          className="text-ink-muted font-mono text-2xs/none"
+        >
           {summaryOf({ single: single !== null, plan, stale, rows, pattern })}
         </span>
         <div className="flex-1" />
         <button
           type="button"
           onClick={close}
+          data-testid="rename-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
           cancel
@@ -364,6 +375,10 @@ function RenamePanel({
           type="button"
           onClick={() => apply.mutate()}
           disabled={!renameable || apply.isPending}
+          // One button, two routes: `renameEntry` on a name, `applyRename` on
+          // a pattern. Named for the route it will call, since its label
+          // (`rename` / `rename 3 files` / `renaming…`) says nothing stable.
+          data-testid={single ? "rename-submit" : "rename-apply-pattern"}
           className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
           {apply.isPending ? "renaming…" : ctaOf(single !== null, plan)}
@@ -381,7 +396,11 @@ function Row({ row }: { row: RenameMapping }) {
   const after = row.match ? row.name.slice(row.match.index + row.match.length) : "";
 
   return (
-    <div className="border-raised grid grid-cols-[1fr_1rem_1fr] items-center gap-2.5 border-t px-3.5 py-1.5">
+    <div
+      data-testid="rename-row"
+      data-name={row.name}
+      className="border-raised grid grid-cols-[1fr_1rem_1fr] items-center gap-2.5 border-t px-3.5 py-1.5"
+    >
       <span className="text-ink-muted truncate font-mono text-xs/[1.3]">
         {before}
         {hit && <span className="bg-line-strong text-ink">{hit}</span>}
@@ -428,6 +447,8 @@ function Flag({ label, on, onToggle }: { label: string; on: boolean; onToggle: (
       type="button"
       aria-pressed={on}
       aria-label={label === "g" ? "Replace every occurrence" : "Ignore case"}
+      data-testid="rename-flag"
+      data-flag={label}
       onClick={onToggle}
       className={`flex-1 border py-1.75 text-center font-mono text-xs/none ${
         on ? `${ON_FILL} border-accent-fill` : "bg-chrome text-ink-muted border-line-strong"

@@ -4,7 +4,9 @@ const isDev = process.env.NODE_ENV !== "production";
 // cross-origin and the API has to be allowed explicitly. In production nginx
 // serves both from one domain and /api/ is same-origin, so 'self' covers it and
 // there is nothing to configure. This is why the front has no env file.
-const apiOrigin = isDev ? "http://localhost:6800" : null;
+// `NEXT_PUBLIC_API_ORIGIN` is the one opt-in: a production build filmed on a laptop (TRE-148), where
+// no nginx makes /api/ same-origin. Unset on ks-b, so the deploy's policy is unchanged.
+const apiOrigin = process.env.NEXT_PUBLIC_API_ORIGIN ?? (isDev ? "http://localhost:6800" : null);
 
 const devConnectSources = ["ws:", "wss:"];
 

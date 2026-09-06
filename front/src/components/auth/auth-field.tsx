@@ -29,6 +29,8 @@ export function AuthField({
   autoFocus = false,
   hint,
   disabled = false,
+  testId,
+  revealTestId,
 }: {
   label: string;
   type?: "text" | "email" | "password";
@@ -41,6 +43,16 @@ export function AuthField({
   hint?: string;
   /** Renders the field inert without removing it — see the signup screen. */
   disabled?: boolean;
+  /**
+   * A name for the input, per call site — `login-email`, `login-password`.
+   *
+   * Two narrow props rather than a rest spread: this component's props are
+   * closed on purpose, and a `data-testid` handed to it would otherwise be
+   * dropped without a word from the compiler.
+   */
+  testId?: string;
+  /** A name for the show/hide toggle, when `secret` — its text flips with state. */
+  revealTestId?: string;
 }) {
   const id = useId();
   const [revealed, setRevealed] = useState(false);
@@ -83,6 +95,7 @@ export function AuthField({
           disabled={disabled}
           aria-invalid={error !== undefined}
           aria-describedby={error ? `${id}-error` : undefined}
+          data-testid={testId}
           className={`bg-chrome text-ink placeholder:text-ink-faint focus:border-accent-soft w-full rounded-xs border px-2.5 py-1.5 font-mono text-base disabled:cursor-not-allowed disabled:opacity-50 ${
             error ? "border-danger-mid" : "border-line-strong"
           } ${secret ? "pr-14" : ""}`}
@@ -93,6 +106,8 @@ export function AuthField({
             onClick={() => setRevealed((current) => !current)}
             aria-pressed={revealed}
             disabled={disabled}
+            // `show` becomes `hide` on the click, so the text is no handle.
+            data-testid={revealTestId}
             className="text-ink-faint hover:text-ink-muted absolute top-1/2 right-2 -translate-y-1/2 text-xs tracking-label disabled:cursor-not-allowed disabled:opacity-50"
           >
             {revealed ? "hide" : "show"}

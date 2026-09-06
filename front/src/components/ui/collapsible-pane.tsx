@@ -121,6 +121,12 @@ export function CollapsiblePane({
       data-open={open}
       data-axis={axis}
       data-animate={animate}
+      // For a scripted take, which has to wait out the transition before it
+      // measures anything inside: hold until nothing is `data-moving`. Three of
+      // these are mounted — the two panes and the inspector — and the panes'
+      // `data-pane` sits inside, so one is picked with `:has([data-pane="0"])`.
+      data-testid="collapsible-pane"
+      data-moving={moving}
       style={{ [axis]: open ? size : 0 } as CSSProperties}
       onTransitionEnd={(event) => {
         // Guarded on both, like `Overlay`: a pane holds a shimmering skeleton

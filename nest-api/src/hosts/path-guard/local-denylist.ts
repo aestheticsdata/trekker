@@ -83,3 +83,25 @@ export async function computeLocalDenylist({ startDir, homeDir }: DenylistInputs
 
   return Promise.all(entries.map(realpathOrSelf));
 }
+
+/**
+ * The one hole in the denylist, and only in development (TRE-148).
+ *
+ * The mock keeps its fake trees in the repository's own `.mock/` folder —
+ * inside the install tree, which the list above denies whole. Rather than
+ * teach the guard what a mock is, the development wrapper that starts the API
+ * names the folder in `TREKKER_DEV_LOCAL_EXCEPTIONS` (absolute paths, `:`
+ * separated), and a path under one of them is served even though it is under
+ * a denied entry. Under `NODE_ENV=production` the variable is ignored
+ * outright: a deployed API has no mock, and no hole.
+ */
+export async function computeLocalDenylistExceptions(env: NodeJS.ProcessEnv = process.env): Promise<string[]> {
+  if (env.NODE_ENV === "production") return [];
+  const raw = env.TREKKER_DEV_LOCAL_EXCEPTIONS?.trim();
+  if (!raw) return [];
+  const paths = raw
+    .split(":")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.startsWith("/"));
+  return Promise.all(paths.map(realpathOrSelf));
+}

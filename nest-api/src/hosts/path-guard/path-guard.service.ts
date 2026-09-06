@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { ForbiddenException, HttpException, Inject, Injectable, Logger } from "@nestjs/common";
+import { ForbiddenException, HttpException, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { AuditService } from "@audit/audit.service";
 import { LIMITS } from "@audit/limits";
 import { RateLimitService } from "@audit/rate-limit.service";
@@ -83,6 +83,8 @@ export const PATH_DENYLISTED_MESSAGE =
 
 /** DI token for the boot-computed local denylist (see local-denylist.ts). */
 export const LOCAL_DENYLIST = "LOCAL_DENYLIST";
+/** DI token for the development-only holes in it (see `computeLocalDenylistExceptions`). */
+export const LOCAL_DENYLIST_EXCEPTIONS = "LOCAL_DENYLIST_EXCEPTIONS";
 
 /**
  * Pure containment predicate, exported for TRE-13's symlink annotation —
@@ -161,6 +163,9 @@ export class PathGuardService {
     @Inject(LOCAL_DENYLIST) private readonly localDenylist: readonly string[],
     private readonly limits: RateLimitService,
     private readonly audit: AuditService,
+    // Last and optional: the specs build this service by hand with four
+    // arguments, and production provides an empty list.
+    @Optional() @Inject(LOCAL_DENYLIST_EXCEPTIONS) private readonly localDenylistExceptions: readonly string[] = [],
   ) {}
 
   async validate({ driver, userId, path, intent }: ValidateArgs): Promise<ValidatedPath> {
@@ -358,7 +363,10 @@ export class PathGuardService {
   }
 
   private isDeniedLocally(realPath: string): boolean {
-    return this.localDenylist.some((entry) => contains(entry, realPath));
+    if (!this.localDenylist.some((entry) => contains(entry, realPath))) return false;
+    // A development-only hole: the mock's own folder inside the install tree
+    // (`computeLocalDenylistExceptions`). Empty in production, always.
+    return !this.localDenylistExceptions.some((entry) => contains(entry, realPath));
   }
 
   /**

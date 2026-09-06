@@ -69,6 +69,7 @@ export function TransferModal({
     <Overlay
       label={`${verb} to ${target.dstPath}`}
       onClosed={onClose}
+      testId="transfer-modal"
       panelClassName="bg-app border-line-strong flex w-full max-w-[56rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
     >
       {(close) => (
@@ -226,6 +227,8 @@ function TransferPanel({
                 key={option.value}
                 type="button"
                 aria-pressed={strategy === option.value}
+                data-testid="transfer-strategy"
+                data-strategy={option.value}
                 onClick={() => {
                   setStrategy(option.value);
                   // The blanket answer replaces the per-row ones. Keeping them
@@ -299,6 +302,7 @@ function TransferPanel({
         <button
           type="button"
           onClick={close}
+          data-testid="transfer-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
           cancel
@@ -307,6 +311,9 @@ function TransferPanel({
           type="button"
           onClick={() => start.mutate()}
           disabled={!armed || start.isPending}
+          // The label is the verb and a count (`copy 3 entries`, `move 1
+          // entry`, `transfer …`), none of it fixed — this is.
+          data-testid="transfer-submit"
           className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
           {start.isPending ? "starting…" : `${verb} ${data ? count(data.items.length, "entry", "entries") : ""}`}
@@ -333,7 +340,11 @@ function Row({
   onAnswer: (choice: ConflictStrategy) => void;
 }) {
   return (
-    <div className="border-raised grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-2.5 border-t px-3.5 py-1.5">
+    <div
+      data-testid="transfer-row"
+      data-name={item.name}
+      className="border-raised grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-2.5 border-t px-3.5 py-1.5"
+    >
       <FileMark
         type={rowTypeOf(item.kind)}
         extension={extensionOf(item.name)}
@@ -374,6 +385,10 @@ function Row({
               key={choice}
               type="button"
               aria-pressed={answer === choice}
+              // Scoped by its row: the same three answers repeat on every
+              // conflicting row, and the text of the last is `both`, not its id.
+              data-testid="transfer-answer"
+              data-answer={choice}
               onClick={() => onAnswer(choice)}
               className={`border px-1.5 py-0.5 font-mono text-2xs/none ${
                 answer === choice

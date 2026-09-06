@@ -168,6 +168,9 @@ function Bubble({ point, gap, id, children }: { point: Point | null; gap: number
       id={id}
       ref={bubble}
       role="tooltip"
+      // The id above is `useId`'s and differs per mount; this is the stable name
+      // a scripted take finds the bubble by. Only one is ever up at a time.
+      data-testid="tooltip"
       style={{ left: placed?.x ?? shown.x + gap, top: placed?.y ?? shown.y + gap }}
     >
       {children}
@@ -193,6 +196,9 @@ function Bubble({ point, gap, id, children }: { point: Point | null; gap: number
  * activatable, still styled as unavailable, but hoverable and — for the first
  * time — reachable by keyboard. The base layer in `globals.css` already keys the
  * cursor off `[aria-disabled="true"]`.
+ *
+ * A `data-testid` belongs on the child, never on `<Tooltip>`: this renders
+ * nothing of its own, and a prop it does not name is dropped without a word.
  */
 export function Tooltip({ content, children }: { content: ReactNode; children: ReactElement<TriggerProps> }) {
   const [hover, setHover] = useState<Point | null>(null);

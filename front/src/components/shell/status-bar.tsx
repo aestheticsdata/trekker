@@ -48,12 +48,20 @@ export function StatusBar({
   onShowStrip?: (() => void) | null;
 }) {
   return (
-    <footer className="bg-chrome border-line flex h-statusbar shrink-0 items-center gap-3 border-t px-2 font-mono text-2xs">
+    <footer
+      className="bg-chrome border-line flex h-statusbar shrink-0 items-center gap-3 border-t px-2 font-mono text-2xs"
+      data-testid="status-bar"
+    >
       {selection ? (
         <>
           {/* The path gets whatever room is left; the fixed-width facts do not
               move as it grows, so the eye can stay on one of them. */}
-          <span className="text-ink-soft min-w-0 flex-1 truncate">{selection.path}</span>
+          <span
+            className="text-ink-soft min-w-0 flex-1 truncate"
+            data-testid="status-path"
+          >
+            {selection.path}
+          </span>
           <Fact
             label="size"
             value={selection.size}
@@ -72,13 +80,20 @@ export function StatusBar({
           />
         </>
       ) : (
-        <span className="text-ink-faint min-w-0 flex-1 truncate">{hint ?? "No selection"}</span>
+        <span
+          className="text-ink-faint min-w-0 flex-1 truncate"
+          data-testid="status-hint"
+        >
+          {hint ?? "No selection"}
+        </span>
       )}
 
       {clipboard && (
         <button
           type="button"
           onClick={onClearClipboard}
+          // Its text is the clipboard sentence, which names whatever is held.
+          data-testid="clipboard-clear"
           className="text-brand hover:text-ink max-w-64 flex-none truncate"
         >
           {clipboard} ✕
@@ -89,6 +104,7 @@ export function StatusBar({
         <button
           type="button"
           onClick={onShowStrip}
+          data-testid="du-show"
           className="text-ink-dim hover:text-ink flex-none whitespace-nowrap"
         >
           show disk usage ▴
@@ -102,7 +118,11 @@ export function StatusBar({
 
 function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <span className="hidden items-center gap-1 whitespace-nowrap inspector:flex">
+    <span
+      className="hidden items-center gap-1 whitespace-nowrap inspector:flex"
+      data-testid="status-fact"
+      data-fact={label}
+    >
       <span className="text-ink-faint">{label}</span>
       <span className="text-ink-muted">{value}</span>
     </span>

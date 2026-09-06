@@ -26,6 +26,7 @@ import type { ViewSlot } from "@helpers/keys";
 import type { Keeps } from "@helpers/views";
 import type { HostView } from "@lib/api/hosts";
 import type { SavedView, ViewLayout } from "@schemas/layout";
+import type { ComponentPropsWithoutRef } from "react";
 
 /**
  * Saving a layout, and editing one that is saved (TRE-37 §4).
@@ -66,6 +67,7 @@ export function ViewForm({
   return (
     <Overlay
       label={view ? `Edit the view ${view.name}` : "Save this layout as a view"}
+      testId="view-form"
       onClosed={onClose}
       panelClassName="bg-app border-line-strong flex w-full max-w-[33.75rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
     >
@@ -193,6 +195,7 @@ function FormPanel({
             type="button"
             onClick={close}
             aria-label="Close"
+            data-testid="view-form-close"
             className="text-ink-dim flex-none font-mono text-2xs"
           >
             esc ✕
@@ -209,6 +212,7 @@ function FormPanel({
               — the rule the auth screens set. */}
           <span
             role="alert"
+            data-testid="view-form-problem"
             className="text-danger-soft min-w-0 truncate font-mono text-2xs/none"
           >
             {problem ?? " "}
@@ -224,6 +228,7 @@ function FormPanel({
           }}
           maxLength={64}
           aria-label="View name"
+          data-testid="view-form-name"
           className={`bg-chrome text-ink w-full border px-2.5 py-2 font-mono text-sm/none ${
             problem ? "border-danger" : "border-accent"
           }`}
@@ -242,6 +247,10 @@ function FormPanel({
               held={views.find((c) => c.id !== view?.id && c.slot === candidate)?.name ?? null}
               on={slot === candidate}
               onPick={() => setSlot(candidate)}
+              // The digit, not the chord: `⌥3` is how a slot is spelled and
+              // `writeViewSlot` owns that; `3` is what the view stores.
+              data-testid="view-form-slot"
+              data-slot={candidate}
             />
           ))}
           <SlotButton
@@ -249,6 +258,8 @@ function FormPanel({
             held={null}
             on={slot === null}
             onPick={() => setSlot(null)}
+            data-testid="view-form-slot"
+            data-slot="none"
           />
         </div>
         {/* Said here rather than only in the toast afterwards: moving somebody's
@@ -290,17 +301,24 @@ function FormPanel({
             label="sort order & glob filter"
             on={keeps.sorts}
             onToggle={() => setKeeps({ ...keeps, sorts: !keeps.sorts })}
+            data-testid="view-form-keep"
+            data-keep="sorts"
           />
           <Check
             label="layout, inspector & heat map"
             on={keeps.layout}
             onToggle={() => setKeeps({ ...keeps, layout: !keeps.layout })}
+            data-testid="view-form-keep"
+            data-keep="layout"
           />
         </div>
       )}
 
       {failure && (
-        <div className="bg-danger-wash border-danger text-danger-soft mx-3.5 mb-2.5 border px-2.5 py-1.75 font-mono text-cmd/[1.5]">
+        <div
+          data-testid="view-form-failure"
+          className="bg-danger-wash border-danger text-danger-soft mx-3.5 mb-2.5 border px-2.5 py-1.75 font-mono text-cmd/[1.5]"
+        >
           {failure}
         </div>
       )}
@@ -313,6 +331,7 @@ function FormPanel({
         <button
           type="button"
           onClick={close}
+          data-testid="view-form-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
           cancel
@@ -321,6 +340,9 @@ function FormPanel({
           type="button"
           onClick={() => save.mutate()}
           disabled={!ready}
+          // The write. Its text is `save view`, `update view` or `saving…`
+          // depending on the moment, which is why it has a name of its own.
+          data-testid="view-form-save"
           className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
           {save.isPending ? "saving…" : view ? "update view" : "save view"}
@@ -343,15 +365,20 @@ function SlotButton({
   held,
   on,
   onPick,
+  ...rest
 }: {
   label: string;
   held: string | null;
   on: boolean;
   onPick: () => void;
-}) {
+} & ComponentPropsWithoutRef<"button">) {
   return (
     <Tooltip content={held === null ? `Use ${label}` : `${label} is ${held}'s — this takes it`}>
       <button
+        // The spread is what lets a call site's `data-testid` reach the
+        // button: a hyphenated attribute compiles clean against closed props
+        // and then never arrives. First, so nothing below it can be overridden.
+        {...rest}
         type="button"
         onClick={onPick}
         aria-pressed={on}
@@ -413,9 +440,16 @@ function PreviewRow({
  * a label — one declaration for every control in the app rather than a
  * `cursor-pointer` on this one (TRE-44's rule, in `globals.css`).
  */
-function Check({ label, on, onToggle }: { label: string; on: boolean; onToggle: () => void }) {
+function Check({
+  label,
+  on,
+  onToggle,
+  ...rest
+}: { label: string; on: boolean; onToggle: () => void } & ComponentPropsWithoutRef<"button">) {
   return (
     <button
+      // The same spread as `SlotButton`, for the same reason.
+      {...rest}
       type="button"
       onClick={onToggle}
       aria-pressed={on}

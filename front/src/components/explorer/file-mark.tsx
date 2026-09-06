@@ -4,6 +4,7 @@ import { markShape, typeLetters } from "@helpers/listing";
 
 import type { MarkInk } from "@helpers/listing";
 import type { RowType } from "@lib/api/fs";
+import type { ComponentPropsWithoutRef } from "react";
 
 /**
  * The one thing in this application that draws a file or a folder (TRE-108).
@@ -19,18 +20,24 @@ import type { RowType } from "@lib/api/fs";
  * `--ui-base` (TRE-44). The two radii stay in `px` for the same reason they do
  * everywhere else: a 1px corner is a corner at any scale, and a scaled one is a
  * smudge.
+ *
+ * ⚠️ The `...rest` is load-bearing. TypeScript exempts hyphenated JSX
+ * attributes from excess-property checking, so a `data-testid` handed to a
+ * closed props object compiles clean and never reaches the DOM. Spread onto
+ * whichever span is drawn, so the pane row's mark can be named from the row.
  */
 export function FileMark({
   type,
   extension,
   ink,
+  ...rest
 }: {
   type: RowType;
   /** Lowercased and without its dot. Ignored by a folder, which carries no letters. */
   extension: string;
   /** Which ground this is drawn on — `MARK_ON_PANE` or `MARK_ON_PANEL`. */
   ink: MarkInk;
-}) {
+} & ComponentPropsWithoutRef<"span">) {
   const shape = markShape(type);
 
   if (shape === "file") {
@@ -39,6 +46,7 @@ export function FileMark({
     return (
       <span
         className={`flex h-3.25 w-3.5 flex-none items-center justify-center rounded-[1.5px] border font-mono text-tag leading-none font-bold tracking-normal ${ink.edge} ${ink.letters}`}
+        {...rest}
       >
         {typeLetters(extension)}
       </span>
@@ -59,6 +67,7 @@ export function FileMark({
       role="img"
       aria-label={shape === "folder" ? "directory" : "symlink"}
       className="relative block h-3.25 w-3.25 flex-none"
+      {...rest}
     >
       <span className={`absolute top-0 left-0 h-0.75 w-1.5 rounded-t-[1px] ${fill}`} />
       <span className={`absolute bottom-0 left-0 h-2.5 w-3.25 rounded-[1px] ${fill}`} />

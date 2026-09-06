@@ -340,6 +340,7 @@ export function TerminalPanel({
         open ? "h-terminal" : "h-omnibar cursor-text"
       }`}
       aria-label="Terminal"
+      data-testid="terminal"
       // `⎋` puts the terminal away, from anywhere inside it (TRE-35 §3, TRE-123).
       //
       // On the panel rather than on the field, which is where it used to be and
@@ -388,6 +389,7 @@ export function TerminalPanel({
             type="button"
             onClick={() => setLines([])}
             className="flex-none hover:opacity-70"
+            data-testid="terminal-clear"
           >
             clear
           </button>
@@ -400,6 +402,7 @@ export function TerminalPanel({
             onClick={() => onOpenChange(false)}
             aria-label="Collapse the terminal"
             className="flex-none hover:opacity-70"
+            data-testid="terminal-collapse"
           >
             ×
           </button>
@@ -418,6 +421,9 @@ export function TerminalPanel({
           // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box with no other keyboard route has to be focusable, or its content is reachable by pointer alone
           tabIndex={0}
           className={`${TERMINAL_OUTPUT_INK} scroll-composited min-h-0 flex-1 overflow-x-auto overflow-y-auto px-2.5 py-1.75 font-mono text-xs leading-term whitespace-pre`}
+          // Mounted only while the scrollback is up, which is what makes its
+          // presence the "expanded" signal a take waits on.
+          data-testid="terminal-output"
         >
           <ScrollThumbRail />
           {lines.length === 0 ? (
@@ -427,6 +433,8 @@ export function TerminalPanel({
               <div
                 key={line.key}
                 className={LINE_INK[line.kind]}
+                data-testid="terminal-line"
+                data-kind={line.kind}
               >
                 {line.text}
               </div>
@@ -459,8 +467,14 @@ export function TerminalPanel({
         className={`flex items-center gap-2 px-2.5 font-mono text-xs leading-none ${
           open ? "border-line flex-none border-t py-1.5" : "min-h-0 flex-1"
         }`}
+        data-testid="terminal-prompt"
       >
-        <span className={`${PROMPT_WHO_INK} flex-none font-medium`}>
+        {/* Named on its own so a recorded DOM can be grepped for the identity
+            this prints — on a LOCAL host it is the machine's login name. */}
+        <span
+          className={`${PROMPT_WHO_INK} flex-none font-medium`}
+          data-testid="terminal-who"
+        >
           {world === null ? "…" : `${who(world, remoteUser)}@${world.host.slug}`}
         </span>
         {/* Only while the scrollback is up. Collapsed, the strip is an
@@ -468,7 +482,14 @@ export function TerminalPanel({
             as one more status line under the actual status bar (TRE-115).
             Where you are is the panes' own headline; the prompt repeats it
             once it is a prompt. */}
-        {open && <span className={`${PROMPT_WHERE_INK} min-w-0 flex-none truncate`}>{world?.cwd ?? "/"}</span>}
+        {open && (
+          <span
+            className={`${PROMPT_WHERE_INK} min-w-0 flex-none truncate`}
+            data-testid="terminal-cwd"
+          >
+            {world?.cwd ?? "/"}
+          </span>
+        )}
         <span
           aria-hidden
           className={`${elevated ? PROMPT_ELEVATED_INK : PROMPT_CHAR_INK} flex-none font-medium`}
@@ -528,6 +549,7 @@ export function TerminalPanel({
           autoComplete="off"
           autoCapitalize="off"
           aria-label="Terminal input"
+          data-testid="terminal-input"
           // Focus is the one signal that the person has come to the terminal,
           // and every route to it ends here: a press anywhere on the row, the
           // label's own default action, `⌥↩`, or a tab stop. So the panel opens

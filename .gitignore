@@ -117,3 +117,14 @@ Desktop.ini
 
 # The accounts crib sheet — one per repo, never committed.
 ACCOUNTS.md
+
+# The demo film harness (see front/e2e/demo/README.md): a take writes a gigabyte of JPEG in flight,
+# and the setup project writes a live session cookie.
+front/e2e/demo/out/
+**/e2e/.auth/
+!.env.test.local.example
+
+# The mock (nest-api/mock/README.md): the four fake trees, their df, the remote machines' keys.
+# In the repository so nothing of it lands anywhere else on the machine; ignored so the deploy
+# scripts' clean-tree check never sees it.
+/.mock/

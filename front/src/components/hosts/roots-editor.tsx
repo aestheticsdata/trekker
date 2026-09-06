@@ -45,7 +45,10 @@ export function RootsEditor({
   const pinned = enforced && roots.length === 1;
 
   return (
-    <div className="flex flex-col gap-1">
+    <div
+      data-testid="host-roots"
+      className="flex flex-col gap-1"
+    >
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-ink-muted font-mono text-2xs tracking-label">roots</span>
         <span className="text-danger-soft truncate text-right font-mono text-2xs">{error ?? ""}</span>
@@ -70,6 +73,9 @@ export function RootsEditor({
               // so the path cannot be the identity.
               // biome-ignore lint/suspicious/noArrayIndexKey: position is the identity
               key={index}
+              // The same identity as the key, for the same reason.
+              data-testid="host-root"
+              data-index={index}
               className="border-line flex items-center gap-1.5 border-b p-1 last:border-b-0"
             >
               <TextInput
@@ -79,6 +85,7 @@ export function RootsEditor({
                 aria-label={`Root ${index + 1} path`}
                 spellCheck={false}
                 autoComplete="off"
+                data-testid="host-root-path"
                 className="flex-1 border-0 bg-transparent"
               />
 
@@ -112,6 +119,7 @@ export function RootsEditor({
                   aria-disabled={pinned}
                   onClick={() => !pinned && onChange(roots.filter((_, position) => position !== index))}
                   aria-label={`Remove root ${index + 1}`}
+                  data-testid="host-root-remove"
                   className={`px-1 font-mono text-xs ${
                     pinned ? "text-line-strong cursor-not-allowed" : "text-ink-faint hover:text-danger-soft"
                   }`}
@@ -136,6 +144,7 @@ export function RootsEditor({
         <Button
           type="button"
           onClick={() => onChange([...roots, { path: "", access: "READ" }])}
+          data-testid="host-root-add"
         >
           + add root
         </Button>

@@ -8,7 +8,14 @@
  */
 import { LOGIN_PATH } from "@auth/paths";
 
-export const API_ORIGIN = process.env.NODE_ENV === "production" ? "" : "http://localhost:6800";
+/**
+ * `NEXT_PUBLIC_API_ORIGIN` is the one exception to "nothing to configure", and it exists for a
+ * production build that is NOT behind nginx: the scripted demo film (TRE-148) has to run
+ * `next build && next start` on a laptop, where `/api/` is nobody's. Inlined at build time like
+ * every `NEXT_PUBLIC_*`; the deploy builds on ks-b without it, so there it is exactly as before.
+ */
+export const API_ORIGIN =
+  process.env.NEXT_PUBLIC_API_ORIGIN ?? (process.env.NODE_ENV === "production" ? "" : "http://localhost:6800");
 
 /** The header Trekker's CsrfGuard reads (nest-api/src/users/csrf-token.util.ts). */
 const CSRF_HEADER = "x-csrf-token";

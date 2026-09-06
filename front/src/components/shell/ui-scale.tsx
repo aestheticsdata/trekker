@@ -30,18 +30,31 @@ export function UiScale() {
   };
 
   return (
-    <span className="flex flex-none items-center gap-0.5 whitespace-nowrap">
+    // ⚠️ Both steps are named so a scripted take can keep its pointer *off*
+    // them: a press writes `localStorage` and rescales every bar in the app,
+    // and the stepper sits in the corner every sweep of the status bar ends at.
+    <span
+      className="flex flex-none items-center gap-0.5 whitespace-nowrap"
+      data-testid="ui-scale"
+    >
       <span className="text-ink-faint mr-0.5">ui</span>
       <Step
         glyph="−"
         label="Smaller interface"
+        testId="ui-scale-smaller"
         disabled={base <= UI_BASE_MIN}
         onSelect={() => step(-1)}
       />
-      <span className="text-ink-muted tabular-nums">{base}px</span>
+      <span
+        className="text-ink-muted tabular-nums"
+        data-testid="ui-scale-value"
+      >
+        {base}px
+      </span>
       <Step
         glyph="+"
         label="Larger interface"
+        testId="ui-scale-larger"
         disabled={base >= UI_BASE_MAX}
         onSelect={() => step(1)}
       />
@@ -52,11 +65,13 @@ export function UiScale() {
 function Step({
   glyph,
   label,
+  testId,
   disabled,
   onSelect,
 }: {
   glyph: string;
   label: string;
+  testId?: string;
   disabled: boolean;
   onSelect: () => void;
 }) {
@@ -70,6 +85,7 @@ function Step({
         onClick={onSelect}
         disabled={disabled}
         aria-label={label}
+        data-testid={testId}
         className={`px-1 ${disabled ? "text-line-strong cursor-not-allowed" : "text-ink-dim hover:text-ink"}`}
       >
         {glyph}

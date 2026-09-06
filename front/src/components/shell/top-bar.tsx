@@ -76,7 +76,10 @@ export function TopBar({
   onOpenPalette?: () => void;
 }) {
   return (
-    <header className="bg-chrome border-line flex h-topbar shrink-0 items-center gap-2.5 border-b px-2.5">
+    <header
+      className="bg-chrome border-line flex h-topbar shrink-0 items-center gap-2.5 border-b px-2.5"
+      data-testid="top-bar"
+    >
       <span className="flex items-center gap-2.25 pr-1.5 select-none">
         {/* The favicon's dual-pane mark, at chrome size. */}
         <svg
@@ -107,11 +110,24 @@ export function TopBar({
             className="fill-accent"
           />
         </svg>
-        <span className="text-brand text-sm font-bold tracking-caps">TREKKER</span>
+        <span
+          className="text-brand text-sm font-bold tracking-caps"
+          data-testid="top-bar-wordmark"
+        >
+          TREKKER
+        </span>
       </span>
 
       {host && (
-        <span className="bg-line border-line-strong flex h-5.5 items-center gap-1.75 rounded-sm border px-2.5">
+        // `data-host` is the label, not the slug: the chip is built in `page.tsx`
+        // from a `HostView` and this shape carries no slug. The label is the
+        // Hosts row's own name, passed verbatim — the latency beside it is the
+        // part that changes, and it is what a text locator would trip on.
+        <span
+          className="bg-line border-line-strong flex h-5.5 items-center gap-1.75 rounded-sm border px-2.5"
+          data-testid="host-chip"
+          data-host={host.label}
+        >
           <span
             aria-hidden
             className="size-1.5 rounded-full"
@@ -164,7 +180,13 @@ export function TopBar({
             value={stats.io}
           />
           {stats.load.length > 0 && (
-            <div className="flex items-center gap-1.5 px-2.5">
+            // The fifth stat, drawn inline for the sparkline's sake — same
+            // family as the four `Stat`s, so `data-term` walks all five.
+            <div
+              className="flex items-center gap-1.5 px-2.5"
+              data-testid="host-stat"
+              data-term="load"
+            >
               <dt>load</dt>
               <dd className="text-ink font-medium">{stats.load[stats.load.length - 1]?.toFixed(2)}</dd>
               <dd>
@@ -185,6 +207,8 @@ export function TopBar({
       <button
         type="button"
         onClick={onOpenPalette}
+        // Named, because its text *is* the chord and follows the keymap.
+        data-testid="palette-trigger"
         className={`${PRESS} flex h-5 items-center rounded-sm px-2 font-mono text-xs font-medium`}
       >
         {hintFor("palette")}
@@ -198,7 +222,11 @@ export function TopBar({
 /** A stat renders its dash rather than vanishing: a missing value is a fact. */
 function Stat({ term, value }: { term: string; value: string | null }) {
   return (
-    <div className="flex items-center gap-1 px-2.5">
+    <div
+      className="flex items-center gap-1 px-2.5"
+      data-testid="host-stat"
+      data-term={term}
+    >
       <dt>{term}</dt>
       <dd className="text-ink font-medium">{value ?? "—"}</dd>
     </div>

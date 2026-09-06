@@ -512,11 +512,15 @@ export function promptFor(world: { host: HostView; cwd: string }, user: string |
 /**
  * Who the next line runs as.
  *
- * `remoteUser` is the machine's answer and the right one. `username` is the
- * login this install was configured with, which is the same thing on an SSH
- * host and null on a local one. The ellipsis is neither — it is the honest
- * shape of "not known yet", and it is deliberately not a plausible name.
+ * `username` first, when the host has one: it is the login this install was
+ * configured with, which on an SSH host is the same thing the machine answers
+ * and on a local host is normally null — in which case `remoteUser`, the
+ * machine's own answer, is the right one. The order matters for exactly one
+ * case: a local host that *does* carry a username (the dev corpus of TRE-140
+ * names its machine's user so a film of it never prints the laptop's login).
+ * The ellipsis is neither — it is the honest shape of "not known yet", and it
+ * is deliberately not a plausible name.
  */
 export function who(world: { host: HostView }, user: string | null): string {
-  return user ?? world.host.username ?? "…";
+  return world.host.username ?? user ?? "…";
 }

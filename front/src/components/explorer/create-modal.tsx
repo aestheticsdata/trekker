@@ -56,6 +56,7 @@ export function CreateModal({
     <Overlay
       label={`New entry in ${target.directory}`}
       onClosed={onClose}
+      testId="create-modal"
       panelClassName="bg-app border-line-strong flex w-full max-w-[28rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
     >
       {(close) => (
@@ -144,6 +145,8 @@ function CreatePanel({
                 key={option}
                 type="button"
                 aria-pressed={active}
+                data-testid="create-mode"
+                data-mode={option}
                 onClick={() => setMode(option)}
                 className={`border-line-strong flex items-center border-l px-2.25 font-mono text-2xs first:border-l-0 ${
                   active ? `${SELECTED} font-medium` : "text-ink-muted"
@@ -159,6 +162,7 @@ function CreatePanel({
             type="button"
             onClick={close}
             aria-label="Close"
+            data-testid="create-close"
             className="text-ink-dim font-mono text-2xs"
           >
             esc ✕
@@ -199,6 +203,8 @@ function CreatePanel({
           }}
           placeholder={mode === "dir" ? "reports" : "notes.md"}
           aria-label={mode === "dir" ? "New directory name" : "New file name"}
+          // The accessible name follows the mode, so a script names the field by this.
+          data-testid="create-name"
           className={`bg-chrome text-ink w-full border px-2.25 py-1.75 font-mono text-name/none ${
             problem ? "border-danger" : "border-accent"
           }`}
@@ -219,6 +225,7 @@ function CreatePanel({
         <button
           type="button"
           onClick={close}
+          data-testid="create-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
           cancel
@@ -227,6 +234,9 @@ function CreatePanel({
           type="button"
           onClick={() => create.mutate()}
           disabled={!ready}
+          // The label is `mkdir`, `create` or `creating…` depending on the mode
+          // and the moment — the name below is the one that stays put.
+          data-testid="create-submit"
           className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
           {create.isPending ? "creating…" : mode === "dir" ? "mkdir" : "create"}

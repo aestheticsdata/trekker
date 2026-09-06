@@ -45,6 +45,7 @@ export function ViewRebind({
   return (
     <Overlay
       label={`${view.name} cannot be restored as saved`}
+      testId="view-rebind"
       onClosed={onClose}
       panelClassName="bg-app border-line-strong flex w-full max-w-[28rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
     >
@@ -89,6 +90,7 @@ function RebindPanel({
             type="button"
             onClick={close}
             aria-label="Close"
+            data-testid="view-rebind-close"
             className="text-ink-dim flex-none font-mono text-2xs"
           >
             esc ✕
@@ -117,6 +119,11 @@ function RebindPanel({
               value={choice[pane.pane] ?? ""}
               onChange={(event) => setChoice({ ...choice, [pane.pane]: event.target.value || null })}
               aria-label={`Host for pane ${pane.pane.toUpperCase()}`}
+              // `a` | `b`, the layout's own key for a pane — not `data-pane`,
+              // which is the explorer's 0 | 1 and would make one attribute
+              // carry two spellings.
+              data-testid="view-rebind-host"
+              data-pane-key={pane.pane}
               className="bg-chrome border-line-strong text-ink w-full border px-2.5 py-1.75 font-mono text-xs"
             >
               <option value="">leave it on nothing</option>
@@ -146,6 +153,7 @@ function RebindPanel({
         <button
           type="button"
           onClick={close}
+          data-testid="view-rebind-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
           cancel
@@ -156,6 +164,9 @@ function RebindPanel({
             onRestore(rebind(view.layout, choice));
             close();
           }}
+          // The URL only — the view is not written — but it is the dialog's
+          // commit, and the one button in it that changes what is on screen.
+          data-testid="view-rebind-restore"
           className={`${PRESS} px-3.5 py-1.75 font-mono text-xs/none font-medium`}
         >
           restore

@@ -57,6 +57,17 @@ export function TransferProvider({ children }: { children: ReactNode }) {
   const [live, setLive] = useState(false);
   /** Jobs already announced, so a completion toast fires once and not per tick. */
   const announced = useRef(new Set<string>());
+  /**
+   * Whether the first list has been read.
+   *
+   * What that list holds finished is history, not news: it ended before this
+   * page existed, and a toast about it would be a toast about nothing that just
+   * happened. Every reload used to announce the whole recent history at once —
+   * eleven "Copied N entries" stacked up the right edge before a single click
+   * (TRE-148). The first snapshot is marked announced without a word, and only
+   * a job seen ending *after* it gets the toast.
+   */
+  const primed = useRef(false);
 
   const list = useQuery({
     queryKey: [QUERY_KEYS.TRANSFERS],
@@ -123,7 +134,19 @@ export function TransferProvider({ children }: { children: ReactNode }) {
    * directory that is not there any more.
    */
   useEffect(() => {
-    for (const job of list.data ?? []) {
+    if (list.data === undefined) return;
+
+    if (!primed.current) {
+      primed.current = true;
+      // A job still running at load is left out on purpose: its end is the
+      // one thing this page will actually witness.
+      for (const job of list.data) {
+        if (!ACTIVE.has(job.status)) announced.current.add(job.id);
+      }
+      return;
+    }
+
+    for (const job of list.data) {
       if (ACTIVE.has(job.status) || announced.current.has(job.id)) continue;
       announced.current.add(job.id);
 
@@ -207,7 +230,14 @@ export function TransferQueue() {
   const { jobs, cancel, retry, dismiss } = useTransfers();
 
   if (jobs.length === 0) {
-    return <p className="text-ink-faint px-2.5 py-1 font-mono text-2xs">Nothing moving. F5 copies, F6 moves.</p>;
+    return (
+      <p
+        data-testid="transfers-empty"
+        className="text-ink-faint px-2.5 py-1 font-mono text-2xs"
+      >
+        Nothing moving. F5 copies, F6 moves.
+      </p>
+    );
   }
 
   return (
@@ -244,7 +274,11 @@ function QueueRow({
     job.bytesTotal > 0 ? job.bytesDone / job.bytesTotal : job.itemsTotal > 0 ? job.itemsDone / job.itemsTotal : 0;
 
   return (
-    <div className="border-raised flex flex-col gap-1 border-t px-2.5 py-1.5">
+    <div
+      data-testid="transfer-row"
+      data-job={job.id}
+      className="border-raised flex flex-col gap-1 border-t px-2.5 py-1.5"
+    >
       <div className="flex items-baseline gap-1.5">
         <span className={`font-mono text-2xs ${failed ? "text-danger-soft" : "text-ink-label"}`}>{job.operation}</span>
         <span className="text-ink-soft min-w-0 flex-1 truncate font-mono text-xs">{basename(job.dstPath)}</span>
@@ -252,6 +286,11 @@ function QueueRow({
           <button
             type="button"
             aria-label={failed ? `Dismiss ${job.operation} into ${job.dstPath}` : `Cancel ${job.operation}`}
+            // One button, two acts: on a failed job it drops the row locally, on
+            // a live one it posts a cancel. Two names, so a take that means the
+            // harmless one can never reach the other — and because the
+            // `aria-label` above changes with the job.
+            data-testid={failed ? "transfer-dismiss" : "transfer-cancel"}
             onClick={failed ? onDismiss : onCancel}
             className="text-ink-faint hover:text-ink flex-none font-mono text-2xs"
           >
@@ -270,6 +309,7 @@ function QueueRow({
           {job.failed > 0 && (
             <button
               type="button"
+              data-testid="transfer-retry"
               onClick={onRetry}
               className="text-ink-label hover:text-brand flex-none font-mono text-2xs"
             >

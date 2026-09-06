@@ -25,6 +25,7 @@ export function Overlay({
   onClosed,
   align = "center",
   panelClassName = "",
+  testId,
   children,
 }: {
   /** Names the dialog for anyone not looking at it. */
@@ -43,6 +44,14 @@ export function Overlay({
   align?: "center" | "top";
   /** The panel's own box: width, border, background. */
   panelClassName?: string;
+  /**
+   * A name for this dialog, per call site — `delete-modal`, `palette` — and
+   * `<name>-backdrop` for the backdrop behind it. Every dialog in the app is
+   * this one component under a different `label`, and that label is a sentence
+   * with the subject in it (`Delete 3 entries`), so a scripted take addresses
+   * the panel by this rather than by its accessible name.
+   */
+  testId?: string;
   children: (close: () => void) => ReactNode;
 }) {
   const [leaving, setLeaving] = useState(false);
@@ -62,6 +71,7 @@ export function Overlay({
       className={`bg-chrome/80 fixed inset-0 z-40 flex justify-center ${
         align === "top" ? "items-start px-6 pt-21.5 pb-6" : "items-center p-6"
       } ${leaving ? "animate-overlay-out" : "animate-overlay-in"}`}
+      data-testid={testId === undefined ? undefined : `${testId}-backdrop`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) close();
       }}
@@ -70,6 +80,7 @@ export function Overlay({
         role="dialog"
         aria-modal="true"
         aria-label={label}
+        data-testid={testId}
         className={`${leaving ? "animate-panel-out" : "animate-panel-in"} ${panelClassName}`}
         // Guarded on the target: a panel this size holds other animated things,
         // and a shimmering skeleton inside it would otherwise close the dialog

@@ -39,7 +39,10 @@ export function ActivityStrip() {
   if (items.length === 0) return <Empty>Nothing yet.</Empty>;
 
   return (
-    <ul className="pb-1">
+    <ul
+      data-testid="activity-list"
+      className="pb-1"
+    >
       {items.map((item) => (
         <Row
           key={item.id}
@@ -75,7 +78,14 @@ function Row({ item }: { item: ActivityView }) {
         />
       }
     >
-      <li className="flex items-baseline gap-1.5 px-2.5 py-0.5">
+      <li
+        // ⚠️ `kind` is a vocabulary, not a key — two `file.copy` rows in one
+        // strip is normal — so a take narrows further with `:has-text()` on
+        // the summary, the only other stable text on the row.
+        data-testid="activity-row"
+        data-kind={item.kind}
+        className="flex items-baseline gap-1.5 px-2.5 py-0.5"
+      >
         <Dot outcome={item.outcome} />
         <span className={`truncate font-sans text-xs ${item.outcome === "success" ? "text-ink-muted" : "text-ink"}`}>
           {item.summary}
@@ -117,6 +127,9 @@ function UndoButton({ item }: { item: ActivityView }) {
       onClick={undo}
       aria-label="Undo"
       title="Undo — restores only what this change touched, not anything altered since."
+      // A write, so its own name: one glyph beside the summary of a row a take
+      // otherwise only hovers.
+      data-testid="activity-undo"
       className="text-ink-faint hover:text-ink-muted flex-none cursor-pointer font-mono text-2xs"
     >
       ↺
@@ -148,7 +161,14 @@ function Dot({ outcome }: { outcome: ActivityOutcome }) {
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="text-ink-faint px-2.5 pb-1 font-sans text-xs italic">{children}</p>;
+  return (
+    <p
+      data-testid="activity-empty"
+      className="text-ink-faint px-2.5 pb-1 font-sans text-xs italic"
+    >
+      {children}
+    </p>
+  );
 }
 
 /**

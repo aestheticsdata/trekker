@@ -62,6 +62,7 @@ export function DeleteModal({
     <Overlay
       label={`Delete ${subject}`}
       onClosed={onClose}
+      testId="delete-modal"
       panelClassName="bg-app border-danger-mid flex w-full max-w-[46.25rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
     >
       {(close) => (
@@ -170,6 +171,8 @@ function DeletePanel({
         {plan.data?.targets.map((row) => (
           <div
             key={row.path}
+            data-testid="delete-target"
+            data-name={row.name}
             className="border-raised grid grid-cols-[auto_1fr_auto_auto] items-center gap-2.5 border-t px-3.5 py-1.5"
           >
             <FileMark
@@ -216,6 +219,9 @@ function DeletePanel({
               spellCheck={false}
               autoComplete="off"
               aria-label={`Type ${plan.data.token} to confirm`}
+              // The accessible name carries the server's token, so it is
+              // different for every plan — this is the stable handle.
+              data-testid="delete-token"
               className={`bg-chrome text-ink w-full border px-2.25 py-1.75 font-mono text-name/none disabled:opacity-50 ${
                 armed ? "border-success text-success" : "border-danger-mid"
               }`}
@@ -240,6 +246,7 @@ function DeletePanel({
         <button
           type="button"
           onClick={close}
+          data-testid="delete-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
           cancel
@@ -248,6 +255,10 @@ function DeletePanel({
           type="button"
           onClick={() => remove.mutate()}
           disabled={!armed || remove.isPending}
+          // ⚠️ The one control in this dialog that removes anything, and it
+          // sits one gap from `cancel`. Its own name, so nothing fuzzier than
+          // this can ever reach it.
+          data-testid="delete-confirm"
           // Dark red, and red even while inert: this button should never look
           // like the one beside it.
           className={`${DANGER_FILL} ${DANGER_INK} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}

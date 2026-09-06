@@ -21,6 +21,11 @@ export function AddButton({ label, onClick }: { label: string; onClick: () => vo
       <button
         type="button"
         onClick={onClick}
+        // Two of these sit in the rail, under VIEWS and under SERVERS, and each
+        // opens a form. `data-label` is the button's own fixed copy, not text
+        // anyone typed, and is what tells them apart.
+        data-testid="add-button"
+        data-label={label}
         className="border-line-strong text-ink-muted hover:bg-raised hover:border-accent hover:text-ink flex w-full justify-center border border-dashed py-1.5 font-mono text-2xs leading-none"
       >
         {label}

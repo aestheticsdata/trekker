@@ -1,7 +1,7 @@
 "use client";
 
 import { Tooltip, TooltipBlock } from "@components/ui/tooltip";
-import { DISK_CELLS, filledCells } from "@helpers/disks";
+import { DISK_CELLS, filledCells, shortMount } from "@helpers/disks";
 import { formatTotal } from "@helpers/listing";
 import { fetchDisks } from "@lib/api/disks";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -100,13 +100,17 @@ function Volume({ disk, onOpen }: { disk: DiskMount; onOpen: () => void }) {
       <button
         type="button"
         onClick={onOpen}
+        // The mount point verbatim (`/`, `/System/Volumes/Data`) — the one
+        // thing about a volume that survives a refetch.
+        data-testid="volume-block"
+        data-mount={disk.mountPoint}
         className="hover:bg-raised block w-full px-2.5 pt-1 pb-1.75 text-left"
       >
         {/* `leading-none` on the percentage as well as the row: `text-2xs`
             carries a 16px line box of its own, which is five pixels taller than
             the 11px line it sits on and would set the height of the whole row. */}
         <span className="flex items-baseline font-mono text-xs leading-none font-medium">
-          <span className="text-ink min-w-0 flex-1 truncate">{disk.mountPoint}</span>
+          <span className="text-ink min-w-0 flex-1 truncate">{shortMount(disk.mountPoint)}</span>
           <span className={`ml-1.5 flex-none text-2xs leading-none ${disk.warn ? "text-warning" : "text-ink-dim"}`}>
             {disk.percent}%
           </span>
@@ -144,5 +148,13 @@ function Volume({ disk, onOpen }: { disk: DiskMount; onOpen: () => void }) {
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <p className="text-ink-faint px-2.5 py-1 font-mono text-2xs">{children}</p>;
+  // Four messages, one name: a take waiting for the blocks waits for this to go.
+  return (
+    <p
+      data-testid="volumes-empty"
+      className="text-ink-faint px-2.5 py-1 font-mono text-2xs"
+    >
+      {children}
+    </p>
+  );
 }
