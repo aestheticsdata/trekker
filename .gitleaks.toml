@@ -47,6 +47,18 @@ regexes = [
   '''@[a-z0-9-]+\.(?:local|test|invalid|internal)$''',
   # `uses: actions/checkout@v5`, `pnpm@11.9.0`, and every other pinned ref.
   '''@(?:v?[0-9][0-9a-z.^~*+-]*|main|master|latest|sha256)$''',
+  # The demo's four invented machines (TRE-140/TRE-148). They are fixtures, not
+  # fleet members: `kestrel` is LOCAL_HOST.slug and the other three are
+  # REMOTE_HOSTS in nest-api/mock/manifest.ts, where marlow's own address is
+  # marlow.example.com. A single-word alias is exactly what a real fleet name
+  # looks like, so this rule cannot tell them apart — the comment on the
+  # hostname shape in .githooks/infra-patterns.sh says as much, and names review
+  # as the thing that closes the gap. This is that review, written down.
+  #
+  # Listed by name rather than widened: a pattern loose enough to cover these
+  # would cover the real ones too, which is the leak this rule exists to catch.
+  # A fifth demo machine has to be added here deliberately.
+  '''@(?:kestrel|marlow|sable|tundra)$''',
 ]
 
 [[rules]]
