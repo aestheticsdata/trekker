@@ -84,9 +84,16 @@ scan_infra() {
   # it is shaped exactly like an ordinary hyphenated word, and the only rule
   # that would catch it is a denylist of the real names, which is the leak it
   # would exist to prevent. That gap is covered by review, not by grep.
+  #
+  # `w3.org` is allowlisted for the same reason the `/Users/` rule below is
+  # case-sensitive: it is not a host anybody reaches, it is the XML namespace
+  # in `xmlns="http://www.w3.org/2000/svg"`, which is mandatory in a standalone
+  # SVG and therefore sits in the first line of every icon this repo will ever
+  # commit. Refusing them all taught --no-verify once already (TRE-149), and a
+  # bypass turns off gitleaks and every shape above it, not just this one.
   _check '\b[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+\.(com|net|org|io|dev|app|sh|eu|fr|de|uk|us|cloud|xyz|me|info|biz|tech|systems|tools|works|zone|ovh|scw)\b' \
     "A hostname with a real public suffix. Use host.example.com." \
-    '(^|\.)example\.(com|org|net)$|^(json\.)?schemastore\.org$|^(www\.)?(github|gitlab|npmjs|nodejs|anthropic)\.(com|org)$'
+    '(^|\.)example\.(com|org|net)$|^(json\.)?schemastore\.org$|^(www\.)?w3\.org$|^(www\.)?(github|gitlab|npmjs|nodejs|anthropic)\.(com|org)$'
 
   # Case-SENSITIVE, alone among these: `/Users/` and `/home/` are the only
   # parts with a fixed spelling, and matching them loosely makes every
