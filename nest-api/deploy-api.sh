@@ -158,6 +158,21 @@ EOF
   # From the repo root: the lockfile, pnpm-workspace.yaml and every package's
   # package.json have to be present or --frozen-lockfile refuses to run.
   log "➡️  Syncing workspace sources"
+  # And whatever git ignores, which rsync does not read on its own (TRE-151).
+  # The hand-kept list above is a list somebody has to remember to add to, and
+  # twice now nobody did: `.mock/` wrote 60 GB of zeros onto the server
+  # (TRE-149), and `credentials-trekker.txt` sat in 88 copies under the deploy
+  # root for four weeks. The excludes stay — they also name things git tracks
+  # that the server must not receive — and they stay *first*, so a `!` line in a
+  # .gitignore can never re-admit one of them.
+  #
+  # ⚠️ rsync takes the FIRST matching rule; git takes the LAST. So a `!` negation
+  # only rescues a file that no earlier line already matched. One tracked file
+  # falls in that gap today — `front/.env.test.local.example`, matched by
+  # `.env.*` long before its own `!` line — and it stops shipping. Nothing on
+  # the server reads it. A tracked file rescued by a late `!` would go the same
+  # way silently, so check with `rsync -an --out-format='%n'` before relying on
+  # one reaching a release.
   rsync -az --delete \
     --exclude=".git" \
     --exclude="node_modules" \
@@ -169,6 +184,7 @@ EOF
     --exclude="deploy.env" \
     --exclude=".DS_Store" \
     --exclude="ecosystem.config.js" \
+    --filter=':- .gitignore' \
     "$REPO_ROOT/" "$TREKKER_DEPLOY_HOST:$NEST_RELEASE_REMOTE/"
 
   # The PM2 config lives above the app directory so it survives the release

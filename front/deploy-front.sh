@@ -152,6 +152,21 @@ EOF
   # rsync does not keep sparseness by default, so one deploy wrote 60 GB of zeros
   # onto the server and filled the disk (TRE-149). It is gitignored — which rsync
   # does not read — and it had never been deployed before that day.
+  # And whatever git ignores, which rsync does not read on its own (TRE-151).
+  # The hand-kept list above is a list somebody has to remember to add to, and
+  # twice now nobody did: `.mock/` wrote 60 GB of zeros onto the server
+  # (TRE-149), and `credentials-trekker.txt` sat in 88 copies under the deploy
+  # root for four weeks. The excludes stay — they also name things git tracks
+  # that the server must not receive — and they stay *first*, so a `!` line in a
+  # .gitignore can never re-admit one of them.
+  #
+  # ⚠️ rsync takes the FIRST matching rule; git takes the LAST. So a `!` negation
+  # only rescues a file that no earlier line already matched. One tracked file
+  # falls in that gap today — `front/.env.test.local.example`, matched by
+  # `.env.*` long before its own `!` line — and it stops shipping. Nothing on
+  # the server reads it. A tracked file rescued by a late `!` would go the same
+  # way silently, so check with `rsync -an --out-format='%n'` before relying on
+  # one reaching a release.
   rsync -az --delete \
     --exclude ".git" \
     --exclude ".next" \
@@ -165,6 +180,7 @@ EOF
     --exclude "deploy.env" \
     --exclude "ecosystem.config.js" \
     --exclude ".DS_Store" \
+    --filter ':- .gitignore' \
     "$REPO_ROOT/" "$TREKKER_DEPLOY_HOST:$STAGING_DIR/"
 
   log "➡️  Installing and building on the server"
