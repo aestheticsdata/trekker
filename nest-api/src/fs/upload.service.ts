@@ -435,6 +435,9 @@ export class UploadService {
     }
 
     const name = placed.name;
+    // One host lookup, returning a closure — and `() => false` for a remote
+    // host, which has no key material of ours to protect.
+    const denied = await this.guard.localDenial(driver, userId);
     let directory = root;
     if (placed.directories.length > 0) {
       try {
@@ -601,6 +604,30 @@ export class UploadService {
       if (final === null) {
         await this.discard(driver, target, partial, { sessionId, hostId: driver.hostId });
         return { requested, name, ok: true, bytes: 0, code: "ESKIPPED", message: "Already there; left alone." };
+      }
+
+      // The last unguarded path in an upload (TRE-52, TRE-150). `destination`
+      // validates the directory and `subdirectory` validates every folder made
+      // under it; the file itself is named here, and nothing asked the denylist
+      // about it — so an upload called `ecosystem.config.js` was renamed into
+      // place *over* the key material. Not a disclosure: the master key is
+      // destroyed rather than read, and every credential sealed with it stops
+      // decrypting at the next restart. It was unreachable only while the
+      // denylist named the tree, which it no longer does.
+      //
+      // Asked on `final` rather than on the requested name, so `keepBoth` — which
+      // lands under a number, and so on a name no entry covers — is not refused
+      // for a name it was never going to use.
+      if (denied(final)) {
+        await this.discard(driver, target, partial, { sessionId, hostId: driver.hostId });
+        return {
+          requested,
+          name: basename(final),
+          ok: false,
+          bytes: 0,
+          code: "EDENYLISTED",
+          message: "That name is protected on this host and cannot be uploaded over.",
+        };
       }
 
       // The one moment the file becomes real. `rename` within a directory is

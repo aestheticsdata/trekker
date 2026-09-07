@@ -14,11 +14,7 @@ import { dfShimPath } from "./tree";
  * - `mock/example-dns.cjs` preloaded, so the three remote machines' names
  *   under `example.com` resolve to the loopback for this process tree alone;
  * - the three remote machines themselves (`sshd.ts`), started here before the
- *   API and stopped when it exits — nothing to run beforehand;
- * - the mock home named to the local driver's denylist as the one place inside
- *   the install tree it may serve (`TREKKER_DEV_LOCAL_EXCEPTIONS`, honoured
- *   under any NODE_ENV but production), because the mock lives in the
- *   repository's own `.mock/` folder.
+ *   API and stopped when it exits — nothing to run beforehand.
  *
  *   pnpm exec tsx mock/df-on-path.ts nest start --watch     # what `pnpm dev` runs
  *   pnpm exec tsx mock/df-on-path.ts node dist/src/main     # a built API, for a film
@@ -47,7 +43,6 @@ void (async () => {
       ...process.env,
       PATH: `${bin}:${process.env.PATH ?? ""}`,
       NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require ${preload}`].filter(Boolean).join(" "),
-      TREKKER_DEV_LOCAL_EXCEPTIONS: mockHome(),
     },
   });
 

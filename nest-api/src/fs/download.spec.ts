@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, open, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
@@ -13,7 +13,7 @@ import { sendDownload } from "@fs/download-response";
 import { DownloadService } from "@fs/download.service";
 import { LocalDriver } from "@hosts/drivers/local.driver";
 import { DriverError } from "@hosts/drivers/driver-error";
-import { PathGuardService } from "@hosts/path-guard/path-guard.service";
+import { PATH_DENYLISTED_MESSAGE, PathGuardService } from "@hosts/path-guard/path-guard.service";
 import { SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
 import { SudoService } from "@hosts/sudo/sudo.service";
 
@@ -81,14 +81,14 @@ function recordingAudit(): AuditService {
 
 function serviceFor(
   roots: { path: string; access: "READ" | "WRITE" }[],
-  options: { denylist?: string[]; maxDownloads?: number } = {},
+  options: { denylist?: string[]; maxDownloads?: number; role?: "OWNER" | "MEMBER" } = {},
 ): DownloadService {
   const prisma = {
     hosts: {
       findFirst: ({ where }: { where: { id: string; userId: string } }) =>
         Promise.resolve(
           where.id === HOST_ID && where.userId === USER_ID
-            ? { id: HOST_ID, userId: USER_ID, transport: "LOCAL", roots, user: { role: "MEMBER" } }
+            ? { id: HOST_ID, userId: USER_ID, transport: "LOCAL", roots, user: { role: options.role ?? "MEMBER" } }
             : null,
         ),
     },
@@ -204,6 +204,51 @@ describe("planning a download", () => {
 
     const error = await refusal(service.plan(USER_ID, HOST_ID, join(base, "install", "master.key")));
     expect(statusOf(error)).toBe(403);
+  });
+
+  it("refuses the archive when the file appears between the plan and the stream", async () => {
+    /**
+     * The gap TRE-150 left, and the reason it is a gap rather than a race.
+     *
+     * `plan()` asks the denylist about the tree it walked; `archive()` walks
+     * again, on purpose — "between them a file may have appeared", says its own
+     * comment — and until now that second walk asked nothing. While the
+     * denylist named the install tree whole there was nothing to miss: the
+     * entry was a directory that was always there. Naming one file inside a
+     * served tree is what made the plan's answer a statement about a moment.
+     *
+     * And the moment is chosen by whoever is downloading. `walkTree` records a
+     * directory it cannot list as unreadable and does not descend, so a chmod
+     * on the directory holding the key file — a write the guard permits, since
+     * only the file is an entry — hides it from the plan and shows it to the
+     * archive. No deploy has to race anything.
+     */
+    await mkdir(join(base, "deploy", "releases"), { recursive: true });
+    await writeFile(join(base, "deploy", "releases", "notes.txt"), "ordinary");
+    await writeFile(join(base, "deploy", "ecosystem.config.js"), "TREKKER_MASTER_KEY=1:secret");
+    const denied = await realpath(join(base, "deploy", "ecosystem.config.js"));
+    const service = serviceFor(readRoot(), { denylist: [denied] });
+
+    // Hidden from the plan's walk: the directory cannot be listed, so the
+    // config never enters `walked.paths` and the plan comes back clean.
+    await chmod(join(base, "deploy"), 0o000);
+    const plan = await service.plan(USER_ID, HOST_ID, join(base, "deploy"));
+    expect(plan.kind).toBe("directory");
+
+    // Shown to the archive's walk.
+    await chmod(join(base, "deploy"), 0o755);
+
+    const error = await refusal(service.stream(plan));
+    expect(statusOf(error)).toBe(403);
+  });
+
+  it("still archives a tree that holds nothing protected", async () => {
+    await mkdir(join(base, "releases"));
+    await writeFile(join(base, "releases", "app.tar.gz"), "bytes");
+    const service = serviceFor(readRoot(), { denylist: [join(await realpath(base), "ecosystem.config.js")] });
+
+    const plan = await service.plan(USER_ID, HOST_ID, join(base, "releases"));
+    expect((await drain(await service.stream(plan))).length).toBeGreaterThan(0);
   });
 
   it("reads a download as a READ, so a read-only root still serves it", async () => {
@@ -666,5 +711,43 @@ describe("reading a root-owned file with sudo", () => {
     expect(statusOf(error)).toBe(416);
     expect(codeOf(error)).toBe("ENORANGESUDO");
     expect(streamed).toHaveLength(0);
+  });
+});
+
+// ------------------------------------------- a protected path under the directory (TRE-150)
+
+describe("a protected path under the directory", () => {
+  it("refuses the directory whole, rather than zipping around the path", async () => {
+    // The guard judged the directory; the walk found the key file under it.
+    // Refused as a delete is (TRE-25), not skipped: an archive missing one entry
+    // arrives looking complete, and this is the operation that takes bytes off
+    // the host.
+    await mkdir(join(base, "deploy", "releases"), { recursive: true });
+    await writeFile(join(base, "deploy", "ecosystem.config.js"), "the master key");
+    await writeFile(join(base, "deploy", "releases", "index.html"), "fine");
+    const service = serviceFor(readRoot(), {
+      denylist: [await realpath(join(base, "deploy", "ecosystem.config.js"))],
+    });
+
+    const error = await refusal(service.plan(USER_ID, HOST_ID, join(base, "deploy")));
+    expect(statusOf(error)).toBe(403);
+
+    // The refusal is about what is under the path, not about the tree it is in:
+    // a subdirectory holding nothing protected still downloads.
+    const plan = await service.plan(USER_ID, HOST_ID, join(base, "deploy", "releases"));
+    expect(plan.kind).toBe("directory");
+  });
+
+  it("says why to the install's owner, as the guard does for the path itself", async () => {
+    await mkdir(join(base, "deploy"));
+    await writeFile(join(base, "deploy", "ecosystem.config.js"), "the master key");
+    const service = serviceFor(readRoot(), {
+      denylist: [await realpath(join(base, "deploy", "ecosystem.config.js"))],
+      role: "OWNER",
+    });
+
+    const error = await refusal(service.plan(USER_ID, HOST_ID, join(base, "deploy")));
+    expect(statusOf(error)).toBe(403);
+    expect((error as Error).message).toBe(PATH_DENYLISTED_MESSAGE);
   });
 });

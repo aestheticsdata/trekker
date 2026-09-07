@@ -425,13 +425,15 @@ node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64')
 The API refuses to boot if it is missing, the wrong length, or still
 `REPLACE_ME`, and the error names the variable.
 
-The directory holding it must stay denylisted. Otherwise a signed-in user
-browsing the local host reads the key that unlocks every other machine, and the
-encryption is decoration. TRE-11's denylist enforces that, and it is the check
-that binds every account — the install's owner browses without the roots
-allowlist applying to them (TRE-48), so keeping the key merely outside the
-configured roots would no longer be enough. An owner who navigates there is
-told why the path refuses instead of getting the uniform refusal.
+The file must stay denylisted. Otherwise a signed-in user browsing the local
+host reads the key that unlocks every other machine, and the encryption is
+decoration. TRE-11's denylist enforces that, and it is the check that binds
+every account — the install's owner browses without the roots allowlist
+applying to them (TRE-48), so keeping the key merely outside the configured
+roots would no longer be enough. It names the file, not the directory around it
+(TRE-150): the deploy root, the releases and the backups beside it open like
+any other directory, and an owner who opens the file itself is told why it
+refuses instead of getting the uniform refusal.
 
 **What this protects against is database disclosure, not host compromise.**
 Anyone who owns the API host reads the key out of the process environment and

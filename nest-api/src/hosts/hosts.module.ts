@@ -9,8 +9,8 @@ import { HostsController } from "@hosts/hosts.controller";
 import { HostsService } from "@hosts/hosts.service";
 import { SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
 import { SudoService } from "@hosts/sudo/sudo.service";
-import { computeLocalDenylist, computeLocalDenylistExceptions } from "@hosts/path-guard/local-denylist";
-import { LOCAL_DENYLIST, LOCAL_DENYLIST_EXCEPTIONS, PathGuardService } from "@hosts/path-guard/path-guard.service";
+import { computeLocalDenylist } from "@hosts/path-guard/local-denylist";
+import { LOCAL_DENYLIST, PathGuardService } from "@hosts/path-guard/path-guard.service";
 import { Global, Module } from "@nestjs/common";
 
 /**
@@ -32,12 +32,6 @@ import { Global, Module } from "@nestjs/common";
     {
       provide: LOCAL_DENYLIST,
       useFactory: () => computeLocalDenylist({ startDir: __dirname, homeDir: homedir() }),
-    },
-    // Development only, and empty unless the wrapper that starts the API names
-    // the mock's folder (`computeLocalDenylistExceptions`).
-    {
-      provide: LOCAL_DENYLIST_EXCEPTIONS,
-      useFactory: () => computeLocalDenylistExceptions(),
     },
     PathGuardService,
     HostSummaryService,

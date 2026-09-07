@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { ForbiddenException, HttpException, Inject, Injectable, Logger, Optional } from "@nestjs/common";
+import { ForbiddenException, HttpException, Inject, Injectable, Logger } from "@nestjs/common";
 import { AuditService } from "@audit/audit.service";
 import { LIMITS } from "@audit/limits";
 import { RateLimitService } from "@audit/rate-limit.service";
@@ -68,7 +68,7 @@ export const PATH_REFUSED_MESSAGE = "Path is not allowed on this host.";
  * (TRE-48).
  *
  * The owner browses without the roots binding them, so this handful of
- * directories is the only thing that still refuses — and a uniform message
+ * paths is the only thing that still refuses — and a uniform message
  * would read as the bug that ticket was filed about rather than as the one
  * boundary deliberately left standing. Saying why leaks nothing to them: the
  * denylist is computed from where this server is installed, by the person who
@@ -83,8 +83,6 @@ export const PATH_DENYLISTED_MESSAGE =
 
 /** DI token for the boot-computed local denylist (see local-denylist.ts). */
 export const LOCAL_DENYLIST = "LOCAL_DENYLIST";
-/** DI token for the development-only holes in it (see `computeLocalDenylistExceptions`). */
-export const LOCAL_DENYLIST_EXCEPTIONS = "LOCAL_DENYLIST_EXCEPTIONS";
 
 /**
  * Pure containment predicate, exported for TRE-13's symlink annotation —
@@ -163,9 +161,6 @@ export class PathGuardService {
     @Inject(LOCAL_DENYLIST) private readonly localDenylist: readonly string[],
     private readonly limits: RateLimitService,
     private readonly audit: AuditService,
-    // Last and optional: the specs build this service by hand with four
-    // arguments, and production provides an empty list.
-    @Optional() @Inject(LOCAL_DENYLIST_EXCEPTIONS) private readonly localDenylistExceptions: readonly string[] = [],
   ) {}
 
   async validate({ driver, userId, path, intent }: ValidateArgs): Promise<ValidatedPath> {
@@ -201,8 +196,8 @@ export class PathGuardService {
       );
     }
 
-    // Checked after resolution on purpose: a symlink into the install
-    // directory has already been unmasked by realpath at this point.
+    // Checked after resolution on purpose: a symlink to the key file has
+    // already been unmasked by realpath at this point.
     //
     // This one still binds the owner (TRE-48). The roots were never a
     // privilege boundary — the account sets its own from the host form — but
@@ -238,10 +233,25 @@ export class PathGuardService {
    */
   async localDenial(driver: HostDriver, userId: string): Promise<(realPath: string) => boolean> {
     const host = await this.loadHost(driver.hostId, userId);
-    // Remote hosts have no install tree of ours to protect, which is the same
+    // Remote hosts have no key material of ours to protect, which is the same
     // reason `validate()` only consults it for LOCAL.
     if (host.transport !== "LOCAL") return () => false;
     return (realPath: string) => this.isDeniedLocally(realPath);
+  }
+
+  /**
+   * Whether this host has any key material of ours at all — LOCAL, in short.
+   *
+   * `localDenial` answers `() => false` for every other transport, which is the
+   * right answer and a cheap one to call. What a predicate cannot say is that
+   * the *work* behind the question is pointless, and a caller that would walk a
+   * tree in order to feed it needs to know that before it starts: a recursive
+   * listing over SFTP, to consult a list that is empty by construction, is a
+   * round trip per directory for an answer settled here.
+   */
+  async hasLocalDenial(driver: HostDriver, userId: string): Promise<boolean> {
+    const host = await this.loadHost(driver.hostId, userId);
+    return host.transport === "LOCAL" && this.localDenylist.length > 0;
   }
 
   /**
@@ -363,10 +373,7 @@ export class PathGuardService {
   }
 
   private isDeniedLocally(realPath: string): boolean {
-    if (!this.localDenylist.some((entry) => contains(entry, realPath))) return false;
-    // A development-only hole: the mock's own folder inside the install tree
-    // (`computeLocalDenylistExceptions`). Empty in production, always.
-    return !this.localDenylistExceptions.some((entry) => contains(entry, realPath));
+    return this.localDenylist.some((entry) => contains(entry, realPath));
   }
 
   /**

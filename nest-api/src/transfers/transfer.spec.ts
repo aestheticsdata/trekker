@@ -1,4 +1,16 @@
-import { chmod, mkdir, mkdtemp, open, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HttpException } from "@nestjs/common";
@@ -300,6 +312,7 @@ interface Harness {
 
 function harness(
   roots: Array<{ path: string; access: "READ" | "WRITE" }> = [{ path: base, access: "WRITE" }],
+  options: { denylist?: string[] } = {},
 ): Harness {
   const prisma = new FakePrisma();
   prisma.roots = roots;
@@ -317,7 +330,12 @@ function harness(
     },
   } as unknown as HostDriverFactory;
 
-  const guard = new PathGuardService(prisma as unknown as PrismaService, [], memoryLimits(), silentAudit);
+  const guard = new PathGuardService(
+    prisma as unknown as PrismaService,
+    options.denylist ?? [],
+    memoryLimits(),
+    silentAudit,
+  );
   const queued: string[] = [];
   const queue = { enqueue: (jobId: string) => queued.push(jobId) } as unknown as TransferQueueService;
 
@@ -1325,4 +1343,47 @@ describe("memory", () => {
     // writing that version, which came in at the full two gigabytes.
     expect(after - before).toBeLessThan(100 * 1024 ** 2);
   }, 120_000);
+});
+
+// ------------------------------------------ a protected path under the selection (TRE-150)
+
+describe("a protected path under the selection", () => {
+  it("refuses the plan when the walk meets one, rather than copying around it", async () => {
+    // The guard judged the selected directory; the walk found the key file
+    // under it. A copy to another host would land it where no denylist applies,
+    // so the plan refuses whole, as a delete does (TRE-25).
+    const deploy = join(base, "deploy");
+    await mkdir(join(deploy, "releases"), { recursive: true });
+    await writeFile(join(deploy, "ecosystem.config.js"), "the master key");
+    await writeFile(join(deploy, "releases", "index.html"), "fine");
+    const to = join(base, "to");
+    await mkdir(to);
+    const kit = harness(undefined, { denylist: [await realpath(join(deploy, "ecosystem.config.js"))] });
+
+    const error = await refusal(kit.service.plan(USER_ID, copyInput([deploy], to)));
+    expect(statusOf(error)).toBe(403);
+    expect(kit.queued).toEqual([]);
+
+    // A subdirectory holding nothing protected still plans: the refusal is
+    // about what is under the selection, not about the tree it is in.
+    const plan = await kit.service.plan(USER_ID, copyInput([join(deploy, "releases")], to));
+    expect(plan.files).toBe(1);
+  });
+
+  it("refuses the plan when an item would land on one", async () => {
+    // The other direction: the destination directory is served, and the name
+    // an item lands under is a path the guard never saw — TRE-52's lesson in
+    // its smallest form, as create and rename already apply it.
+    const from = join(base, "from");
+    await mkdir(from);
+    await writeFile(join(from, "ecosystem.config.js"), "an impostor");
+    const deploy = join(base, "deploy");
+    await mkdir(deploy);
+    await writeFile(join(deploy, "ecosystem.config.js"), "the master key");
+    const kit = harness(undefined, { denylist: [await realpath(join(deploy, "ecosystem.config.js"))] });
+
+    const error = await refusal(kit.service.plan(USER_ID, copyInput([join(from, "ecosystem.config.js")], deploy)));
+    expect(statusOf(error)).toBe(403);
+    expect(await readFile(join(deploy, "ecosystem.config.js"), "utf8")).toBe("the master key");
+  });
 });

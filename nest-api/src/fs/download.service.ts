@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable, Logger } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { AuditService } from "@audit/audit.service";
 import { LIMITS } from "@audit/limits";
 import { RateLimitService } from "@audit/rate-limit.service";
@@ -9,7 +9,7 @@ import { walkTree } from "@fs/tree-walk";
 import { zipTree } from "@fs/zip-stream";
 import { isDriverError } from "@hosts/drivers/driver-error";
 import { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
-import { PathGuardService } from "@hosts/path-guard/path-guard.service";
+import { PATH_REFUSED_MESSAGE, PathGuardService } from "@hosts/path-guard/path-guard.service";
 import { isPermissionRefusal, SudoRunnerService } from "@hosts/sudo/sudo-runner.service";
 
 import type { HostDriver } from "@hosts/drivers/host-driver";
@@ -58,6 +58,13 @@ export interface DownloadPlan {
   entries?: number;
   /** Symlinks the archive leaves out, so the caller can say so. */
   skippedLinks?: number;
+  /**
+   * Who the plan was judged for, so the archive's own walk can ask the denylist
+   * again (TRE-150). Set on directory plans; a directory plan without it is
+   * refused rather than zipped. An id and not a predicate, so the plan stays a
+   * value — a function on it would make the type unserialisable for no gain.
+   */
+  userId?: string;
 }
 
 export interface PlanOptions {
@@ -138,6 +145,23 @@ export class DownloadService {
         );
       }
 
+      // The guard judged the directory; what the walk found under it, the guard
+      // never saw (TRE-52). A protected path anywhere in the tree refuses the
+      // whole download rather than being left out of the archive, as a delete
+      // refuses rather than skips (TRE-25): a zip missing one entry arrives
+      // looking complete, and this is the one operation that takes bytes off
+      // the host (TRE-150). Through validate() rather than a 403 written here,
+      // so the refusal is logged, counted and worded like every other one —
+      // the explanation for the owner, the uniform line for a member.
+      const denied = await this.guard.localDenial(driver, userId);
+      const protectedPath = walked.paths.find(denied);
+      if (protectedPath !== undefined) {
+        await this.guard.validate({ driver, userId, path: protectedPath, intent: "read" });
+        // validate() throws on a denied real path. Were it ever to return,
+        // refuse anyway rather than send the archive.
+        throw new ForbiddenException(PATH_REFUSED_MESSAGE);
+      }
+
       return {
         driver,
         realPath,
@@ -145,6 +169,7 @@ export class DownloadService {
         kind: "directory",
         entries: walked.paths.length,
         skippedLinks: walked.skippedLinks,
+        userId,
       };
     }
 
@@ -245,6 +270,31 @@ export class DownloadService {
     // between them a file may have appeared. Re-walking costs one listing pass
     // and means the archive describes the tree it is actually reading.
     const walked = await walkTree(plan.driver, plan.realPath, entryCeiling());
+
+    // And so the denylist is applied to *this* walk, not only to the plan's.
+    // The sentence above is the whole reason: a file may have appeared, and
+    // since TRE-150 the file that matters is one name inside a tree that is
+    // otherwise served. A plan judged clean and an archive built from a second
+    // walk are two different answers about two different moments, and the one
+    // that leaves the host is this one.
+    //
+    // It is not a narrow race. `walkTree` records a directory it cannot list
+    // as unreadable and does not descend, so a chmod on the directory holding
+    // the key file — an ordinary write the guard permits, since only the file
+    // is an entry — hides it from the plan's walk and shows it to this one.
+    // A directory plan always carries its user; one that does not cannot be
+    // asked, and an archive nobody can vouch for is refused rather than sent.
+    if (plan.userId === undefined) throw new ForbiddenException(PATH_REFUSED_MESSAGE);
+
+    const denied = await this.guard.localDenial(plan.driver, plan.userId);
+    const protectedPath = walked.paths.find(denied);
+    if (protectedPath !== undefined) {
+      await this.guard.validate({ driver: plan.driver, userId: plan.userId, path: protectedPath, intent: "read" });
+      // validate() throws on a denied real path. Were it ever to return, refuse
+      // anyway rather than zip it.
+      throw new ForbiddenException(PATH_REFUSED_MESSAGE);
+    }
+
     return zipTree(plan.driver, plan.realPath, walked.details).stream;
   }
 

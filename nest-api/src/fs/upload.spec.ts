@@ -55,7 +55,7 @@ function memoryLimits(): RateLimitService {
 
 const silentAudit = { refused: () => Promise.resolve() } as unknown as AuditService;
 
-function serviceFor(roots: { path: string; access: "READ" | "WRITE" }[]): UploadService {
+function serviceFor(roots: { path: string; access: "READ" | "WRITE" }[], denylist: string[] = []): UploadService {
   const prisma = {
     hosts: {
       findFirst: ({ where }: { where: { id: string; userId: string } }) =>
@@ -67,7 +67,7 @@ function serviceFor(roots: { path: string; access: "READ" | "WRITE" }[]): Upload
     },
   } as unknown as PrismaService;
 
-  const guard = new PathGuardService(prisma, [], memoryLimits(), silentAudit);
+  const guard = new PathGuardService(prisma, denylist, memoryLimits(), silentAudit);
   const factory = { forHost: () => Promise.resolve(new LocalDriver(HOST_ID)) } as unknown as HostDriverFactory;
   // A real runner over an empty window store: nothing here opens a window, so
   // every upload takes the ordinary path — which TRE-29 must not have changed.
@@ -394,6 +394,90 @@ describe("a name that is already taken", () => {
     await serviceFor(writeRoot()).receive(USER_ID, driver(), base, "a.txt", body("new"), "keepBoth");
 
     expect(await readFile(join(base, "a.txt"), "utf8")).toBe("original");
+  });
+});
+
+// -------------------------------------------------------------- the denylist
+
+/**
+ * TRE-150 narrowed the local denylist from the install tree to the PM2 config
+ * inside it, which served the tree and left one route to the file unguarded:
+ * `destination` validates the directory an upload goes into and `subdirectory`
+ * validates every folder made under it, but the file's own path was never
+ * asked about. An upload called `ecosystem.config.js` was renamed into place
+ * over the master key — not read, destroyed, which takes every sealed host
+ * credential with it.
+ *
+ * The whole point of these being real files on a real driver: the assertion is
+ * what is on disk afterwards, not what the service said.
+ */
+describe("a name the local denylist covers", () => {
+  const CONFIG = "ecosystem.config.js";
+
+  /**
+   * What the controller hands `receive`: `destination()`'s resolved path, not
+   * the one the client asked for. It matters on this machine, where the
+   * temporary directory is reached through a symlink — and the denylist is a
+   * list of real paths, compared as strings, here as everywhere else.
+   */
+  const realBase = () => realpath(base);
+
+  it("refuses to land on it, and leaves the bytes that were there", async () => {
+    await writeFile(join(base, CONFIG), "TREKKER_MASTER_KEY=1:secret\n");
+    const service = serviceFor(writeRoot(), [await realpath(join(base, CONFIG))]);
+
+    const outcome = await service.receive(USER_ID, driver(), await realBase(), CONFIG, body("PWNED"), "overwrite");
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.code).toBe("EDENYLISTED");
+    expect(await readFile(join(base, CONFIG), "utf8")).toBe("TREKKER_MASTER_KEY=1:secret\n");
+  });
+
+  it("refuses it before it exists, so the name cannot be claimed first", async () => {
+    const service = serviceFor(writeRoot(), [join(await realpath(base), CONFIG)]);
+
+    const outcome = await service.receive(USER_ID, driver(), await realBase(), CONFIG, body("PWNED"), "overwrite");
+
+    expect(outcome.ok).toBe(false);
+    expect(await entries(base)).toEqual([]);
+  });
+
+  it("leaves no partial behind when it refuses", async () => {
+    await writeFile(join(base, CONFIG), "key");
+    const service = serviceFor(writeRoot(), [await realpath(join(base, CONFIG))]);
+
+    await service.receive(USER_ID, driver(), await realBase(), CONFIG, body("PWNED"), "overwrite");
+
+    expect((await entries(base)).filter(isPartialName)).toEqual([]);
+    expect(await entries(base)).toEqual([CONFIG]);
+  });
+
+  it("refuses one file of a folder upload and keeps the rest", async () => {
+    await mkdir(join(base, "deploy"));
+    await writeFile(join(base, "deploy", CONFIG), "key");
+    const service = serviceFor(writeRoot(), [await realpath(join(base, "deploy", CONFIG))]);
+
+    const refused = await service.receive(USER_ID, driver(), base, `deploy/${CONFIG}`, body("PWNED"), "overwrite");
+    const fine = await service.receive(USER_ID, driver(), base, "deploy/notes.txt", body("kept"), "overwrite");
+
+    expect(refused.ok).toBe(false);
+    expect(fine.ok).toBe(true);
+    expect(await readFile(join(base, "deploy", CONFIG), "utf8")).toBe("key");
+    expect(await readFile(join(base, "deploy", "notes.txt"), "utf8")).toBe("kept");
+  });
+
+  it("does not refuse a keepBoth that lands under a number instead", async () => {
+    // The check is on the name the upload settles on, not the one it asked for.
+    // `keepBoth` never touches the config, so refusing it would be the guard
+    // answering a question nobody asked.
+    await writeFile(join(base, CONFIG), "key");
+    const service = serviceFor(writeRoot(), [await realpath(join(base, CONFIG))]);
+
+    const outcome = await service.receive(USER_ID, driver(), await realBase(), CONFIG, body("beside it"), "keepBoth");
+
+    expect(outcome.ok).toBe(true);
+    expect(await readFile(join(base, CONFIG), "utf8")).toBe("key");
+    expect(await readFile(join(base, "ecosystem.config (2).js"), "utf8")).toBe("beside it");
   });
 });
 

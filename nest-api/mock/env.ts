@@ -50,10 +50,9 @@ export const HOUSE_PASSPHRASE = "mock local recovery";
  * sub-folder of the project and nowhere else on the machine (TRE-148: "il
  * faut que tous les dossiers soient dans le dossier de trekker"). An
  * ignored folder is invisible to `git status --porcelain`, so the deploy
- * scripts' clean-tree check does not see it; and the local driver, which
- * refuses the install tree, is told about this one folder for development
- * only — `TREKKER_DEV_LOCAL_EXCEPTIONS`, set by `df-on-path.ts`, honoured by
- * the path guard under any NODE_ENV but production.
+ * scripts' clean-tree check does not see it; and the local driver serves it
+ * like any other folder of the repository, because the denylist names the
+ * PM2 config and not the tree around it (TRE-150).
  *
  * `TREKKER_MOCK_HOME` moves it: the specs materialise into a temporary
  * directory rather than into the repository.

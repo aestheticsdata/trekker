@@ -515,6 +515,9 @@ const BAND_DENIED_MARK = "⚠";
 /**
  * Why the one band that never opens never opens (TRE-105).
  *
+ * Since TRE-150 that band stands for `~/.pm2`, `~/.ssh` or the PM2 config that
+ * carries the master key — never the install, which opens like any directory.
+ *
  * The front's words rather than the API's, following `linkInsideRoot`: the 403
  * body is written for a request that has already been made, this is written for
  * a pointer resting on a rectangle. One fact, two registers — and the server
@@ -534,8 +537,8 @@ const BAND_DENIED_NOTE = (
       {BAND_DENIED_MARK}
     </span>
     <span>
-      Trekker's own install. It holds the master key that decrypts every stored credential, so it stays closed to the
-      browser — reach it over SSH.
+      Trekker's own key material — the master key that decrypts every stored credential, or the API user's SSH keys. It
+      stays closed to the browser; reach it over SSH.
     </span>
   </span>
 );

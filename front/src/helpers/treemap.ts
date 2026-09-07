@@ -78,7 +78,8 @@ export interface TreemapBand {
   isDirectory: boolean;
   /**
    * The API refuses this path however a pane reaches it (TRE-105) — Trekker's
-   * own install, on the local denylist because the master key sits in it.
+   * own key material on the local denylist: the PM2 config that carries the
+   * master key, or the API user's `~/.pm2` and `~/.ssh` (TRE-150).
    *
    * A separate flag from `isDirectory` because it says something different: the
    * band has a real path and a real size, and still goes nowhere. False when

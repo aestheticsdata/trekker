@@ -53,10 +53,12 @@ follow from that:
   access to every host it knows.
 
 The master key is yours to generate and is never derived from anything in this repo — 32 bytes of
-randomness, into `TREKKER_MASTER_KEY`. The directory holding it is denylisted rather than merely
-left out of the configured roots: the install's owner browses without those roots binding them
-(TRE-48), so root placement alone stopped being a guarantee and the denylist is the one that
-holds. The version travels with the key as `<version>:<base64>`, so the two cannot be set
+randomness, into `TREKKER_MASTER_KEY`. The file holding it, `ecosystem.config.js`, is denylisted
+rather than merely left out of the configured roots: the install's owner browses without those
+roots binding them (TRE-48), so root placement alone stopped being a guarantee and the denylist is
+the one that holds. The file, not the directory around it (TRE-150) — the deploy root and the
+releases beside it open like any other directory. The version travels with the key as
+`<version>:<base64>`, so the two cannot be set
 inconsistently, which is the commonest way a rotation goes wrong:
 
 ```bash

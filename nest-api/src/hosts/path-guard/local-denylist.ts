@@ -6,16 +6,25 @@ import { dirname, join } from "node:path";
  * root, even when the root is `/`. Computed once at boot from where the
  * process actually runs, so nothing environment-specific is committed:
  *
- *   - the install tree (dev: the repo; deployed: the workspace under
- *     TREKKER_REMOTE_ROOT), because it is Trekker itself;
- *   - the deploy root above it when it holds `ecosystem.config.js` — on the
- *     server that file carries the master key in clear;
+ *   - the PM2 config, `ecosystem.config.js`, at each level the deploy can put
+ *     it: beside the API package (development), at the install root, and one
+ *     above the install root — the deployed layout, where the file sits outside
+ *     the tree it launches so that it survives the release swap. On the server
+ *     it carries the master key in clear;
  *   - `~/.pm2`, because `pm2 save` copies the resolved environment — master
  *     key included — into dump.pm2;
  *   - `~/.ssh`, the API user's own key material.
  *
  * Without these, one authenticated session reads the key that decrypts every
  * other host's credential, and TRE-8 is decoration.
+ *
+ * Until TRE-150 the first entry was the install tree whole, and the deploy root
+ * above it. That closed everything under `$TREKKER_REMOTE_ROOT` — releases,
+ * backups, deploy logs — to the one account that has to manage them, for the
+ * sake of a single file. The file is named now and the tree is served like any
+ * other directory. Every operation that could carry the file out of a served
+ * tree — a zip download, a transfer — asks `PathGuardService.localDenial` about
+ * what it walked, the way delete and chmod already did (TRE-52).
  */
 
 export interface DenylistInputs {
@@ -24,6 +33,12 @@ export interface DenylistInputs {
   /** The API user's home — `os.homedir()` in production. */
   homeDir: string;
 }
+
+/**
+ * The PM2 config's name. `front/ecosystem.config.cjs` and the committed
+ * `ecosystem.config.example.js` hold no secrets and are not named.
+ */
+const PM2_CONFIG = "ecosystem.config.js";
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -59,7 +74,7 @@ export async function computeLocalDenylist({ startDir, homeDir }: DenylistInputs
   if (packageRoot !== null) {
     // Nearest ancestor holding pnpm-workspace.yaml — the whole install, not
     // just the API package. Nearest, not highest: a stray workspace file
-    // higher up (someone's ~/pnpm-workspace.yaml) must not deny their home.
+    // higher up (someone's ~/pnpm-workspace.yaml) must not name their home.
     let installRoot = packageRoot;
     for (let dir = packageRoot; ; dir = dirname(dir)) {
       if (await exists(join(dir, "pnpm-workspace.yaml"))) {
@@ -68,40 +83,21 @@ export async function computeLocalDenylist({ startDir, homeDir }: DenylistInputs
       }
       if (dirname(dir) === dir) break;
     }
-    entries.push(installRoot);
 
-    // Deployed layout: the PM2 config with the secrets sits one level above
-    // the workspace it launches. In dev the config lives inside the repo, so
-    // this simply does not fire.
-    const parent = dirname(installRoot);
-    if (parent !== installRoot && (await exists(join(parent, "ecosystem.config.js")))) {
-      entries.push(parent);
+    // Named at all three levels whether or not a file is there today: an entry
+    // for a config that does not exist yet still refuses one created there
+    // later, and the deploy writes the real one at exactly these paths. A Set,
+    // because a package that is its own install root would name the same file
+    // twice. The directory is resolved before the name goes on, so an install
+    // reached through a symlink still names the file the guard will compare
+    // against; the file is resolved again below in case it is itself a link.
+    const levels = new Set([packageRoot, installRoot, dirname(installRoot)]);
+    for (const level of levels) {
+      entries.push(join(await realpathOrSelf(level), PM2_CONFIG));
     }
   }
 
   entries.push(join(homeDir, ".pm2"), join(homeDir, ".ssh"));
 
   return Promise.all(entries.map(realpathOrSelf));
-}
-
-/**
- * The one hole in the denylist, and only in development (TRE-148).
- *
- * The mock keeps its fake trees in the repository's own `.mock/` folder —
- * inside the install tree, which the list above denies whole. Rather than
- * teach the guard what a mock is, the development wrapper that starts the API
- * names the folder in `TREKKER_DEV_LOCAL_EXCEPTIONS` (absolute paths, `:`
- * separated), and a path under one of them is served even though it is under
- * a denied entry. Under `NODE_ENV=production` the variable is ignored
- * outright: a deployed API has no mock, and no hole.
- */
-export async function computeLocalDenylistExceptions(env: NodeJS.ProcessEnv = process.env): Promise<string[]> {
-  if (env.NODE_ENV === "production") return [];
-  const raw = env.TREKKER_DEV_LOCAL_EXCEPTIONS?.trim();
-  if (!raw) return [];
-  const paths = raw
-    .split(":")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.startsWith("/"));
-  return Promise.all(paths.map(realpathOrSelf));
 }

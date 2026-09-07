@@ -1,11 +1,12 @@
 import { posix } from "node:path";
 import { BadRequestException, HttpException, HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { isDriverError } from "@hosts/drivers/driver-error";
-import type { HostDriver } from "@hosts/drivers/host-driver";
+import type { FileEntry, HostDriver } from "@hosts/drivers/host-driver";
 import { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
 import { PathGuardService } from "@hosts/path-guard/path-guard.service";
 import { toHttp } from "@fs/driver-http";
-import { MAX_PATHS } from "@fs/permissions.service";
+import { entryCeiling, MAX_PATHS } from "@fs/permissions.service";
+import { walkTree } from "@fs/tree-walk";
 import {
   type RenameMapping,
   type RenamePlan,
@@ -80,22 +81,24 @@ export class RenameService {
     if (invalid) throw new BadRequestException(invalid.message);
 
     const directory = posix.dirname(path);
-    const { driver, realDirectory, denied } = await this.openDirectory(userId, hostId, directory);
+    const { driver, realDirectory, denied, protectable } = await this.openDirectory(userId, hostId, directory);
     const name = posix.basename(path);
 
     if (name === "" || name === "/") {
       throw new BadRequestException("That path names a directory root, which has no name to change.");
     }
 
+    const source = posix.join(realDirectory, name);
     const target = posix.join(realDirectory, newName);
-    if (denied(posix.join(realDirectory, name)) || denied(target)) {
+    if (denied(source) || denied(target)) {
       throw new BadRequestException("That entry holds Trekker's own key material and cannot be renamed here.");
     }
 
     // The listing is what makes "already taken" answerable, and it is also the
     // difference between refusing and silently overwriting: POSIX `rename`
     // replaces an existing target without a word.
-    const existing = await this.namesIn(driver, realDirectory);
+    const entries = await this.entriesIn(driver, realDirectory);
+    const existing = entries.map((entry) => entry.name);
     if (newName !== name && existing.includes(newName)) {
       throw new BadRequestException(`“${newName}” already exists in this directory.`);
     }
@@ -104,8 +107,10 @@ export class RenameService {
       return { directory, renamed: 0, results: [{ name, next: newName, ok: true }], rolledBack: [], stranded: [] };
     }
 
+    await this.refuseProtectedInside(driver, entries, name, source, denied, protectable);
+
     try {
-      await driver.rename(posix.join(realDirectory, name), target);
+      await driver.rename(source, target);
     } catch (error) {
       this.rethrow(error);
     }
@@ -131,7 +136,7 @@ export class RenameService {
   ): Promise<RenamePlan & { directory: string }> {
     const directory = this.oneDirectory(paths);
     const { driver, realDirectory } = await this.openDirectory(userId, hostId, directory, "read");
-    const existing = await this.namesIn(driver, realDirectory);
+    const existing = (await this.entriesIn(driver, realDirectory)).map((entry) => entry.name);
 
     const plan = await planRename({
       names: paths.map((path) => posix.basename(path)),
@@ -163,8 +168,9 @@ export class RenameService {
     ignoreCase: boolean,
   ): Promise<RenameResult> {
     const directory = this.oneDirectory(paths);
-    const { driver, realDirectory, denied } = await this.openDirectory(userId, hostId, directory);
-    const existing = await this.namesIn(driver, realDirectory);
+    const { driver, realDirectory, denied, protectable } = await this.openDirectory(userId, hostId, directory);
+    const entries = await this.entriesIn(driver, realDirectory);
+    const existing = entries.map((entry) => entry.name);
 
     const plan = await planRename({
       names: paths.map((path) => posix.basename(path)),
@@ -192,6 +198,20 @@ export class RenameService {
       if (denied(posix.join(realDirectory, move.name)) || denied(posix.join(realDirectory, move.next))) {
         throw new BadRequestException(`“${move.name}” holds Trekker's own key material and cannot be renamed here.`);
       }
+    }
+
+    // Second pass, and after the first: the checks above cost nothing and
+    // refuse the whole batch, so a selection that names the config outright
+    // never reaches a walk.
+    for (const move of moves) {
+      await this.refuseProtectedInside(
+        driver,
+        entries,
+        move.name,
+        posix.join(realDirectory, move.name),
+        denied,
+        protectable,
+      );
     }
 
     return this.applyMoves(driver, directory, realDirectory, moves, existing);
@@ -369,16 +389,84 @@ export class RenameService {
     hostId: string,
     directory: string,
     intent: "read" | "write" = "write",
-  ): Promise<{ driver: HostDriver; realDirectory: string; denied: (path: string) => boolean }> {
+  ): Promise<{
+    driver: HostDriver;
+    realDirectory: string;
+    denied: (path: string) => boolean;
+    protectable: boolean;
+  }> {
     const driver = await this.driverFor(hostId, userId);
     const validated = await this.guard.validate({ driver, userId, path: directory, intent });
     const denied = await this.guard.localDenial(driver, userId);
-    return { driver, realDirectory: validated.realPath, denied };
+    // Asked once, here, rather than per entry in a batch of a thousand.
+    const protectable = await this.guard.hasLocalDenial(driver, userId);
+    return { driver, realDirectory: validated.realPath, denied, protectable };
   }
 
-  private async namesIn(driver: HostDriver, realDirectory: string): Promise<string[]> {
+  /**
+   * A protected path *inside* an entry being renamed (TRE-150).
+   *
+   * The checks above ask about the entry's own path and the name it is taking,
+   * which was the whole question while the denylist named directories: a tree
+   * holding key material was itself an entry, and refused. Since TRE-150 it is
+   * not — and renaming the directory the PM2 config sits in carries the file
+   * out from under an absolute path computed at boot, after which no entry
+   * matches it and it downloads like any other file. Delete already walks
+   * before it removes a tree (TRE-25); this is the same walk, one step earlier.
+   *
+   * Only for a directory, off the listing the caller already has: a plain file
+   * is its own path and has been asked about. Links are walked so that one
+   * standing *at* a denied path is seen; a link merely pointing at the config
+   * is not the config, moves with its parent, and resolves to the same refused
+   * path afterwards — which is why the spec asserts that one may move.
+   *
+   * And only on a host that has key material of ours. Elsewhere the predicate
+   * is false by construction, so the walk could only cost a recursive listing
+   * over SSH and refuse a large directory for a reason that does not apply to
+   * it.
+   *
+   * A walk that did not see the whole tree refuses rather than passes, whether
+   * it stopped at the ceiling or was turned away at a door. The second is the
+   * one that matters: `walkTree` records a directory it cannot list and does
+   * not descend, and since TRE-150 the directory holding the key file is not
+   * itself an entry — so a `chmod 000` on it, a write the guard permits, would
+   * otherwise hide the file from this walk and let its parent be renamed off
+   * the absolute path the denylist names. The same trick the download archive
+   * is defended against; this is that defence.
+   */
+  private async refuseProtectedInside(
+    driver: HostDriver,
+    entries: readonly FileEntry[],
+    name: string,
+    realPath: string,
+    denied: (path: string) => boolean,
+    protectable: boolean,
+  ): Promise<void> {
+    if (!protectable) return;
+    if (entries.find((entry) => entry.name === name)?.kind !== "directory") return;
+
+    const ceiling = entryCeiling();
+    const walked = await walkTree(driver, realPath, ceiling, { includeLinks: true });
+    if (walked.exceeded) {
+      throw new BadRequestException(
+        `“${name}” holds more than ${ceiling.toLocaleString("en-GB")} entries, so it cannot be checked for Trekker's own key material. Narrow the selection, or raise the ceiling on the server.`,
+      );
+    }
+    if (walked.unreadable.length > 0) {
+      throw new BadRequestException(
+        `“${name}” holds something that cannot be read, so it cannot be checked for Trekker's own key material.`,
+      );
+    }
+
+    const protectedPath = walked.paths.find(denied);
+    if (protectedPath !== undefined) {
+      throw new BadRequestException(`“${name}” holds Trekker's own key material and cannot be renamed here.`);
+    }
+  }
+
+  private async entriesIn(driver: HostDriver, realDirectory: string): Promise<FileEntry[]> {
     try {
-      return (await driver.list(realDirectory)).map((entry) => entry.name);
+      return await driver.list(realDirectory);
     } catch (error) {
       this.rethrow(error);
     }

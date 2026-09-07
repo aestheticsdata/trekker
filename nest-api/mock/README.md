@@ -200,7 +200,6 @@ evaporate silently while you work.
 relative path is made absolute). Everything of the mock — Kestrel's tree, the three remote trees,
 every fake `df`, the machines' host keys, the stamps — sits in that one gitignored folder of the
 project and nowhere else on the machine. Git does not see it (`git status --porcelain` skips
-ignored paths, which is what both deploy scripts check), and the local driver, which refuses the
-install tree whole, is told about this one folder for development only: `df-on-path.ts` passes it
-in `TREKKER_DEV_LOCAL_EXCEPTIONS`, and the path guard honours that variable under any `NODE_ENV`
-but production. The specs materialise into a temporary directory instead.
+ignored paths, which is what both deploy scripts check), and the local driver serves it like any
+other folder of the repository — the denylist names the PM2 config, not the install tree around it
+(TRE-150). The specs materialise into a temporary directory instead.

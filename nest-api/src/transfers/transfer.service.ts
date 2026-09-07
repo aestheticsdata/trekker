@@ -1,7 +1,15 @@
-import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import { isDriverError } from "@hosts/drivers/driver-error";
 import { HostDriverFactory } from "@hosts/drivers/host-driver.factory";
-import { PathGuardService } from "@hosts/path-guard/path-guard.service";
+import { PATH_REFUSED_MESSAGE, PathGuardService, type PathIntent } from "@hosts/path-guard/path-guard.service";
 import { toHttp } from "@fs/driver-http";
 import { readFreeBytes } from "@fs/mount-table";
 import { entryCeiling } from "@fs/permissions.service";
@@ -127,6 +135,12 @@ export class TransferService {
     let skippedLinks = 0;
 
     const landAs = await this.landingNames(userId, srcDriver, dstDriver, destination, input);
+
+    // What the walk finds under a selected entry, and the name an item lands
+    // under, are paths the guard never saw (TRE-52). Two predicates because the
+    // ends can be two hosts, and only a LOCAL one has key material of ours.
+    const deniedAtSource = await this.guard.localDenial(srcDriver, userId);
+    const deniedAtDestination = sameHost ? deniedAtSource : await this.guard.localDenial(dstDriver, userId);
     // Keyed by where each item will *land*, which for an ordinary transfer is
     // where it is called now. A duplicate asks about `logs (2)/app.log`, and
     // asking about `logs/app.log` instead would report a conflict with the file
@@ -149,6 +163,16 @@ export class TransferService {
       }
       skippedLinks += walked.skippedLinks;
 
+      // A protected path anywhere under the selection refuses the whole plan
+      // rather than being left out, as a delete refuses rather than skips
+      // (TRE-25): a copy to another host would land the key file where no
+      // denylist applies, and a plan quietly one item short would not say so
+      // (TRE-150).
+      const protectedPath = walked.paths.find(deniedAtSource);
+      if (protectedPath !== undefined) {
+        await this.refuseProtected(srcDriver, userId, protectedPath, "read");
+      }
+
       for (const entry of walked.details) {
         // The walk hands back absolute paths on the source; the item's name is
         // relative to the *selection*, so `top` is re-attached rather than the
@@ -156,7 +180,15 @@ export class TransferService {
         // for the root entry itself, whose relative path is the empty string.
         const suffix = entry.path.slice(validated.realPath.length).replace(/^\//, "");
         const name = suffix === "" ? top : `${top}/${suffix}`;
-        items.push(itemFrom(entry, name, targets.get(landingFor(name, landAs)) ?? null));
+        const landed = landingFor(name, landAs);
+        // The other direction: an item landing *on* the key file. The
+        // destination directory was validated; the path under it was not, and
+        // create and rename already refuse the same name (TRE-150).
+        const landing = joinPath(destination, landed);
+        if (deniedAtDestination(landing)) {
+          await this.refuseProtected(dstDriver, userId, landing, "write");
+        }
+        items.push(itemFrom(entry, name, targets.get(landed) ?? null));
       }
     }
 
@@ -181,6 +213,18 @@ export class TransferService {
       ceiling,
       landAs,
     };
+  }
+
+  /**
+   * Refuse through the guard, for a path it never saw: one the walk found, or
+   * one an item would land under. `validate()` throws on a denied real path,
+   * and the refusal is then logged, counted and worded like every other one —
+   * the explanation for the owner, the uniform line for a member. Were it ever
+   * to return, refuse anyway rather than plan around the file.
+   */
+  private async refuseProtected(driver: HostDriver, userId: string, path: string, intent: PathIntent): Promise<never> {
+    await this.guard.validate({ driver, userId, path, intent });
+    throw new ForbiddenException(PATH_REFUSED_MESSAGE);
   }
 
   /**

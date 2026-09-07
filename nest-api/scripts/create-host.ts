@@ -105,7 +105,7 @@ async function main(): Promise<void> {
     const clash = roots.find((root) => denied.some((path) => root.path === path || path.startsWith(`${root.path}/`)));
     if (clash) {
       console.warn(
-        `\n  warning  root ${clash.path} contains a denylisted directory (Trekker's own install tree, ~/.pm2 or ~/.ssh).` +
+        `\n  warning  root ${clash.path} holds a path the guard refuses (Trekker's own PM2 config, ~/.pm2 or ~/.ssh).` +
           "\n           The host will be created, but the guard refuses those paths — they hold the master key.\n",
       );
     }

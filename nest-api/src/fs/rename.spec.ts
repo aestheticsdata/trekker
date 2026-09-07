@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HttpException } from "@nestjs/common";
@@ -445,6 +445,134 @@ describe("RenameService.batch", () => {
       service.batch(USER_ID, HOST_ID, [join(dir, "id_rsa")], "^id_", "old_", false, false),
     ).rejects.toThrow();
     expect(await namesIn(dir)).toEqual(["id_rsa"]);
+  });
+});
+
+// ------------------------------------------------- the tree around a key file
+
+/**
+ * TRE-150 narrowed the local denylist from the install tree to the PM2 config
+ * inside it. A file-shaped entry is an absolute path computed at boot, and
+ * renaming the *directory* it sits in moves the file out from under it: nothing
+ * matches afterwards and the master key downloads like any other file. The
+ * checks the ticket added ask about the entry's own path and the name it takes,
+ * and a directory holding the file is neither.
+ *
+ * Delete has walked before removing a tree since TRE-25 for the same class of
+ * reason; these are that walk, one operation earlier.
+ */
+describe("renaming the directory a denied file sits in", () => {
+  const CONFIG = "ecosystem.config.js";
+
+  /** A deploy root holding the config, and the denylist naming only the file. */
+  async function deployTree(name: string): Promise<{ dir: string; denied: string }> {
+    const dir = join(base, name);
+    await mkdir(join(dir, "deploy"), { recursive: true });
+    await writeFile(join(dir, "deploy", CONFIG), "TREKKER_MASTER_KEY=1:secret");
+    await writeFile(join(dir, "deploy", "notes.txt"), "ordinary");
+    return { dir, denied: await realpath(join(dir, "deploy", CONFIG)) };
+  }
+
+  it("refuses the single rename, and the file stays where the entry names it", async () => {
+    const { dir, denied } = await deployTree("one");
+    const service = serviceFor(writeRoot(), [denied]);
+
+    await expect(service.renameOne(USER_ID, HOST_ID, join(dir, "deploy"), "deploy-moved")).rejects.toThrow(
+      /key material/,
+    );
+    expect(await namesIn(dir)).toEqual(["deploy"]);
+    expect(await readFile(denied, "utf8")).toBe("TREKKER_MASTER_KEY=1:secret");
+  });
+
+  it("refuses the batch, and nothing in it moves", async () => {
+    const { dir, denied } = await deployTree("batch");
+    await mkdir(join(dir, "logs"));
+    const service = serviceFor(writeRoot(), [denied]);
+
+    await expect(
+      service.batch(USER_ID, HOST_ID, [join(dir, "deploy"), join(dir, "logs")], "^", "old-", false, false),
+    ).rejects.toThrow(/key material/);
+    expect(await namesIn(dir)).toEqual(["deploy", "logs"]);
+  });
+
+  it("refuses a grandparent too — the walk is the whole tree, not one level", async () => {
+    const dir = join(base, "deep");
+    await mkdir(join(dir, "srv", "trekker", "deploy"), { recursive: true });
+    await writeFile(join(dir, "srv", "trekker", "deploy", CONFIG), "key");
+    const service = serviceFor(writeRoot(), [await realpath(join(dir, "srv", "trekker", "deploy", CONFIG))]);
+
+    await expect(service.renameOne(USER_ID, HOST_ID, join(dir, "srv"), "srv-moved")).rejects.toThrow(/key material/);
+    expect(await namesIn(dir)).toEqual(["srv"]);
+  });
+
+  it("lets a link to it move, because a link is not the file", async () => {
+    // The boundary, stated so it is not mistaken for an oversight. The walk
+    // includes links and asks about the path each one *has*, not the path it
+    // points at — which is the right question here: renaming the directory
+    // above a link moves the link, while the file stays exactly where the
+    // denylist entry names it. Following the link later resolves to that same
+    // path, and `validate()` realpaths before it decides, so the file is
+    // refused through the link as surely as through its own name.
+    const { dir, denied } = await deployTree("linked");
+    await mkdir(join(dir, "shortcuts"));
+    await symlink(denied, join(dir, "shortcuts", "config"));
+    const service = serviceFor(writeRoot(), [denied]);
+
+    const result = await service.renameOne(USER_ID, HOST_ID, join(dir, "shortcuts"), "elsewhere");
+
+    expect(result.renamed).toBe(1);
+    expect(await readFile(denied, "utf8")).toBe("TREKKER_MASTER_KEY=1:secret");
+    expect(await namesIn(dir)).toEqual(["deploy", "elsewhere"]);
+  });
+
+  it("refuses when the walk was turned away at a door", async () => {
+    /**
+     * The bypass the first version of this check had, and the reason the walk
+     * now refuses on `unreadable` as well as on `exceeded`.
+     *
+     * `walkTree` records a directory it cannot list and does not descend, so a
+     * `chmod 000` on the directory holding the config — a write the guard
+     * permits, since TRE-150 makes only the FILE an entry — empties it out of
+     * `walked.paths`. The rename would then move the key material off the
+     * absolute path the denylist names, computed once at boot, after which
+     * nothing matches it. Exactly the trick the download archive is defended
+     * against, one operation over.
+     */
+    const { dir, denied } = await deployTree("shut");
+    const service = serviceFor(writeRoot(), [denied]);
+    await chmod(join(dir, "deploy"), 0o000);
+
+    try {
+      await expect(service.renameOne(USER_ID, HOST_ID, dir, "moved")).rejects.toThrow(/cannot be read/);
+      expect(await namesIn(base)).toContain("shut");
+    } finally {
+      // Restorable, or the temp tree cannot be torn down afterwards.
+      await chmod(join(dir, "deploy"), 0o755);
+    }
+  });
+
+  it("renames a sibling directory that holds nothing protected", async () => {
+    // The other half of the claim, and the reason the ticket exists: the tree
+    // is served now, so everything in it that is not the file still works.
+    const { dir, denied } = await deployTree("sibling");
+    await mkdir(join(dir, "releases"));
+    await writeFile(join(dir, "releases", "app.tar.gz"), "bytes");
+    const service = serviceFor(writeRoot(), [denied]);
+
+    const result = await service.renameOne(USER_ID, HOST_ID, join(dir, "releases"), "releases-2026");
+
+    expect(result.renamed).toBe(1);
+    expect(await namesIn(dir)).toEqual(["deploy", "releases-2026"]);
+  });
+
+  it("renames a plain file beside the protected one", async () => {
+    const { dir, denied } = await deployTree("plain");
+    const service = serviceFor(writeRoot(), [denied]);
+
+    const result = await service.renameOne(USER_ID, HOST_ID, join(dir, "deploy", "notes.txt"), "notes.md");
+
+    expect(result.renamed).toBe(1);
+    expect(await namesIn(join(dir, "deploy"))).toEqual([CONFIG, "notes.md"]);
   });
 });
 
