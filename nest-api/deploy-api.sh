@@ -351,10 +351,14 @@ EOF
     'bash -s' << 'EOF' || log "⚠️  Release pruning skipped (non-fatal)"
 set -Eeuo pipefail
 cd "$RELEASES_DIR"
-ls -1d release-* 2>/dev/null | sort -r | tail -n +"$((KEEP + 1))" | while read -r old; do
-  rm -rf -- "$old" && echo "🗑  $old"
-done
-echo "✅ $(ls -1d release-* 2>/dev/null | wc -l) release(s) kept"
+# `find` exits 0 on an empty directory; `ls release-*` exits 2 there, which under
+# pipefail aborted this block before it said anything. Empty is the normal state
+# wherever the switch moves the release into place instead of pointing at it.
+removed=0
+while read -r old; do
+  if rm -rf -- "$old"; then echo "🗑  $old"; removed=$((removed + 1)); else echo "⚠️  could not remove $old" >&2; fi
+done < <(find . -mindepth 1 -maxdepth 1 -name 'release-*' -printf '%f\n' | sort -r | tail -n +"$((KEEP + 1))")
+echo "✅ $removed removed, $(find . -mindepth 1 -maxdepth 1 -name 'release-*' | wc -l) kept"
 EOF
 
   write_deploy_log "$ZEUS_ROLE" || log "⚠️  Deploy changelog update skipped (non-fatal)"
