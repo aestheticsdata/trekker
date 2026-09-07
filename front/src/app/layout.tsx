@@ -24,10 +24,38 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Trekker",
   description: "A file explorer for the servers you actually run.",
+  /*
+   * The peak is monochrome and bleeds to the edges of its 32×32 grid — no rounded navy backplate
+   * any more — so the ink has to follow the browser chrome instead of supplying its own contrast.
+   * `-dark` names the ink, not the scheme: the dark glyph is what a *light* tab strip gets.
+   *
+   * The undecorated entry is first and repeated last because `media` on `rel="icon"` is not
+   * honoured by every engine; one that ignores it lands on `trekker.svg` from either end, and that
+   * file carries its own `prefers-color-scheme` rule inside the SVG as the second line of defence.
+   *
+   * `trekker-32.png` is gone from this list rather than kept beside the SVG. A vector icon needs no
+   * sized raster alongside it, and while that entry was declared, any client preferring a raster
+   * rendered it instead of the file the identity actually lives in.
+   *
+   * `apple` and the manifest icons still carry the old navy set. iOS ignores SVG for a home-screen
+   * icon and composites transparency onto a solid ground, and the manifest's `maskable` entry
+   * requires an opaque full-bleed tile Android may crop to any silhouette — so a mark drawn to have
+   * nothing behind it is not a drop-in for either. `themeColor` below and the manifest's
+   * `theme_color` / `background_color` still match that set, not the favicon.
+   */
   icons: {
     icon: [
       { url: "/favicon/trekker.svg", type: "image/svg+xml" },
-      { url: "/favicon/trekker-32.png", sizes: "32x32", type: "image/png" },
+      {
+        url: "/favicon/trekker-dark.svg",
+        type: "image/svg+xml",
+        media: "(prefers-color-scheme: light)",
+      },
+      {
+        url: "/favicon/trekker.svg",
+        type: "image/svg+xml",
+        media: "(prefers-color-scheme: dark)",
+      },
     ],
     apple: [{ url: "/favicon/trekker-180.png" }],
   },

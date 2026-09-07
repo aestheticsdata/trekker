@@ -81,33 +81,53 @@ export function TopBar({
       data-testid="top-bar"
     >
       <span className="flex items-center gap-2.25 pr-1.5 select-none">
-        {/* The favicon's dual-pane mark, at chrome size. */}
+        {/*
+         * The favicon's peak, at chrome size — same geometry as `public/favicon/trekker.svg`.
+         *
+         * No backplate any more. The mark bleeds to the edges of its grid and carries no tile of
+         * its own, so the bar itself is the ground: one shape in `brand`, where there used to be a
+         * `line` rounded square under two bars in `brand` and `accent`.
+         *
+         * The two notches are a mask rather than a clipped path — they stop inside the mass, so
+         * they do not cut it into separate pieces the way Zeus's full-width voids do. The `id` is
+         * safe to hard-code because the top bar is rendered once per document.
+         */}
         <svg
           viewBox="0 0 32 32"
           aria-hidden="true"
           className="size-3.75 shrink-0"
         >
-          <rect
-            width="32"
-            height="32"
-            rx="7"
-            className="fill-line"
-          />
-          <rect
-            x="6"
-            y="7"
-            width="8.4"
-            height="18"
-            rx="1.4"
+          <mask
+            id="trekker-mark-notches"
+            maskUnits="userSpaceOnUse"
+            x="-2"
+            y="-2"
+            width="36"
+            height="36"
+          >
+            <path
+              d="M0.5 30.5 L10.8 1.5 L18.2 17.6 L22.4 9.4 L31.5 30.5 Z"
+              fill="#fff"
+            />
+            <rect
+              x="-2"
+              y="9.3"
+              width="13"
+              height="3.4"
+              fill="#000"
+            />
+            <rect
+              x="-2"
+              y="19.3"
+              width="25"
+              height="3.4"
+              fill="#000"
+            />
+          </mask>
+          <path
+            d="M0.5 30.5 L10.8 1.5 L18.2 17.6 L22.4 9.4 L31.5 30.5 Z"
+            mask="url(#trekker-mark-notches)"
             className="fill-brand"
-          />
-          <rect
-            x="17.6"
-            y="7"
-            width="8.4"
-            height="18"
-            rx="1.4"
-            className="fill-accent"
           />
         </svg>
         <span
