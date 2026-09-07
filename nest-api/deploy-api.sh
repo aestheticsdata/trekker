@@ -30,6 +30,12 @@ NEST_DIR="$API_ROOT/api"
 APP_DIR="$NEST_DIR/nest-api"
 NEST_BACKUP_DIR="$API_ROOT/api.bak"
 NEST_RELEASES_DIR="$API_ROOT/api-releases"
+# How many releases stay under $NEST_RELEASES_DIR after a successful switch. The directory
+# is history only — what is live is a copy of a release, not a link into it — so
+# pruning it can never touch what is served. Nothing bounded it before TRE-149,
+# where Trekker's had reached 86 entries. This one is emptied by its own switch
+# and holds nothing between deploys; the bound is for the day that changes.
+KEEP_RELEASES="${KEEP_RELEASES:-5}"
 ECOSYSTEM_FILE="$SCRIPT_DIR/ecosystem.config.js"
 
 remote_rollback() {
@@ -333,6 +339,23 @@ exit 1
 EOF
 
   trap - ERR
+
+  # After the switch and the health check, and non-fatal: a prune that failed
+  # must not turn a deploy that worked into one that reports failure. Release
+  # names carry their timestamp, so newest-first order is a reverse sort, and
+  # what gets removed is everything after the first N of it.
+  log "➡️  Pruning releases, keeping the last $KEEP_RELEASES"
+  ssh "$TREKKER_DEPLOY_HOST" \
+    RELEASES_DIR="$NEST_RELEASES_DIR" \
+    KEEP="$KEEP_RELEASES" \
+    'bash -s' << 'EOF' || log "⚠️  Release pruning skipped (non-fatal)"
+set -Eeuo pipefail
+cd "$RELEASES_DIR"
+ls -1d release-* 2>/dev/null | sort -r | tail -n +"$((KEEP + 1))" | while read -r old; do
+  rm -rf -- "$old" && echo "🗑  $old"
+done
+echo "✅ $(ls -1d release-* 2>/dev/null | wc -l) release(s) kept"
+EOF
 
   write_deploy_log "$ZEUS_ROLE" || log "⚠️  Deploy changelog update skipped (non-fatal)"
   zeus_report "success" || log "⚠️  The deploy registry was not told about this deploy (non-fatal)"
