@@ -18,6 +18,11 @@ WEB_ROOT="$TREKKER_REMOTE_ROOT"
 CURRENT_DIR="$WEB_ROOT/public_html"
 BACKUP_DIR="$WEB_ROOT/public_html.bak"
 RELEASES_DIR="$WEB_ROOT/front-releases"
+# How many releases stay under $RELEASES_DIR after a successful switch. That
+# directory is history only — $CURRENT_DIR is a copy of the release, not a link
+# into it — so pruning it can never touch what is live. Nothing bounded it before
+# TRE-149 and it had reached 86 entries; harmless at ~500 MB each, but unbounded.
+KEEP_RELEASES="${KEEP_RELEASES:-5}"
 # The deployed unit is the whole pnpm workspace — the lockfile lives at the repo
 # root, so shipping only front/ leaves --frozen-lockfile nothing to work from.
 # $CURRENT_DIR is therefore the workspace root and the Next app sits in front/.
@@ -141,10 +146,18 @@ mkdir -p "$STAGING_DIR"
 EOF
 
   log "➡️  Uploading workspace sources"
+  # `.mock` and `e2e` are dev-only and nothing the server builds reads them.
+  # `.mock` is the reason this comment exists: it is the demo's fake filesystem,
+  # 145 MB on disk and 180 GB apparent, because the files it fakes are sparse.
+  # rsync does not keep sparseness by default, so one deploy wrote 60 GB of zeros
+  # onto the server and filled the disk (TRE-149). It is gitignored — which rsync
+  # does not read — and it had never been deployed before that day.
   rsync -az --delete \
     --exclude ".git" \
     --exclude ".next" \
     --exclude "node_modules" \
+    --exclude ".mock" \
+    --exclude "e2e" \
     --exclude "out" \
     --exclude "dist" \
     --exclude "generated" \
@@ -214,6 +227,23 @@ exit 1
 EOF
 
   trap - ERR
+
+  # After the switch and the health check, and non-fatal: a prune that failed
+  # must not turn a deploy that worked into one that reports failure. Release
+  # names carry their timestamp, so newest-first order is a reverse sort, and
+  # what gets removed is everything after the first N of it.
+  log "➡️  Pruning releases, keeping the last $KEEP_RELEASES"
+  ssh "$TREKKER_DEPLOY_HOST" \
+    RELEASES_DIR="$RELEASES_DIR" \
+    KEEP="$KEEP_RELEASES" \
+    'bash -s' << 'EOF' || log "⚠️  Release pruning skipped (non-fatal)"
+set -Eeuo pipefail
+cd "$RELEASES_DIR"
+ls -1d release-* 2>/dev/null | sort -r | tail -n +"$((KEEP + 1))" | while read -r old; do
+  rm -rf -- "$old" && echo "🗑  $old"
+done
+echo "✅ $(ls -1d release-* 2>/dev/null | wc -l) release(s) kept"
+EOF
 
   write_deploy_log "$ZEUS_ROLE" || log "⚠️  Deploy changelog update skipped (non-fatal)"
   zeus_report "success" || log "⚠️  The deploy registry was not told about this deploy (non-fatal)"

@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { PrismaClient } from "../generated/prisma/client";
 import { parseDatabaseUrl } from "../src/config/database-url";
@@ -67,6 +68,30 @@ export function mockHome(): string {
 
 export function treeRoot(): string {
   return join(mockHome(), "tree");
+}
+
+/**
+ * Removes the mock home whole — the four trees, the fake `df`, the keys, the
+ * stamps. `df-on-path.ts` calls it when the API it wrapped exits, so the mock
+ * exists while `pnpm dev` or a film is running and at no other time.
+ *
+ * It costs 145 MB on disk and claims 180 GB, because every big file in it is
+ * sparse — the right way to fake a 2 GB archive, and the wrong thing to leave
+ * lying in a folder that gets copied: a copy that does not keep sparseness
+ * writes the zeros out for real, which is how one deploy filled the server
+ * (TRE-149). The deploy no longer ships it; this makes sure there is nothing to
+ * ship. The next `pnpm dev` finds the tree absent and writes it again.
+ *
+ * Three paths are refused whatever `TREKKER_MOCK_HOME` says. A recursive
+ * remove of any of them is not a teardown, and the spec that points the home at
+ * a temporary directory is the reason the variable exists.
+ */
+export function removeMockHome(): void {
+  const home = mockHome();
+  if (home === sep || home === homedir() || home === installRoot()) {
+    throw new MockRefusal(`${home} is not a mock home — refusing to remove it`);
+  }
+  rmSync(home, { recursive: true, force: true });
 }
 
 /**

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { startRemoteMachines } from "./sshd";
-import { mockHome } from "./env";
+import { mockHome, removeMockHome } from "./env";
 import { dfShimPath } from "./tree";
 
 /**
@@ -57,11 +57,26 @@ void (async () => {
   process.on("SIGINT", () => forward("SIGINT"));
   process.on("SIGTERM", () => forward("SIGTERM"));
 
+  // The machines first — they serve from inside the mock home — and then the
+  // home itself, so nothing of the mock outlives the process it was made for.
+  // It is a laptop artefact: 145 MB on disk, 180 GB apparent, every big file
+  // in it sparse. Left standing between runs it is one careless copy away from
+  // being written out for real, which is how one deploy filled the server
+  // (TRE-149). `dev-up.ts` writes it again on the next start.
+  const tearDown = async (): Promise<void> => {
+    await stop();
+    try {
+      removeMockHome();
+      console.log(`\ndf-on-path: removed ${mockHome()} — pnpm dev writes it again`);
+    } catch (error) {
+      console.error(`df-on-path: the mock home was not removed: ${(error as Error).message}`);
+    }
+  };
   child.on("exit", (code, signal) => {
-    void stop().then(() => process.exit(code ?? (signal ? 1 : 0)));
+    void tearDown().then(() => process.exit(code ?? (signal ? 1 : 0)));
   });
   child.on("error", (error) => {
     console.error(`df-on-path: could not start ${command}: ${error.message}`);
-    void stop().then(() => process.exit(1));
+    void tearDown().then(() => process.exit(1));
   });
 })();
