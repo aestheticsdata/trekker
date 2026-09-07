@@ -359,11 +359,17 @@ export class Cursor {
     await sleep(PACE.settle + (options.dwell ?? 0));
   }
 
-  /** Human-rate typing: jittered, and slower after the punctuation a hand pauses on. */
-  async type(text: string): Promise<void> {
+  /**
+   * Human-rate typing: jittered, and slower after the punctuation a hand pauses on.
+   *
+   * `rate` stretches the gaps for one call. The film's usual rate is right for a path nobody
+   * reads letter by letter and wrong for a short command the beat exists to show being written,
+   * and `DEMO_SPEED` cannot serve both — it retimes all 333 seconds at once.
+   */
+  async type(text: string, rate = 1): Promise<void> {
     for (const character of text) {
       await this.page.keyboard.type(character);
-      const pause = PACE.keystroke * (0.55 + jitter() * 0.9) + (/[ .,:—]/.test(character) ? 45 : 0);
+      const pause = PACE.keystroke * rate * (0.55 + jitter() * 0.9) + (/[ .,:—]/.test(character) ? 45 : 0);
       await sleep(pause);
     }
   }

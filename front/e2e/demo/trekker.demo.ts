@@ -803,20 +803,47 @@ test("trekker, end to end", async ({ demo }) => {
   // The foot strip is a prompt, and it runs on the active pane's machine: a click in it is what
   // expands it, and the prompt reads `deploy@marlow`. ⚠️ Read-only intents only. `rm` and
   // `chmod` open real dialogs from here.
+  //
+  // Paced as its own scene rather than as a step, because the first cut lost it: six characters at
+  // the film's usual rate are over in 350ms, and `press` fires the key before its own pause, so
+  // the finished `ls -al` stood for a single frame. What a viewer saw was a panel opening and a
+  // listing appearing, with no command ever written. Every hold below is there to be read.
   await demo.click(page.getByTestId("terminal-input"), { aim: "text" });
   const terminal = page.getByTestId("terminal");
   await expect(terminal.getByTestId("terminal-output")).toBeVisible();
-  await demo.dwell(800);
-  await demo.type("ls -al");
+  // The empty scrollback carries the panel's own thesis — "a restricted set, not a shell" — and
+  // this is the one moment in the film it is on screen.
+  await demo.dwell(1500);
+  // In two parts and at two and a half times the rate, the flag held apart from the verb the way
+  // a hand holds it, and then the whole line held still before it is sent.
+  await demo.type("ls", 2.5);
+  await demo.dwell(520);
+  await demo.type(" -al", 2.5);
+  await demo.dwell(1600);
   await demo.press("Enter");
-  await expect(terminal.getByTestId("terminal-line").first()).toBeVisible({ timeout: 15_000 });
-  await demo.dwell(2800);
+  // `data-kind="output"`, not `.first()`: the echo is written synchronously and carries the same
+  // testid, so the first line is visible the instant Enter lands. Waiting on that would let the
+  // hold below spend itself on an echo and cut away before the listing came back over SSH.
+  await expect(terminal.locator('[data-testid="terminal-line"][data-kind="output"]').first()).toBeVisible({
+    timeout: 15_000,
+  });
+  await demo.dwell(3400);
+  // ⎋ is handled on the panel itself rather than on the window, so it only lands while the caret
+  // is still in the prompt: nothing may click elsewhere between the listing and this.
   await demo.press("Escape");
   await expect(terminal.getByTestId("terminal-output")).toHaveCount(0);
-  await demo.dwell(700);
+  // Off-frame on the same beat the panel drops, so the pointer's teleport hides under the one
+  // change the eye is already following. Its home is (120, 620) — on the `Logs` favourite, which
+  // answers a hover with a tooltip and a delete `✕` over the closing frames of the film.
+  await demo.park(-40, -40);
+  await demo.dwell(1400);
 
   // ── 14 ── At rest ────────────────────────────────────────────────────────
-  // Two machines side by side, Marlow's treemap under them, pointer parked: the closing frames.
-  await demo.park();
-  await demo.dwell(1800);
+  // Two machines side by side, the treemap back under them — ⎋ remounts the strip the terminal
+  // had taken the slot of — and no pointer at all: the closing frames.
+  await demo.dwell(2200);
+  // One last pointer move, which nobody sees. The screencast emits a frame only when something is
+  // drawn and the recorder holds its final frame for a single sixtieth of a second, so on a still
+  // closing shot the hold above is what would be lost.
+  await demo.park(-41, -41);
 });

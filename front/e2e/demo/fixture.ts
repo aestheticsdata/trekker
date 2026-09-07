@@ -209,8 +209,9 @@ export class Demo {
     await sleep(PACE.settle);
   }
 
-  type(text: string): Promise<void> {
-    return this.cursor.type(text);
+  /** `rate` slows one line without retiming the film — see `Cursor.type`. */
+  type(text: string, rate?: number): Promise<void> {
+    return this.cursor.type(text, rate);
   }
 
   press(key: string, options?: GestureOptions): Promise<void> {
