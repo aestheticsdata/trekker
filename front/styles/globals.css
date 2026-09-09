@@ -698,11 +698,40 @@ body {
    * string with `path` pushing history (TRE-18) — so a swipe back is a real
    * navigation here and not ours to take away in a rule about a visual effect.
    *
-   * On `*` because there is no selector for "is a scroll container", and the
-   * property is inert on everything that is not one. It costs nothing on the
-   * other elements and needs nothing remembered on the next scroller added.
+   * ⚠️ **Not on `*` (TRE-153).** That was written believing the property is
+   * inert on everything that is not a scroll container. It is — but `overflow:
+   * hidden` *makes* an element one, so `truncate` does, and `none` says exactly
+   * "do not chain this wheel to my ancestors". Every clipped cell in the app was
+   * therefore quietly eating the wheel: a pane scrolled when the pointer stood
+   * on the size column and did nothing when it stood on the file name. Measured
+   * over CDP, one notch of 120px inside a 300px scroller moved it 0px over a
+   * `truncate` span and 120px over a plain one — and 0px over an `overflow:
+   * hidden` box with nothing overflowing at all, which is the part to remember:
+   * Chrome asks whether the box *is* a scroll container, never whether it has
+   * anything to scroll.
+   *
+   * So the rule names the boxes that can actually bounce — a clipping box
+   * cannot, having nothing to drag past — and there is still no selector for
+   * "is a scroll container". There is one for how this codebase builds them:
+   * every scroller in `src` is a Tailwind `overflow-y-auto`, so the utilities
+   * are what this matches, and the next scroller added is covered by having
+   * been written the way scrollers are written here.
+   *
+   * The `x` utilities are left out for the same reason `truncate` is: a box
+   * that scrolls sideways has no vertical bounce to remove, and marking it
+   * would swallow the vertical wheel exactly as before — `delete-modal`'s
+   * command block is one, and it sits inside a scrolling list.
+   *
+   * `:where()` keeps the specificity at zero, as `*` had it, so a component can
+   * still override this with a utility.
    */
-  * {
+  :where(
+    html,
+    [class*="overflow-auto"],
+    [class*="overflow-y-auto"],
+    [class*="overflow-scroll"],
+    [class*="overflow-y-scroll"]
+  ) {
     overscroll-behavior-y: none;
   }
 }
