@@ -1,5 +1,7 @@
+import { describe } from "@e2e/demo/events";
 import { ease, glideMs, jitter, ms, PACE, sleep } from "@e2e/demo/pacing";
 
+import type { Box, EventLog, Target } from "@e2e/demo/events";
 import type { Locator, Page } from "@playwright/test";
 
 /**
@@ -24,7 +26,8 @@ import type { Locator, Page } from "@playwright/test";
  *
  * Set `DEMO_CURSOR=off` to skip the overlay entirely — the right setting when
  * filming a headed browser with a screen recorder, where the OS already draws
- * a real one.
+ * a real one, and for a take an edit will redraw the pointer over from
+ * `events.json` (the landing page's Remotion films): two arrows is one too many.
  */
 
 export const CURSOR_ENABLED = process.env.DEMO_CURSOR !== "off";
@@ -190,7 +193,7 @@ interface Point {
  * edge, because a full-width row is not clicked in the middle by a hand — the
  * eye goes to the title, and the middle of a 1660px row is empty space.
  */
-function aimAt(box: { x: number; y: number; width: number; height: number } | null, aim: Aim): Point | null {
+function aimAt(box: Box | null, aim: Aim): Point | null {
   if (!box) return null;
   const x = aim === "text" ? box.x + Math.min(box.width * 0.5, 26) : box.x + box.width / 2;
   return { x, y: box.y + box.height / 2 };
@@ -207,14 +210,22 @@ export class Cursor {
   /** Flipped per move so consecutive glides do not all bow the same way. */
   private bow = 1;
 
-  private constructor(private readonly page: Page) {}
+  /**
+   * Every step, press and keystroke is also written to the take's event log (`events.ts`),
+   * which is how an edit made afterwards knows where the hand was — the arrow drawn here is
+   * baked into the pixels, the log is what lets a cut redraw it.
+   */
+  private constructor(
+    private readonly page: Page,
+    private readonly log: EventLog,
+  ) {}
 
   /** Must be called before the first navigation — init scripts are per-context. */
-  static async install(page: Page): Promise<Cursor> {
+  static async install(page: Page, log: EventLog): Promise<Cursor> {
     if (CURSOR_ENABLED) {
       await page.addInitScript(installOverlay, { hideNative: true } satisfies CursorOptions);
     }
-    return new Cursor(page);
+    return new Cursor(page, log);
   }
 
   /** Put the pointer somewhere with no animation, before the take really starts. */
@@ -222,6 +233,7 @@ export class Cursor {
     this.x = x;
     this.y = y;
     await this.page.mouse.move(x, y);
+    this.log.pointer(x, y);
   }
 
   /**
@@ -254,6 +266,7 @@ export class Cursor {
       const px = inv * inv * from.x + 2 * inv * t * cx + t * t * x;
       const py = inv * inv * from.y + 2 * inv * t * cy + t * t * y;
       await this.page.mouse.move(px, py);
+      this.log.pointer(px, py);
 
       // Held to the wall clock rather than to a fixed sleep: a slow CDP round
       // trip must eat into the next frame's wait, not stretch the whole glide.
@@ -265,9 +278,10 @@ export class Cursor {
     this.y = y;
   }
 
-  /** The point on a locator the pointer should travel to. */
-  private async pointOn(target: Locator, aim: Aim): Promise<{ x: number; y: number }> {
-    let point = aimAt(await target.boundingBox(), aim);
+  /** The point on a locator the pointer should travel to, and the box it was worked out from. */
+  private async pointOn(target: Locator, aim: Aim): Promise<{ point: Point; box: Box }> {
+    let box = await target.boundingBox();
+    let point = aimAt(box, aim);
     const view = this.page.viewportSize();
 
     // The test is on the POINT, never on the box. A scroll container is taller
@@ -282,26 +296,35 @@ export class Cursor {
     if (!point || !view || !inside(point, view)) {
       await target.evaluate((node) => node.scrollIntoView({ behavior: "smooth", block: "center" }));
       await sleep(PACE.navigate);
-      point = aimAt(await target.boundingBox(), aim);
+      box = await target.boundingBox();
+      point = aimAt(box, aim);
     }
     if (!point) {
       await target.scrollIntoViewIfNeeded();
-      point = aimAt(await target.boundingBox(), aim);
+      box = await target.boundingBox();
+      point = aimAt(box, aim);
     }
-    if (!point) throw new Error(`demo: ${target} has no box to point at — is it visible?`);
-    return point;
+    if (!point || !box) throw new Error(`demo: ${target} has no box to point at — is it visible?`);
+    return { point, box };
   }
 
-  async moveTo(target: Locator, options: GestureOptions = {}): Promise<void> {
+  /**
+   * Travel to a target, and say what it was: its testid, its `data-*` member and the box the
+   * pointer was aimed at. Read here, before any press — after one, a submit button or a menu
+   * option is already gone, and a locator waiting for it would hold the take.
+   */
+  async moveTo(target: Locator, options: GestureOptions = {}): Promise<Target> {
     // Bounded, deliberately. Under the test runner `waitFor` inherits the TEST timeout — eight
     // minutes here — so a hover aimed at an element that is not there (a tooltip trigger the
     // corpus did not fill, a chart mark the chart did not draw) held a take frozen for eight
     // minutes and then failed with a line number. Fifteen seconds is longer than any screen in
     // these consoles takes to draw, and short enough that the failure says what it is.
     await target.waitFor({ state: "visible", timeout: 15_000 });
-    const point = await this.pointOn(target, options.aim ?? "center");
+    const { point, box } = await this.pointOn(target, options.aim ?? "center");
+    const described = await describe(target, box);
     await this.glideTo(point.x, point.y);
     if (options.dwell) await sleep(options.dwell);
+    return described;
   }
 
   /**
@@ -338,8 +361,8 @@ export class Cursor {
    * normally provides is bought back by the `waitFor` and the scroll in
    * `pointOn` above, plus the hit test here.
    */
-  async click(target: Locator, options: GestureOptions = {}): Promise<void> {
-    await this.moveTo(target, options);
+  async click(target: Locator, options: GestureOptions = {}): Promise<Target> {
+    let described = await this.moveTo(target, options);
 
     // Only on a press, never on a hover. A hover that lands a few pixels off
     // shows the wrong tooltip for a moment; a press that lands on the wrong
@@ -349,14 +372,17 @@ export class Cursor {
     if (!(await this.paintedAt(target, { x: this.x, y: this.y }))) {
       await target.evaluate((node) => node.scrollIntoView({ behavior: "smooth", block: "center" }));
       await sleep(PACE.navigate);
-      await this.moveTo(target, { aim: options.aim });
+      described = await this.moveTo(target, { aim: options.aim });
     }
 
     await sleep(PACE.aim);
     await this.page.mouse.down();
+    this.log.down(this.x, this.y);
     await sleep(70);
     await this.page.mouse.up();
+    this.log.up();
     await sleep(PACE.settle + (options.dwell ?? 0));
+    return described;
   }
 
   /**
@@ -365,10 +391,14 @@ export class Cursor {
    * `rate` stretches the gaps for one call. The film's usual rate is right for a path nobody
    * reads letter by letter and wrong for a short command the beat exists to show being written,
    * and `DEMO_SPEED` cannot serve both — it retimes all 333 seconds at once.
+   *
+   * `secret` logs every keystroke as a bullet: a password field shows bullets on camera, and the
+   * event log must not hold what the picture hides.
    */
-  async type(text: string, rate = 1): Promise<void> {
+  async type(text: string, rate = 1, secret = false): Promise<void> {
     for (const character of text) {
       await this.page.keyboard.type(character);
+      this.log.key(secret ? "•" : character);
       const pause = PACE.keystroke * rate * (0.55 + jitter() * 0.9) + (/[ .,:—]/.test(character) ? 45 : 0);
       await sleep(pause);
     }
@@ -376,6 +406,7 @@ export class Cursor {
 
   async press(key: string, options: GestureOptions = {}): Promise<void> {
     await this.page.keyboard.press(key);
+    this.log.key(key);
     await sleep(PACE.settle + (options.dwell ?? 0));
   }
 

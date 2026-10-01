@@ -52,6 +52,38 @@ const OUTPUT_FPS = Number(process.env.DEMO_FPS ?? 60);
 /** x264 quality. 16 is high; every point down roughly doubles the file. */
 const CRF = Number(process.env.DEMO_CRF ?? 16);
 
+/**
+ * Width and height of a JPEG, off its frame header. The screencast's own
+ * metadata reports the page in CSS pixels, not the size of the picture it sent,
+ * so this is the only honest source for the second — which `events.json`
+ * records, for an edit that zooms and needs to know what pixels it has.
+ *
+ * MEASURED, because asking is not getting: a headless browser caps its
+ * screencast at CSS pixels whatever `maxWidth` says — 1920x1080 frames at a 2x
+ * device scale, in the old headless shell and in the new headless mode alike,
+ * and through `Emulation.setDeviceMetricsOverride({ scale: 2 })` too. Only a
+ * headed window sends the 2x surface, and on a laptop that window is squeezed
+ * by the screen (a 1000x1266 take) and takes the focus from whoever is at the
+ * machine. So the film is viewport-sized, and an edit that zooms keeps its
+ * zooms modest.
+ */
+function jpegSize(data: Buffer): { width: number; height: number } | null {
+  let at = 2;
+  while (at + 9 < data.length) {
+    if (data[at] !== 0xff) {
+      at += 1;
+      continue;
+    }
+    const marker = data[at + 1];
+    // SOF0 to SOF3: baseline, extended, progressive, lossless — any of them carries the size.
+    if (marker >= 0xc0 && marker <= 0xc3) {
+      return { height: data.readUInt16BE(at + 5), width: data.readUInt16BE(at + 7) };
+    }
+    at += 2 + data.readUInt16BE(at + 2);
+  }
+  return null;
+}
+
 interface Frame {
   file: string;
   /** Chromium's wall-clock timestamp for the frame, in seconds. */
@@ -63,6 +95,8 @@ export class CdpRecorder {
   private readonly writes: Promise<unknown>[] = [];
   private index = 0;
   private stopped = false;
+  /** The size the first frame really came at — see `jpegSize`. */
+  frameSize: { width: number; height: number } | null = null;
 
   private constructor(
     private readonly cdp: CDPSession,
@@ -84,17 +118,20 @@ export class CdpRecorder {
       if (recorder.stopped) return;
 
       const file = join(frameDir, `f${String(recorder.index++).padStart(6, "0")}.jpg`);
+      const data = Buffer.from(event.data, "base64");
+      recorder.frameSize ??= jpegSize(data);
       recorder.frames.push({ file, at: event.metadata.timestamp ?? 0 });
-      recorder.writes.push(writeFile(file, Buffer.from(event.data, "base64")));
+      recorder.writes.push(writeFile(file, data));
     });
 
     const viewport = page.viewportSize() ?? { width: 1920, height: 1080 };
     await cdp.send("Page.startScreencast", {
       format: "jpeg",
       quality: FRAME_QUALITY,
-      // In CSS pixels. The compositor surface is twice this at the default 2x,
-      // so Chromium downsamples into the frame and the result is supersampled —
-      // the same trick that made the old path look better, for free.
+      // In CSS pixels — the most a headless screencast will send anyway (see
+      // `jpegSize`). The 2x surface is downsampled into that frame, so the
+      // result is supersampled, the same trick that made the old path look
+      // better, for free.
       //
       // Rounded down to even, as Playwright's own screencast does: yuv420p
       // cannot represent an odd dimension, so an odd viewport would fail the

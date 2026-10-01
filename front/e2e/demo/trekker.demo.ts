@@ -240,6 +240,9 @@ test("trekker, end to end", async ({ demo }) => {
   ).toBeVisible();
   demo.shot("two-panes");
   await demo.dwell(1800);
+  // For the landing page's film: what it frames whole — the two panes, and the rail beside them.
+  await demo.mark(page.getByTestId("pane").first());
+  await demo.mark(pane(1));
 
   // The top bar, read left to right: the host, the saved views, the account.
   await demo.moveTo(page.getByTestId("host-chip"), { dwell: 800 });
@@ -339,6 +342,7 @@ test("trekker, end to end", async ({ demo }) => {
   await expect
     .poll(() => preview.evaluate((image) => (image as HTMLImageElement).naturalWidth), { timeout: 10_000 })
     .toBeGreaterThan(0);
+  await demo.mark(page.getByTestId("inspector"));
   await demo.moveTo(preview, { dwell: 1_400 });
   await demo.dwell(600);
   await leaf(1, 1_500);
@@ -392,6 +396,7 @@ test("trekker, end to end", async ({ demo }) => {
   await demo.click(bind("marlow", 1));
   await expect(rowIn(1, DUMP)).toBeVisible({ timeout: 20_000 });
   await demo.dwell(1200);
+  await demo.mark(pane(1));
   await demo.moveTo(pane(1).getByTestId("path-host-chip"), { dwell: 900 });
   await demo.dwell(400);
   await demo.moveTo(rowIn(1, "logs"), { aim: "text", dwell: 600 });
@@ -412,6 +417,7 @@ test("trekker, end to end", async ({ demo }) => {
   const hosts = page.getByTestId("host-manager");
   await expect(hosts).toBeVisible();
   await demo.dwell(900);
+  await demo.mark(hosts);
   await sweep(hosts.getByTestId("hosts-row"), [0, 1, 2, 3], 550);
   await demo.click(hosts.locator('[data-testid="hosts-row"][data-host="marlow"] [data-testid="hosts-edit"]'));
   const form = hosts.getByTestId("host-form");
@@ -444,6 +450,7 @@ test("trekker, end to end", async ({ demo }) => {
   await demo.click(firstRow(0), { aim: "text" });
   const du = page.getByTestId("disk-usage");
   await expect(du.getByTestId("du-band").first()).toBeVisible();
+  await demo.mark(du);
   // ⚠️ `scan ⟳` / `cancel ✕` / `hide ▾` are at the right end of the title line. Nothing here goes
   // near it: the bands are below, the facts are below.
   await sweep(du.getByTestId("du-band"), [0, 1, 2, 3, 4, 5], 600);
@@ -474,6 +481,7 @@ test("trekker, end to end", async ({ demo }) => {
   await expect(tailBody).toBeVisible();
   demo.shot("live-tail");
   await demo.dwell(2000);
+  await demo.mark(pane(1));
 
   // The body fills as the stream lands; only a body that overflows can be scrolled away from,
   // and only then does `↓ follow` appear. So: wait until there is a body to read, then the
@@ -553,12 +561,14 @@ test("trekker, end to end", async ({ demo }) => {
   const transfer = page.getByTestId("transfer-modal");
   await expect(transfer).toBeVisible();
   await expect(transfer.getByTestId("transfer-submit")).toBeEnabled({ timeout: 15_000 });
+  await demo.mark(transfer);
   await sweep(transfer.getByTestId("transfer-row"), [0, 1, 2], 600);
   await demo.dwell(900);
   await demo.click(transfer.getByTestId("transfer-submit"));
   await expect(transfer).toHaveCount(0);
   // The queue in the rail, and then the toast: `Copied 3 entries`. Hovered, so a viewer reads it.
   await expect(rowIn(1, COPIED[2])).toBeVisible({ timeout: 30_000 });
+  await demo.mark(pane(1));
   await demo.moveTo(page.getByTestId("toast").first(), { dwell: 1400 });
   await demo.dwell(900);
 
@@ -571,6 +581,7 @@ test("trekker, end to end", async ({ demo }) => {
   await demo.fill(rename.getByTestId("rename-pattern"), PATTERN);
   await demo.fill(rename.getByTestId("rename-replacement"), REPLACEMENT);
   await expect(rename.getByTestId("rename-row")).toHaveCount(COPIED.length);
+  await demo.mark(rename);
   await demo.dwell(2200);
   demo.shot("rename", async (target) => {
     // The stills run after the take, when the copies already carry their new names: the same
@@ -615,6 +626,7 @@ test("trekker, end to end", async ({ demo }) => {
   await demo.click(upload.getByTestId("upload-pick-files"));
   await (await chooser).setFiles(uploadPaths);
   await expect(upload.getByTestId("upload-row")).toHaveCount(UPLOADS.length);
+  await demo.mark(upload);
   await demo.dwell(600);
   await sweep(upload.getByTestId("upload-row"), [0, 1, 2], 600);
   // `overwrite`, so a second take lands the same three names rather than `press-kit (2).zip`.
@@ -629,6 +641,7 @@ test("trekker, end to end", async ({ demo }) => {
   await expect(tray).toBeVisible();
   await expect(tray.getByText(/finished/)).toBeVisible({ timeout: 60_000 });
   await expect(rowIn(1, UPLOADS[2][0])).toBeVisible({ timeout: 15_000 });
+  await demo.mark(tray);
   await demo.moveTo(tray.getByTestId("upload-row").first(), { dwell: 900 });
   await demo.dwell(600);
   await demo.moveTo(rowIn(1, UPLOADS[2][0]).getByTestId("row-size"), { dwell: 900 });
@@ -694,6 +707,7 @@ test("trekker, end to end", async ({ demo }) => {
   await rightClick(rowIn(1, "error.log"));
   const menu = page.getByTestId("context-menu");
   await expect(menu).toBeVisible();
+  await demo.mark(menu);
   await demo.dwell(1100);
   // ⚠️ `rm` is the LAST row, directly under `add to favourites`. The pointer visits the top half
   // only, and leaves by the keyboard.
@@ -714,9 +728,16 @@ test("trekker, end to end", async ({ demo }) => {
   const palette = page.getByTestId("palette");
   await expect(palette).toBeVisible();
   await demo.dwell(800);
+  // Opened empty, it lists everything it can do: down the whole list and back, so the film shows it.
+  await demo.mark(palette);
+  await demo.scroll(palette.getByTestId("palette-list"), 700, 1_300);
+  await demo.dwell(500);
+  await demo.scroll(palette.getByTestId("palette-list"), -700, 1_000);
+  await demo.dwell(400);
 
   await demo.type("back");
   await expect(palette.getByTestId("palette-row").first()).toBeVisible();
+  await demo.mark(palette);
   await demo.dwell(1400);
   demo.shot("palette", async (target) => {
     await target.keyboard.press("Control+K");
@@ -751,6 +772,7 @@ test("trekker, end to end", async ({ demo }) => {
   const compare = page.getByTestId("compare-modal");
   await expect(compare).toBeVisible();
   await expect(compare.getByTestId("compare-summary")).toBeVisible();
+  await demo.mark(compare);
   await demo.dwell(2000);
 
   // Only the verdicts this pair actually produced get a chip — `all` first, then whatever the
@@ -793,6 +815,7 @@ test("trekker, end to end", async ({ demo }) => {
   await demo.dwell(900);
   await demo.click(strip.getByTestId("du-blank-scan"));
   await expect(strip.getByTestId("du-band").first()).toBeVisible({ timeout: 60_000 });
+  await demo.mark(strip);
   await demo.dwell(1200);
   await sweep(strip.getByTestId("du-band"), [0, 1, 2, 3], 600);
   await demo.dwell(500);
@@ -811,6 +834,7 @@ test("trekker, end to end", async ({ demo }) => {
   await demo.click(page.getByTestId("terminal-input"), { aim: "text" });
   const terminal = page.getByTestId("terminal");
   await expect(terminal.getByTestId("terminal-output")).toBeVisible();
+  await demo.mark(terminal);
   // The empty scrollback carries the panel's own thesis — "a restricted set, not a shell" — and
   // this is the one moment in the film it is on screen.
   await demo.dwell(1500);

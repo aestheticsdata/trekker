@@ -2,6 +2,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Chapters } from "@e2e/demo/chapters";
 import { Cursor } from "@e2e/demo/cursor";
+import { describe, EventLog } from "@e2e/demo/events";
 import { PACE, resetJitter, sleep } from "@e2e/demo/pacing";
 import { CdpRecorder } from "@e2e/demo/recorder";
 import { test as base } from "@playwright/test";
@@ -161,11 +162,16 @@ export class Demo {
   /** Screens the storyboard asked for a picture of. Read by the teardown. */
   readonly stills: Still[] = [];
 
+  /**
+   * Every verb below also files itself in `log` — one gesture each, with its start and end on
+   * the film's clock and, when it had one, the element it was aimed at. See `events.ts`.
+   */
   constructor(
     readonly page: Page,
     private readonly cursor: Cursor,
     private readonly chapters: Chapters,
     private readonly recorder: CdpRecorder | null,
+    private readonly log: EventLog,
   ) {}
 
   /** Opens a chapter at the current moment of the recording. */
@@ -191,31 +197,60 @@ export class Demo {
       const now = Date.now();
       this.recorder?.rebase(now / 1000);
       this.chapters.rebase(now);
+      this.log.rebase(now);
     }
   }
 
-  moveTo(target: Locator, options?: GestureOptions): Promise<void> {
-    return this.cursor.moveTo(target, options);
+  async moveTo(target: Locator, options?: GestureOptions): Promise<void> {
+    const start = this.log.now();
+    const aimed = await this.cursor.moveTo(target, options);
+    this.log.gesture({ verb: "moveTo", start, end: this.log.now(), target: aimed });
   }
 
-  click(target: Locator, options?: GestureOptions): Promise<void> {
-    return this.cursor.click(target, options);
+  async click(target: Locator, options?: GestureOptions): Promise<void> {
+    const start = this.log.now();
+    const aimed = await this.cursor.click(target, options);
+    this.log.gesture({ verb: "click", start, end: this.log.now(), target: aimed });
   }
 
-  /** Click a field, then type into it at a human rate. */
+  /**
+   * Click a field, then type into it at a human rate. A password field is typed for real and
+   * logged as bullets, the way the screen shows it.
+   */
   async fill(target: Locator, text: string, options?: GestureOptions): Promise<void> {
-    await this.cursor.click(target, options);
-    await this.cursor.type(text);
+    const start = this.log.now();
+    const secret = (await target.getAttribute("type")) === "password";
+    const aimed = await this.cursor.click(target, options);
+    await this.cursor.type(text, 1, secret);
     await sleep(PACE.settle);
+    const logged = secret ? "•".repeat(text.length) : text;
+    this.log.gesture({ verb: "fill", start, end: this.log.now(), target: aimed, text: logged });
   }
 
   /** `rate` slows one line without retiming the film — see `Cursor.type`. */
-  type(text: string, rate?: number): Promise<void> {
-    return this.cursor.type(text, rate);
+  async type(text: string, rate?: number): Promise<void> {
+    const start = this.log.now();
+    await this.cursor.type(text, rate);
+    this.log.gesture({ verb: "type", start, end: this.log.now(), text });
   }
 
-  press(key: string, options?: GestureOptions): Promise<void> {
-    return this.cursor.press(key, options);
+  async press(key: string, options?: GestureOptions): Promise<void> {
+    const start = this.log.now();
+    await this.cursor.press(key, options);
+    this.log.gesture({ verb: "press", start, end: this.log.now(), text: key });
+  }
+
+  /**
+   * Notes where an element is, for the edit — no pointer, no time. What a film frames is not
+   * always something the hand touched: a whole chart around the bars it walked, a modal around
+   * the button it pressed. A mark names that element in `events.json`, by its testid and box, so
+   * the edit can frame it on this take and on every re-take after it.
+   */
+  async mark(target: Locator): Promise<void> {
+    const now = this.log.now();
+    const box = await target.boundingBox();
+    if (!box) throw new Error(`demo: ${target} has no box to mark — is it visible?`);
+    this.log.gesture({ verb: "mark", start: now, end: now, target: await describe(target, box) });
   }
 
   /**
@@ -224,14 +259,21 @@ export class Demo {
    * pointer parked on the sidebar scrolls the sidebar.
    */
   async scroll(over: Locator, distance: number, duration?: number): Promise<void> {
-    await this.cursor.moveTo(over);
+    const start = this.log.now();
+    const aimed = await this.cursor.moveTo(over);
     await this.cursor.wheel(distance, duration);
     await sleep(PACE.settle);
+    this.log.gesture({ verb: "scroll", start, end: this.log.now(), target: aimed, distance });
   }
 
-  /** Time on screen with nothing happening: the beat that lets a viewer read. */
-  dwell(base: number = PACE.dwell): Promise<void> {
-    return sleep(base);
+  /**
+   * Time on screen with nothing happening: the beat that lets a viewer read. Logged too,
+   * because an edit that speeds a take up wants to know which seconds were for reading.
+   */
+  async dwell(base: number = PACE.dwell): Promise<void> {
+    const start = this.log.now();
+    await sleep(base);
+    this.log.gesture({ verb: "dwell", start, end: this.log.now() });
   }
 
   park(x?: number, y?: number): Promise<void> {
@@ -315,7 +357,9 @@ export const test = base.extend<{ demo: Demo }>({
   demo: async ({ page }, use) => {
     resetJitter();
     await page.addInitScript(hideDevChrome);
-    const cursor = await Cursor.install(page);
+    // Its clock is moved to the film's first frame in `Demo.open`, with the other two.
+    const log = new EventLog(Date.now());
+    const cursor = await Cursor.install(page, log);
 
     // Opened now, over a blank page, so that nothing the take draws is missed;
     // the film's actual first instant is set by `Demo.open`, once the app has
@@ -325,13 +369,25 @@ export const test = base.extend<{ demo: Demo }>({
     const chapters = await Chapters.install(page, Date.now());
     await cursor.park();
 
-    const demo = new Demo(page, cursor, chapters, recorder);
+    const demo = new Demo(page, cursor, chapters, recorder, log);
     await use(demo);
 
     const totalMs = chapters.elapsed();
 
     // Chapters before the encode, so the encode can write them into the file.
     const marks = chapters.write(Chapters.path(OUT_DIR), totalMs);
+
+    // The gestures, beside them, with the pixels per CSS pixel the mp4 really carries — read off
+    // the frames, because a headless screencast quietly ignores the size it is asked for (see
+    // `jpegSize` in `recorder.ts`). Playwright's own recorder films at the viewport regardless.
+    const viewport = page.viewportSize() ?? { width: 1920, height: 1080 };
+    log.write(join(OUT_DIR, "events.json"), {
+      viewport,
+      deviceScaleFactor: await page.evaluate(() => window.devicePixelRatio),
+      captureScale: recorder?.frameSize ? recorder.frameSize.width / viewport.width : 1,
+      durationMs: totalMs,
+      chapters: marks,
+    });
 
     // Ours first, while the page is still open — it is reading a live CDP
     // session. Playwright's own recorder only finalises on close.
