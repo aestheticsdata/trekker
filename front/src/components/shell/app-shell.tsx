@@ -44,6 +44,7 @@ export function AppShell({
   onInspectorChange,
   actions,
   onOpenPalette,
+  onManageHost,
   sidebar,
   strip,
   onShowStrip,
@@ -79,6 +80,8 @@ export function AppShell({
   /** The top bar's ⌘K chip (TRE-36). The panel itself is the explorer's, since
    * everything it offers — the selection, the panes, the hosts — belongs there. */
   onOpenPalette?: () => void;
+  /** The top bar's host chip was pressed (TRE-87). */
+  onManageHost?: () => void;
   /** The 176px left rail (TRE-18). Rendered beside the panes, inside the bars. */
   sidebar?: ReactNode;
   /**
@@ -123,6 +126,7 @@ export function AppShell({
               sudo={sudo}
               account={account}
               onOpenPalette={onOpenPalette}
+              onManageHost={onManageHost}
             />
             <Toolbar
               viewMode={viewMode}

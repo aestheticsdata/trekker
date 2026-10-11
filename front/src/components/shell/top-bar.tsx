@@ -1,6 +1,7 @@
 "use client";
 
 import { Sparkline } from "@components/shell/sparkline";
+import { Tooltip } from "@components/ui/tooltip";
 import { hintFor } from "@helpers/keys";
 import { PRESS } from "@helpers/press";
 
@@ -40,6 +41,7 @@ export function TopBar({
   sudo,
   account,
   onOpenPalette,
+  onManageHost,
 }: {
   host: HostChip | null;
   stats: MachineStats | null;
@@ -74,6 +76,15 @@ export function TopBar({
    */
   account?: ReactNode;
   onOpenPalette?: () => void;
+  /**
+   * Opens the host manager on the host the chip names (TRE-87).
+   *
+   * The chip is bordered, rounded and carries a status dot, so it reads as a
+   * control — and it is the first thing reached for by anyone who wants to
+   * rename this machine or add another. An inert one sent them away concluding
+   * Trekker could not manage its hosts at all.
+   */
+  onManageHost?: () => void;
 }) {
   return (
     <header
@@ -143,23 +154,27 @@ export function TopBar({
         // from a `HostView` and this shape carries no slug. The label is the
         // Hosts row's own name, passed verbatim — the latency beside it is the
         // part that changes, and it is what a text locator would trip on.
-        <span
-          className="bg-line border-line-strong flex h-5.5 items-center gap-1.75 rounded-sm border px-2.5"
-          data-testid="host-chip"
-          data-host={host.label}
-        >
-          <span
-            aria-hidden
-            className="size-1.5 rounded-full"
-            style={{ backgroundColor: host.colour }}
-          />
-          <span className="text-ink-soft font-mono text-xs font-medium">{host.label}</span>
-          {/* Transport is configuration, not a measurement: only the number degrades. */}
-          <span className="text-ink-dim font-mono text-2xs">
-            {host.transport ? `${host.transport} · ` : ""}
-            {host.pingMs === null ? "—" : `${host.pingMs} ms`}
-          </span>
-        </span>
+        <Tooltip content={`Edit ${host.label}`}>
+          <button
+            type="button"
+            onClick={onManageHost}
+            className="bg-line border-line-strong hover:bg-raised flex h-5.5 items-center gap-1.75 rounded-sm border px-2.5"
+            data-testid="host-chip"
+            data-host={host.label}
+          >
+            <span
+              aria-hidden
+              className="size-1.5 rounded-full"
+              style={{ backgroundColor: host.colour }}
+            />
+            <span className="text-ink-soft font-mono text-xs font-medium">{host.label}</span>
+            {/* Transport is configuration, not a measurement: only the number degrades. */}
+            <span className="text-ink-dim font-mono text-2xs">
+              {host.transport ? `${host.transport} · ` : ""}
+              {host.pingMs === null ? "—" : `${host.pingMs} ms`}
+            </span>
+          </button>
+        </Tooltip>
       )}
 
       {/* Beside the chip rather than inside it: the chip describes the host,

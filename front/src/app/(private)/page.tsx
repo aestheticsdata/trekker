@@ -1,6 +1,7 @@
 "use client";
 
 import { Explorer } from "@components/explorer/explorer";
+import { HostMenu } from "@components/hosts/host-menu";
 import { SudoBadge } from "@components/hosts/sudo-badge";
 import { AccountMenu } from "@components/shell/account-menu";
 import { isRule, resolveActions } from "@components/shell/actions";
@@ -111,6 +112,9 @@ export default function HomePage() {
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   /** Which view's menu is open and where, or null for none. */
   const [viewMenu, setViewMenu] = useState<{ id: string; point: Point } | null>(null);
+  // A sidebar server row's right-click (TRE-87). Up here with the views menu
+  // and for the same reason: while it is open the explorer's keys stand down.
+  const [hostMenu, setHostMenu] = useState<{ hostId: string; point: Point } | null>(null);
   /**
    * Whether the account menu is showing (TRE-90).
    *
@@ -377,6 +381,7 @@ export default function HomePage() {
   };
 
   const menuView = savedViews.find((view) => view.id === viewMenu?.id) ?? null;
+  const menuHost = hosts?.find((host) => host.id === hostMenu?.hostId) ?? null;
   const formView = savedViews.find((view) => view.id === viewForm?.id) ?? null;
   const rebindView = savedViews.find((view) => view.id === viewRebindId) ?? null;
 
@@ -452,6 +457,10 @@ export default function HomePage() {
       // badge that followed anything else would be reporting on a machine the
       // reader is not looking at (TRE-29).
       sudo={activeHost ? <SudoBadge host={activeHost} /> : null}
+      // On the host the chip names, which is the active pane's (TRE-87).
+      onManageHost={
+        activeHost ? () => setManageHosts({ pane: active, mode: "list", hostId: activeHost.id }) : undefined
+      }
       // Unconditional, unlike the two slots above it: the host chip and its
       // sudo badge describe a machine a pane may not be bound to, and this
       // describes the session, which always exists in here (TRE-90).
@@ -494,6 +503,7 @@ export default function HomePage() {
           // The active pane, because that is the one a host saved from here
           // should open in — the same pane the chip would have used.
           onNewHost={() => setManageHosts({ pane: active, mode: "create" })}
+          onHostMenu={(host, point) => setHostMenu({ hostId: host.id, point })}
         />
       }
       strip={
@@ -564,7 +574,9 @@ export default function HomePage() {
         onPaletteOpenChange={setPaletteOpen}
         paletteQuery={paletteQuery}
         savedViews={savedViews}
-        viewOverlayOpen={viewForm !== null || viewRebindId !== null || viewMenu !== null || accountMenuOpen}
+        viewOverlayOpen={
+          viewForm !== null || viewRebindId !== null || viewMenu !== null || hostMenu !== null || accountMenuOpen
+        }
         onRestoreView={restoreView}
         onSaveView={() => setViewForm({ id: null })}
         onClipboardChange={setClipboard}
@@ -576,6 +588,15 @@ export default function HomePage() {
       {/* Inside the shell rather than beside it: all three need the toasts, and
           `ToastProvider` is `AppShell`'s. They sit here with the explorer for
           the same reason its own modals do. */}
+      {menuHost && hostMenu && (
+        <HostMenu
+          host={menuHost}
+          point={hostMenu.point}
+          onEdit={() => setManageHosts({ pane: active, mode: "list", hostId: menuHost.id })}
+          onClose={() => setHostMenu(null)}
+        />
+      )}
+
       {menuView && viewMenu && (
         <ViewMenu
           view={menuView}

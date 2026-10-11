@@ -15,6 +15,7 @@ import { QUERY_KEYS } from "@lib/query/keys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 
+import type { Point } from "@helpers/menu";
 import type { BookmarkView } from "@lib/api/bookmarks";
 import type { HostView } from "@lib/api/hosts";
 import type { ReactNode } from "react";
@@ -43,6 +44,7 @@ export function Sidebar({
   onBindHost,
   onNavigate,
   onNewHost,
+  onHostMenu,
 }: {
   hosts: readonly HostView[];
   /** What each pane is showing, so a row can draw its A and B badges. */
@@ -60,6 +62,12 @@ export function Sidebar({
   onNavigate: (host: HostView, path: string) => void;
   /** Opens the host manager on a blank form, bound to the active pane (TRE-102). */
   onNewHost: () => void;
+  /**
+   * A server row was right-clicked (TRE-87). The menu itself is the page's, as
+   * the views menu is, so the explorer can stand down its keyboard while it is
+   * open.
+   */
+  onHostMenu: (host: HostView, point: Point) => void;
 }) {
   const { data: bookmarks } = useQuery({
     queryKey: [QUERY_KEYS.BOOKMARKS],
@@ -128,6 +136,7 @@ export function Sidebar({
                 boundTo={[paneHostIds[0] === host.id, paneHostIds[1] === host.id]}
                 onPick={() => onBindHost(activePane, host)}
                 onBind={(pane) => onBindHost(pane, host)}
+                onMenu={(point) => onHostMenu(host, point)}
               />
             ))}
             {hosts.length === 0 && <Empty>No hosts yet.</Empty>}
@@ -253,12 +262,14 @@ function ServerRow({
   boundTo,
   onPick,
   onBind,
+  onMenu,
 }: {
   host: HostView;
   here: boolean;
   boundTo: readonly [boolean, boolean];
   onPick: () => void;
   onBind: (pane: 0 | 1) => void;
+  onMenu: (point: Point) => void;
 }) {
   // Only asked for once the host is on screen, and cached 5s server-side.
   const { data: summary } = useQuery({
@@ -271,12 +282,19 @@ function ServerRow({
   });
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: the row's own controls are the buttons inside it; this element only carries the right-click, and the top bar's host chip is the keyboard route to the same form
     <div
       // The slug (`local`, `demo-remote`) rather than the label: the label is
       // what the host form renames, and the same host is a row here, a chip in
       // each pane's path row and a row of the host manager — all `data-host`.
       data-testid="server-row"
       data-host={host.slug}
+      // The click binds, which is the row's job; editing the host is the one
+      // other thing anyone looks for here, and it lives on the row it edits.
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onMenu({ x: event.clientX, y: event.clientY });
+      }}
       className={`hover:bg-raised flex h-6 items-center gap-1.75 border-l-2 pr-1.75 pl-2 ${
         here ? "bg-raised" : "border-transparent"
       }`}

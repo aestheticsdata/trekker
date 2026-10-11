@@ -32,13 +32,15 @@ type Mode = { kind: "idle" } | { kind: "edit"; host: HostView } | { kind: "creat
  * The chip in a pane's path row opens the list, because the question it asks is
  * which host that pane shows. The sidebar's `＋ new host…` opens the form: a
  * button that names what it makes and then asks for a second press has not done
- * its job.
+ * its job. The top bar's chip and a server row's `Edit host…` name one host,
+ * and open on its form (TRE-87).
  */
 export type HostsMode = "list" | "create";
 
 export function HostManager({
   hosts,
   initialMode,
+  initialHostId,
   boundHostId,
   onPick,
   onChanged,
@@ -46,6 +48,8 @@ export function HostManager({
 }: {
   hosts: readonly HostView[];
   initialMode: HostsMode;
+  /** A host to open straight onto the form of, when the door used names one. */
+  initialHostId: string | null;
   /** What the pane that opened this is currently showing, if anything. */
   boundHostId: string | null;
   onPick: (host: HostView) => void;
@@ -56,9 +60,11 @@ export function HostManager({
   const { push } = useToast();
   // What the caller asked for — except on a deployment with no hosts, which has
   // exactly one useful thing to show whichever door was used to get here.
-  const [mode, setMode] = useState<Mode>(() =>
-    initialMode === "create" || hosts.length === 0 ? { kind: "create" } : { kind: "idle" },
-  );
+  const [mode, setMode] = useState<Mode>(() => {
+    if (initialMode === "create" || hosts.length === 0) return { kind: "create" };
+    const named = hosts.find((host) => host.id === initialHostId);
+    return named ? { kind: "edit", host: named } : { kind: "idle" };
+  });
 
   const localTaken = hosts.some(
     (host) => host.transport === "LOCAL" && !(mode.kind === "edit" && mode.host.id === host.id),

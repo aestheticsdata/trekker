@@ -188,6 +188,8 @@ export interface HostsTarget {
   /** The pane that binds whatever gets picked, and whose host is shown bound. */
   pane: PaneIndex;
   mode: HostsMode;
+  /** The host to open on, for a door that names one (TRE-87). */
+  hostId?: string;
 }
 
 /** A paste that has become a transfer (TRE-71 §4). */
@@ -2663,6 +2665,7 @@ export function Explorer({
         <HostManager
           hosts={hosts}
           initialMode={manageHosts.mode}
+          initialHostId={manageHosts.hostId ?? null}
           boundHostId={panes[manageHosts.pane].host}
           onPick={(host) => onPaneChange(manageHosts.pane, { host: host.id, path: host.homePath })}
           onChanged={onHostsChanged}
