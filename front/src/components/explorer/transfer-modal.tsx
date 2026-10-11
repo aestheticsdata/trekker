@@ -6,10 +6,13 @@ import { HostPath } from "@components/ui/host-path";
 import { Overlay } from "@components/ui/overlay";
 import { extensionOf, formatSize, MARK_ON_PANEL, rowTypeOf } from "@helpers/listing";
 import { PRESS, SELECTED } from "@helpers/press";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { planTransfer, startTransfer } from "@lib/api/transfers";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { dictionary } from "@text/index";
 import { useState } from "react";
 
 import type { HostView } from "@lib/api/hosts";
@@ -35,10 +38,10 @@ import type { ConflictStrategy, PlannedItem, TransferOperation, TransferPlan } f
 const RENDER_LIMIT = 200;
 
 const STRATEGIES: ReadonlyArray<{ value: ConflictStrategy; label: string }> = [
-  { value: "ask", label: "ask" },
-  { value: "overwrite", label: "overwrite all" },
-  { value: "skip", label: "skip all" },
-  { value: "keepBoth", label: "keep both" },
+  { value: "ask", label: dictionary.dialogs.transfer.strategies.ask },
+  { value: "overwrite", label: dictionary.dialogs.transfer.strategies.overwrite },
+  { value: "skip", label: dictionary.dialogs.transfer.strategies.skip },
+  { value: "keepBoth", label: dictionary.dialogs.transfer.strategies.keepBoth },
 ];
 
 export interface TransferTarget {
@@ -60,14 +63,15 @@ export function TransferModal({
   onClose: () => void;
   onStarted: () => void;
 }) {
+  const t = useTranslations("dialogs");
   // "transfer" when the hosts differ, because that is what it is: the bytes
   // leave one machine and arrive at another, and calling that a copy invites
   // the assumption that it is as instant as one within a disk.
-  const verb = target.srcHostId === target.dstHostId ? target.operation : "transfer";
+  const verb = target.srcHostId === target.dstHostId ? t.transfer.verbs[target.operation] : t.transfer.verbs.transfer;
 
   return (
     <Overlay
-      label={`${verb} to ${target.dstPath}`}
+      label={interpolate(t.transfer.dialog, { verb, path: target.dstPath })}
       onClosed={onClose}
       testId="transfer-modal"
       panelClassName="bg-app border-line-strong flex w-full max-w-[56rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
@@ -98,6 +102,7 @@ function TransferPanel({
   close: () => void;
   onStarted: () => void;
 }) {
+  const t = useTranslations("dialogs");
   const { csrfToken } = useAuth();
   const queryClient = useQueryClient();
 
@@ -163,7 +168,7 @@ function TransferPanel({
       onStarted();
       close();
     },
-    onError: (error) => setFailure(error instanceof ApiError ? error.message : "The transfer could not be started."),
+    onError: (error) => setFailure(error instanceof ApiError ? error.message : t.transfer.failure),
   });
 
   const refusal = plan.error instanceof ApiError ? plan.error.message : null;
@@ -187,7 +192,11 @@ function TransferPanel({
         <span className="text-ink-label font-mono text-xs font-semibold tracking-label">{verb}</span>
         <HostPath
           host={hosts.find((host) => host.id === target.srcHostId) ?? null}
-          path={target.srcPaths.length === 1 ? target.srcPaths[0] : `${target.srcPaths.length} entries`}
+          path={
+            target.srcPaths.length === 1
+              ? target.srcPaths[0]
+              : interpolate(t.common.entryMany, { count: target.srcPaths.length })
+          }
         />
         <span
           aria-hidden
@@ -209,17 +218,19 @@ function TransferPanel({
 
       {data?.truncated === true && (
         <div className="bg-danger-wash border-warning text-warning mx-3.5 mt-2.5 border px-2.5 py-1.75 font-mono text-cmd/[1.5]">
-          {`This selection holds more than ${data.ceiling.toLocaleString("en-GB")} entries. Narrow it before transferring.`}
+          {interpolate(t.transfer.truncated, { ceiling: data.ceiling.toLocaleString("en-GB") })}
         </div>
       )}
 
       {data !== undefined && conflicting.length > 0 && (
         <div className="border-line flex items-center gap-2 border-b px-3.5 py-2">
           <span className="text-ink-faint font-mono text-2xs tracking-label">
-            {`${count(conflicting.length, "conflict")} · answer`}
+            {interpolate(t.transfer.answer, {
+              conflicts: count(conflicting.length, t.transfer.conflictOne, t.transfer.conflictMany),
+            })}
           </span>
           <fieldset
-            aria-label="What to do with conflicts"
+            aria-label={t.transfer.strategyLabel}
             className="border-line-strong flex h-5 overflow-hidden rounded-sm border"
           >
             {STRATEGIES.map((option) => (
@@ -248,7 +259,9 @@ function TransferPanel({
       )}
 
       <div className="border-line max-h-90 flex-1 overflow-y-auto border-b">
-        {plan.isPending && <div className="text-ink-faint px-3.5 py-3 font-mono text-xs">walking both trees…</div>}
+        {plan.isPending && (
+          <div className="text-ink-faint px-3.5 py-3 font-mono text-xs">{t.common.walkingBothTrees}</div>
+        )}
 
         {shown.map((item) => (
           <Row
@@ -261,13 +274,15 @@ function TransferPanel({
 
         {rows.length > shown.length && (
           <p className="text-ink-faint border-raised border-t px-3.5 py-2 font-mono text-2xs">
-            {`…and ${(rows.length - shown.length).toLocaleString("en-GB")} more, all without conflicts. They transfer with the rest.`}
+            {interpolate(t.transfer.notDrawn, { count: (rows.length - shown.length).toLocaleString("en-GB") })}
           </p>
         )}
 
         {data?.skippedLinks !== undefined && data.skippedLinks > 0 && (
           <p className="text-warning border-raised border-t px-3.5 py-2 font-mono text-2xs">
-            {`${count(data.skippedLinks, "symlink")} under this selection will not be copied.`}
+            {interpolate(t.transfer.skippedLinks, {
+              links: count(data.skippedLinks, t.common.symlinkOne, t.common.symlinkMany),
+            })}
           </p>
         )}
       </div>
@@ -276,7 +291,10 @@ function TransferPanel({
         <div className="bg-danger-wash border-danger text-danger-soft mx-3.5 mt-2.5 border px-2.5 py-1.75 font-mono text-cmd/[1.5]">
           {/* Blocked, not warned about. A transfer that fills the destination's
               root partition is not a thing to let somebody choose by accident. */}
-          {`Needs ${formatSize(writing, "file")} and ${formatSize(data.destination.freeBytes ?? 0, "file")} is free at the destination.`}
+          {interpolate(t.common.noRoom, {
+            needed: formatSize(writing, "file"),
+            free: formatSize(data.destination.freeBytes ?? 0, "file"),
+          })}
         </div>
       )}
 
@@ -290,14 +308,24 @@ function TransferPanel({
         <span className="text-ink-muted font-mono text-2xs/none">
           {data === undefined
             ? ""
-            : `${count(data.files, "file")} · ${formatSize(writing, "file")}${data.directories > 0 ? ` · ${count(data.directories, "directory", "directories")}` : ""}`}
+            : interpolate(data.directories > 0 ? t.transfer.summaryWithDirectories : t.transfer.summary, {
+                files: count(data.files, t.common.fileOne, t.common.fileMany),
+                size: formatSize(writing, "file"),
+                directories: count(data.directories, t.common.directoryOne, t.common.directoryMany),
+              })}
         </span>
         {data?.destination.freeBytes != null && (
-          <span className="text-ink-faint font-mono text-2xs/none">{`${formatSize(data.destination.freeBytes, "file")} free`}</span>
+          <span className="text-ink-faint font-mono text-2xs/none">
+            {interpolate(t.common.free, { size: formatSize(data.destination.freeBytes, "file") })}
+          </span>
         )}
         <div className="flex-1" />
         {unanswered > 0 && (
-          <span className="text-warning font-mono text-2xs/none">{`${count(unanswered, "conflict")} unanswered`}</span>
+          <span className="text-warning font-mono text-2xs/none">
+            {interpolate(t.transfer.unanswered, {
+              conflicts: count(unanswered, t.transfer.conflictOne, t.transfer.conflictMany),
+            })}
+          </span>
         )}
         <button
           type="button"
@@ -305,7 +333,7 @@ function TransferPanel({
           data-testid="transfer-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
-          cancel
+          {t.common.cancel}
         </button>
         <button
           type="button"
@@ -316,7 +344,12 @@ function TransferPanel({
           data-testid="transfer-submit"
           className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
-          {start.isPending ? "starting…" : `${verb} ${data ? count(data.items.length, "entry", "entries") : ""}`}
+          {start.isPending
+            ? t.transfer.starting
+            : interpolate(t.transfer.submit, {
+                verb,
+                entries: data ? count(data.items.length, t.common.entryOne, t.common.entryMany) : "",
+              })}
         </button>
       </footer>
     </>
@@ -339,6 +372,8 @@ function Row({
   answer: ConflictStrategy;
   onAnswer: (choice: ConflictStrategy) => void;
 }) {
+  const t = useTranslations("dialogs");
+
   return (
     <div
       data-testid="transfer-row"
@@ -356,7 +391,7 @@ function Row({
           a symlink and the directory it looks like is worth a word as well as
           an ink. */}
       <span className="text-ink-faint w-14 font-mono text-2xs/none">
-        {item.kind === "directory" ? "dir" : item.kind}
+        {item.kind === "directory" ? t.common.directoryShort : item.kind}
       </span>
       <span className={`min-w-0 truncate font-mono text-xs/[1.3] ${item.conflict ? "text-warning" : "text-ink-muted"}`}>
         {item.name}
@@ -373,9 +408,7 @@ function Row({
         {/* The note, whenever there is one. Not `conflict ? note : …`: a
             directory that is already there and merging is not a conflict and
             is very much not absent, and the server's own line says which. */}
-        <span className="text-ink-faint font-mono text-2xs/none">
-          {item.note || "does not exist at the destination"}
-        </span>
+        <span className="text-ink-faint font-mono text-2xs/none">{item.note || t.transfer.absent}</span>
       </span>
 
       {item.conflict ? (
@@ -396,12 +429,12 @@ function Row({
                   : "border-line-strong text-ink-faint hover:text-ink-muted"
               }`}
             >
-              {choice === "keepBoth" ? "both" : choice}
+              {t.transfer.answers[choice]}
             </button>
           ))}
         </span>
       ) : (
-        <span className="text-ink-faint w-[7.5rem] text-right font-mono text-2xs/none">no conflict</span>
+        <span className="text-ink-faint w-[7.5rem] text-right font-mono text-2xs/none">{t.transfer.noConflict}</span>
       )}
     </div>
   );
@@ -426,6 +459,7 @@ function bytesToWrite(
   }, 0);
 }
 
-function count(n: number, singular: string, plural = `${singular}s`): string {
-  return `${n} ${n === 1 ? singular : plural}`;
+/** A count in words, from the zone's `{count}` pair. */
+function count(n: number, one: string, many: string): string {
+  return interpolate(n === 1 ? one : many, { count: n });
 }

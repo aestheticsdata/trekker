@@ -1,4 +1,5 @@
 import { UiScale } from "@components/shell/ui-scale";
+import useTranslations from "@i18n/useTranslations";
 
 /**
  * The 24px status bar (TRE-14 §4): everything about the selected row that the
@@ -47,6 +48,8 @@ export function StatusBar({
    */
   onShowStrip?: (() => void) | null;
 }) {
+  const t = useTranslations("shell").statusBar;
+
   return (
     <footer
       className="bg-chrome border-line flex h-statusbar shrink-0 items-center gap-3 border-t px-2 font-mono text-2xs"
@@ -63,19 +66,23 @@ export function StatusBar({
             {selection.path}
           </span>
           <Fact
-            label="size"
+            fact="size"
+            label={t.facts.size}
             value={selection.size}
           />
           <Fact
-            label="mode"
+            fact="mode"
+            label={t.facts.mode}
             value={selection.mode}
           />
           <Fact
-            label="owner"
+            fact="owner"
+            label={t.facts.owner}
             value={selection.owner}
           />
           <Fact
-            label="modified"
+            fact="modified"
+            label={t.facts.modified}
             value={selection.modified}
           />
         </>
@@ -84,7 +91,7 @@ export function StatusBar({
           className="text-ink-faint min-w-0 flex-1 truncate"
           data-testid="status-hint"
         >
-          {hint ?? "No selection"}
+          {hint ?? t.noSelection}
         </span>
       )}
 
@@ -107,7 +114,7 @@ export function StatusBar({
           data-testid="du-show"
           className="text-ink-dim hover:text-ink flex-none whitespace-nowrap"
         >
-          show disk usage ▴
+          {t.showDiskUsage}
         </button>
       )}
 
@@ -116,12 +123,13 @@ export function StatusBar({
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+/** `fact` is the stable key `data-fact` carries; `label` is the word on screen. */
+function Fact({ fact, label, value }: { fact: string; label: string; value: string }) {
   return (
     <span
       className="hidden items-center gap-1 whitespace-nowrap inspector:flex"
       data-testid="status-fact"
-      data-fact={label}
+      data-fact={fact}
     >
       <span className="text-ink-faint">{label}</span>
       <span className="text-ink-muted">{value}</span>

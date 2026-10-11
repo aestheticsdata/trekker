@@ -8,10 +8,13 @@ import { Tooltip } from "@components/ui/tooltip";
 import { joinPath } from "@helpers/listing";
 import { parseMode } from "@helpers/permissions";
 import { ON_FILL, PRESS } from "@helpers/press";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { changeMode, changeOwner, fetchEntryCount, undoChmod, undoChown } from "@lib/api/permissions";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useMutation, useQueries } from "@tanstack/react-query";
+import { dictionary } from "@text/index";
 import { Fragment, useState } from "react";
 
 import type { FileRow } from "@lib/api/fs";
@@ -40,9 +43,9 @@ const PRESETS = ["0644", "0640", "0755", "0600"] as const;
 
 /** The fourth octal digit, which the nine-cell grid has no room for. */
 const SPECIAL = [
-  { bit: 0o4000, label: "setuid", warn: true },
-  { bit: 0o2000, label: "setgid", warn: true },
-  { bit: 0o1000, label: "sticky", warn: false },
+  { bit: 0o4000, label: dictionary.dialogs.permissions.special.setuid, warn: true },
+  { bit: 0o2000, label: dictionary.dialogs.permissions.special.setgid, warn: true },
+  { bit: 0o1000, label: dictionary.dialogs.permissions.special.sticky, warn: false },
 ] as const;
 
 export interface PermissionsTarget {
@@ -84,11 +87,12 @@ export function PermissionsModal({
   onClose: () => void;
   onApplied: () => void;
 }) {
+  const t = useTranslations("dialogs");
   const subject = subjectOf(target);
 
   return (
     <Overlay
-      label={`Permissions for ${subject}`}
+      label={interpolate(t.permissions.dialog, { subject })}
       onClosed={onClose}
       testId="permissions-modal"
       panelClassName="bg-app border-line-strong w-full max-w-[30rem] overflow-hidden rounded-sm border shadow-2xl"
@@ -121,6 +125,7 @@ function PermissionsPanel({
   close: () => void;
   onApplied: () => void;
 }) {
+  const t = useTranslations("dialogs");
   const { csrfToken } = useAuth();
   const { push } = useToast();
   const { hostId, directory, entries, initialMode, origin } = target;
@@ -208,21 +213,27 @@ function PermissionsPanel({
       const undo = result.undo;
       push({
         tone: "success",
-        message: `${octal} · ${result.changed} ${result.changed === 1 ? "entry" : "entries"}`,
-        detail: changedOwner && changedOwner !== startingOwner ? `owner ${changedOwner}` : undefined,
+        message: interpolate(result.changed === 1 ? t.permissions.toast.changedOne : t.permissions.toast.changedMany, {
+          octal,
+          count: result.changed,
+        }),
+        detail:
+          changedOwner && changedOwner !== startingOwner
+            ? interpolate(t.permissions.toast.owner, { owner: changedOwner })
+            : undefined,
         action: undo
           ? {
-              label: "Undo",
-              title: "Restores only what this change touched — anything altered since is not affected.",
+              label: t.permissions.toast.undo,
+              title: t.permissions.toast.undoHint,
               onClick: () => {
                 const call = undo.kind === "chmod" ? undoChmod : undoChown;
                 call(undo.activityLogId, csrfToken)
                   .then(() => {
                     onApplied();
-                    push({ tone: "info", message: "Reverted." });
+                    push({ tone: "info", message: t.permissions.toast.reverted });
                   })
                   .catch(() => {
-                    push({ tone: "danger", message: "Could not undo — it may have expired." });
+                    push({ tone: "danger", message: t.permissions.toast.undoFailed });
                   });
               },
             }
@@ -231,28 +242,28 @@ function PermissionsPanel({
       close();
     },
     onError: (error: unknown) => {
-      setFailure(error instanceof ApiError ? error.message : "The change could not be applied.");
+      setFailure(error instanceof ApiError ? error.message : t.permissions.failure);
     },
   });
 
-  const command = `chmod ${recursive ? "-R " : ""}${octal} ${entries.length > 2 ? `${entries.length} paths` : paths.join(" ")}`;
+  const command = `chmod ${recursive ? "-R " : ""}${octal} ${entries.length > 2 ? interpolate(t.permissions.commandPaths, { count: entries.length }) : paths.join(" ")}`;
   const marked = SPECIAL.filter((special) => (bits & special.bit) !== 0);
 
   return (
     <>
       <header className="bg-line border-line-strong flex h-topbar flex-none items-center gap-2.25 border-b px-3">
-        <span className="text-ink font-mono text-xs font-semibold tracking-label">chmod</span>
+        <span className="text-ink font-mono text-xs font-semibold tracking-label">{t.permissions.title}</span>
         <span className="text-ink-muted min-w-0 truncate font-mono text-cmd">{subject}</span>
         <div className="flex-1" />
-        <Tooltip content="Close (⎋)">
+        <Tooltip content={t.common.closeTooltip}>
           <button
             type="button"
             onClick={close}
-            aria-label="Close"
+            aria-label={t.common.close}
             data-testid="permissions-close"
             className="text-ink-dim font-mono text-2xs"
           >
-            esc ✕
+            {t.common.escClose}
           </button>
         </Tooltip>
       </header>
@@ -295,13 +306,13 @@ function PermissionsPanel({
                 key={column}
                 className="text-ink-faint text-center"
               >
-                {column}
+                {t.permissions.columns[column]}
               </span>
             ))}
 
             {CLASSES.map((who, group) => (
               <Fragment key={who}>
-                <span>{who}</span>
+                <span>{t.permissions.classes[who]}</span>
                 {[0, 1, 2].map((column) => {
                   const bit = 1 << (8 - (group * 3 + column));
                   const on = (bits & bit) !== 0;
@@ -310,7 +321,10 @@ function PermissionsPanel({
                       key={column}
                       type="button"
                       aria-pressed={on}
-                      aria-label={`${COLUMNS[column]} for ${who}`}
+                      aria-label={interpolate(t.permissions.bitLabel, {
+                        column: t.permissions.columns[COLUMNS[column]],
+                        who: t.permissions.classes[who],
+                      })}
                       data-testid="permissions-bit"
                       data-who={who}
                       data-bit={COLUMNS[column]}
@@ -357,12 +371,12 @@ function PermissionsPanel({
           </div>
 
           <div className="text-ink-muted mt-2.5 grid grid-cols-[3.375rem_1fr] items-center gap-1 font-mono text-cmd">
-            <span>owner</span>
+            <span>{t.permissions.owner}</span>
             <input
               value={owner}
               onChange={(event) => setOwner(event.target.value)}
-              placeholder={mixedOwners ? "mixed — user:group" : startingOwner}
-              aria-label="Owner and group"
+              placeholder={mixedOwners ? t.permissions.ownerMixed : startingOwner}
+              aria-label={t.permissions.ownerLabel}
               data-testid="permissions-owner"
               className="bg-chrome border-line-strong text-ink w-full border px-2 py-1.5 font-mono text-cmd"
             />
@@ -391,20 +405,19 @@ function PermissionsPanel({
           >
             {recursive ? "✓" : ""}
           </span>
-          <span className="text-ink-soft font-mono text-cmd">recursive</span>
+          <span className="text-ink-soft font-mono text-cmd">{t.permissions.recursive}</span>
           <span className="text-ink-faint font-mono text-2xs/none">{recursiveNote(recursive, counts)}</span>
         </label>
 
         {distinctModes > 1 && (
-          <Notice tone="warn">
-            {distinctModes} different modes are selected — applying {octal} unifies them.
-          </Notice>
+          <Notice tone="warn">{interpolate(t.permissions.mixedModes, { count: distinctModes, octal })}</Notice>
         )}
 
         {marked.length > 0 && (
           <Notice tone="warn">
-            {marked.map((special) => special.label).join(" and ")} will be set. This is how privilege is left behind on
-            a filesystem.
+            {interpolate(t.permissions.specialSet, {
+              bits: marked.map((special) => special.label).join(t.permissions.specialJoin),
+            })}
           </Notice>
         )}
 
@@ -427,8 +440,9 @@ function PermissionsPanel({
         {outcome && outcome.refused.length > 0 && (
           <div className="mt-2.5">
             <Notice tone="warn">
-              {outcome.refused.length} {outcome.refused.length === 1 ? "entry holds" : "entries hold"} Trekker's own key
-              material and {outcome.refused.length === 1 ? "was" : "were"} left untouched:
+              {interpolate(outcome.refused.length === 1 ? t.permissions.refusedOne : t.permissions.refusedMany, {
+                count: outcome.refused.length,
+              })}
             </Notice>
             {outcome.refused.map((path) => (
               <p
@@ -444,7 +458,7 @@ function PermissionsPanel({
         {outcome && outcome.failed > 0 && (
           <div className="mt-2.5">
             <Notice tone="bad">
-              {outcome.changed} changed, {outcome.failed} refused:
+              {interpolate(t.permissions.failedSummary, { changed: outcome.changed, failed: outcome.failed })}
             </Notice>
             {outcome.results
               .filter((row) => !row.ok)
@@ -462,7 +476,10 @@ function PermissionsPanel({
 
       <footer className="bg-chrome border-line flex h-11 flex-none items-center gap-2 border-t px-3.5">
         <span className="text-ink-faint font-mono text-2xs/none">
-          {entries.length} {entries.length === 1 ? "path" : "paths"} in {directory}
+          {interpolate(entries.length === 1 ? t.permissions.pathsOne : t.permissions.pathsMany, {
+            count: entries.length,
+            directory,
+          })}
         </span>
         <div className="flex-1" />
         <button
@@ -471,7 +488,7 @@ function PermissionsPanel({
           data-testid="permissions-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
-          cancel
+          {t.common.cancel}
         </button>
         <button
           type="button"
@@ -482,7 +499,7 @@ function PermissionsPanel({
           data-testid="permissions-apply"
           className={`${PRESS} px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:opacity-60`}
         >
-          {apply.isPending ? "applying…" : `apply ${octal}`}
+          {apply.isPending ? t.permissions.applying : interpolate(t.permissions.apply, { octal })}
         </button>
       </footer>
     </>
@@ -494,7 +511,7 @@ function PermissionsPanel({
  * the header falls back to the path rather than rendering a blank.
  */
 function subjectOf({ entries, directory }: PermissionsTarget): string {
-  if (entries.length !== 1) return `${entries.length} entries`;
+  if (entries.length !== 1) return interpolate(dictionary.dialogs.common.entryMany, { count: entries.length });
   return entries[0].name || joinPath(directory, "");
 }
 
@@ -534,16 +551,17 @@ function recursiveNote(
   recursive: boolean,
   counts: readonly { data?: { entries: number; exceeded: boolean }; isPending: boolean }[],
 ): string {
-  if (!recursive) return "· selection only";
-  if (counts.length === 0) return "· nothing selected is a directory";
-  if (counts.some((count) => count.isPending)) return "· counting…";
+  const text = dictionary.dialogs.permissions.recursiveNote;
+  if (!recursive) return text.selectionOnly;
+  if (counts.length === 0) return text.noDirectory;
+  if (counts.some((count) => count.isPending)) return text.counting;
 
   const known = counts.filter((count) => count.data);
-  if (known.length === 0) return "· the count could not be read";
+  if (known.length === 0) return text.unknown;
 
   const total = known.reduce((sum, count) => sum + (count.data?.entries ?? 0), 0);
   const capped = known.some((count) => count.data?.exceeded);
-  return `· applies to ${capped ? "more than " : ""}${total.toLocaleString("en-GB")} nested entries`;
+  return interpolate(capped ? text.appliesMore : text.applies, { count: total.toLocaleString("en-GB") });
 }
 
 /** chmod and chown answered separately; the panel reports them as one run. */

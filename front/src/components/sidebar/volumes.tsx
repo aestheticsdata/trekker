@@ -3,6 +3,8 @@
 import { Tooltip, TooltipBlock } from "@components/ui/tooltip";
 import { DISK_CELLS, filledCells, shortMount } from "@helpers/disks";
 import { formatTotal } from "@helpers/listing";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { fetchDisks } from "@lib/api/disks";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useQuery } from "@tanstack/react-query";
@@ -36,6 +38,7 @@ export function Volumes({
   /** Point the active pane at a mount. */
   onNavigate: (host: HostView, path: string) => void;
 }) {
+  const t = useTranslations("sidebar");
   const {
     data: disks,
     isPending,
@@ -53,14 +56,14 @@ export function Volumes({
     throwOnError: false,
   });
 
-  if (!host) return <Empty>No host in the active pane.</Empty>;
+  if (!host) return <Empty>{t.volumes.noHost}</Empty>;
   // A disabled query never leaves `isPending`, so the guard above has to come
   // first — otherwise an unbound pane shows this forever.
-  if (isPending) return <Empty>Reading df…</Empty>;
+  if (isPending) return <Empty>{t.volumes.reading}</Empty>;
   // Before the empty arm, because "this host reports no filesystems" is a claim
   // about the machine and a failed request supports no claim about it at all.
-  if (isError) return <Empty>Could not read df on this host.</Empty>;
-  if (!disks || disks.length === 0) return <Empty>This host reports no filesystems.</Empty>;
+  if (isError) return <Empty>{t.volumes.readFailed}</Empty>;
+  if (!disks || disks.length === 0) return <Empty>{t.volumes.none}</Empty>;
 
   return (
     <>
@@ -76,6 +79,7 @@ export function Volumes({
 }
 
 function Volume({ disk, onOpen }: { disk: DiskMount; onOpen: () => void }) {
+  const t = useTranslations("sidebar");
   const filled = filledCells(disk.percent);
   // The whole row is the control: the mockup makes the block clickable rather
   // than putting a link on the mount name, and a 176px row with a hit area the
@@ -84,14 +88,10 @@ function Volume({ disk, onOpen }: { disk: DiskMount; onOpen: () => void }) {
     <Tooltip
       content={
         <TooltipBlock
-          note={
-            disk.warn
-              ? "Above the warning threshold. Click to open it in the active pane."
-              : "Click to open it in the active pane."
-          }
+          note={disk.warn ? t.volumes.openWarn : t.volumes.open}
           rows={[
-            { label: "used", value: `${disk.percent}%` },
-            { label: "of", value: formatTotal(disk.totalBytes) },
+            { label: t.volumes.used, value: `${disk.percent}%` },
+            { label: t.volumes.of, value: formatTotal(disk.totalBytes) },
           ]}
           subject={disk.mountPoint}
         />
@@ -140,7 +140,9 @@ function Volume({ disk, onOpen }: { disk: DiskMount; onOpen: () => void }) {
             {disk.device}
             {disk.type && ` · ${disk.type}`}
           </span>
-          <span className="ml-1.5 flex-none">{formatTotal(disk.availableBytes)} free</span>
+          <span className="ml-1.5 flex-none">
+            {interpolate(t.volumes.free, { size: formatTotal(disk.availableBytes) })}
+          </span>
         </span>
       </button>
     </Tooltip>

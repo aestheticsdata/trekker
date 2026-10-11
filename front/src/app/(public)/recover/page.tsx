@@ -3,6 +3,7 @@
 import { AuthCard, AuthLinks } from "@components/auth/auth-card";
 import { AuthField, StrengthMeter } from "@components/auth/auth-field";
 import { zodResolver } from "@hookform/resolvers/zod";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { recover } from "@lib/api/users";
 import { recoverSchema } from "@schemas/auth";
@@ -14,6 +15,7 @@ import type { AuthStatus } from "@components/auth/auth-card";
 import type { RecoverValues } from "@schemas/auth";
 
 export default function RecoverPage() {
+  const t = useTranslations("auth");
   const [status, setStatus] = useState<AuthStatus>("IDLE");
   const [failure, setFailure] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -34,15 +36,15 @@ export default function RecoverPage() {
       setDone(true);
     } catch (error) {
       setStatus("REJECTED");
-      setFailure(error instanceof ApiError ? error.message : "The API could not be reached.");
+      setFailure(error instanceof ApiError ? error.message : t.unreachable);
     }
   };
 
   const links = (
     <AuthLinks
       links={[
-        { href: "/login", label: "sign in" },
-        { href: "/about", label: "about" },
+        { href: "/login", label: t.links.signIn },
+        { href: "/about", label: t.links.about },
       ]}
     />
   );
@@ -50,20 +52,17 @@ export default function RecoverPage() {
   if (done) {
     return (
       <AuthCard
-        title="TREKKER"
-        subtitle="Key replaced"
+        title={t.title}
+        subtitle={t.recover.done.subtitle}
         status="AUTHENTICATED"
         footer={links}
       >
-        <p className="text-ink-muted text-sm leading-relaxed">
-          The key is replaced and every existing session has been signed out — including any this account had open
-          elsewhere. Sign in with the new one.
-        </p>
+        <p className="text-ink-muted text-sm leading-relaxed">{t.recover.done.body}</p>
         <Link
           href="/login"
           className="border-accent text-ink hover:bg-accent/20 mt-1 rounded-xs border py-1.5 text-center text-sm tracking-caps"
         >
-          SIGN IN
+          {t.recover.done.signIn}
         </Link>
       </AuthCard>
     );
@@ -71,8 +70,8 @@ export default function RecoverPage() {
 
   return (
     <AuthCard
-      title="TREKKER"
-      subtitle="Recover"
+      title={t.title}
+      subtitle={t.recover.subtitle}
       status={status}
       failure={failure}
       footer={links}
@@ -83,7 +82,7 @@ export default function RecoverPage() {
         noValidate
       >
         <AuthField
-          label="Identity"
+          label={t.fields.identity}
           type="email"
           autoComplete="username"
           autoFocus
@@ -91,7 +90,7 @@ export default function RecoverPage() {
           error={errors.email?.message}
         />
         <AuthField
-          label="Recovery passphrase"
+          label={t.fields.recoveryPassphrase}
           secret
           autoComplete="off"
           registration={register("passphrase")}
@@ -100,7 +99,7 @@ export default function RecoverPage() {
 
         <div className="flex flex-col gap-1.5">
           <AuthField
-            label="New key"
+            label={t.fields.newKey}
             secret
             autoComplete="new-password"
             registration={register("newPassword")}
@@ -110,7 +109,7 @@ export default function RecoverPage() {
         </div>
 
         <AuthField
-          label="Confirm new key"
+          label={t.fields.confirmNewKey}
           secret
           autoComplete="new-password"
           registration={register("newPasswordConfirm")}
@@ -122,7 +121,7 @@ export default function RecoverPage() {
           disabled={isSubmitting}
           className="border-accent text-ink hover:bg-accent/20 mt-1 rounded-xs border py-1.5 text-sm tracking-caps disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isSubmitting ? "REPLACING…" : "REPLACE KEY"}
+          {isSubmitting ? t.recover.submitting : t.recover.submit}
         </button>
       </form>
     </AuthCard>

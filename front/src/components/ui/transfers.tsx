@@ -4,13 +4,16 @@ import { useAuth } from "@auth/context/AuthContext";
 import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import { formatSize } from "@helpers/listing";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { cancelTransfer, fetchTransfers, retryTransfer, transferStreamUrl } from "@lib/api/transfers";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { dictionary } from "@text/index";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 
-import type { TransferProgress, TransferView } from "@lib/api/transfers";
+import type { TransferOperation, TransferProgress, TransferView } from "@lib/api/transfers";
 import type { ReactNode } from "react";
 
 /**
@@ -48,6 +51,7 @@ const POLL_MS = 5_000;
 const ACTIVE = new Set(["QUEUED", "RUNNING", "PAUSED"]);
 
 export function TransferProvider({ children }: { children: ReactNode }) {
+  const t = useTranslations("ui");
   const { csrfToken } = useAuth();
   const queryClient = useQueryClient();
   const { push } = useToast();
@@ -160,13 +164,13 @@ export function TransferProvider({ children }: { children: ReactNode }) {
       if (job.status === "DONE") {
         push({
           tone: "success",
-          message: `${job.operation === "move" ? "Moved" : "Copied"} ${count(job.itemsTotal, "entry", "entries")}`,
-          detail: `${formatSize(job.bytesDone, "file")} into ${job.dstPath}`,
+          message: interpolate(doneMessage(job.operation, job.itemsTotal), { count: job.itemsTotal }),
+          detail: interpolate(t.transfers.doneDetail, { size: formatSize(job.bytesDone, "file"), path: job.dstPath }),
         });
       } else if (job.status === "FAILED") {
         // The row stays in the strip with its retry, so the toast says what
         // happened rather than repeating what the row is already showing.
-        push({ tone: "warning", message: "Transfer finished with failures", detail: job.error ?? undefined });
+        push({ tone: "warning", message: t.transfers.failedToast, detail: job.error ?? undefined });
       }
     }
   }, [list.data, queryClient, push]);
@@ -177,7 +181,7 @@ export function TransferProvider({ children }: { children: ReactNode }) {
     onError: (error) =>
       push({
         tone: "danger",
-        message: "Could not cancel that transfer",
+        message: t.transfers.cancelFailed,
         detail: error instanceof ApiError ? error.message : undefined,
       }),
   });
@@ -193,7 +197,7 @@ export function TransferProvider({ children }: { children: ReactNode }) {
     onError: (error) =>
       push({
         tone: "danger",
-        message: "Could not retry that transfer",
+        message: t.transfers.retryFailed,
         detail: error instanceof ApiError ? error.message : undefined,
       }),
   });
@@ -227,6 +231,7 @@ export function useTransfers(): TransferContextValue {
  * this section is about work in progress, and a completed transfer is history.
  */
 export function TransferQueue() {
+  const t = useTranslations("ui");
   const { jobs, cancel, retry, dismiss } = useTransfers();
 
   if (jobs.length === 0) {
@@ -235,7 +240,7 @@ export function TransferQueue() {
         data-testid="transfers-empty"
         className="text-ink-faint px-2.5 py-1 font-mono text-2xs"
       >
-        Nothing moving. F5 copies, F6 moves.
+        {t.transfers.empty}
       </p>
     );
   }
@@ -266,7 +271,9 @@ function QueueRow({
   onRetry: () => void;
   onDismiss: () => void;
 }) {
+  const t = useTranslations("ui");
   const failed = job.status === "FAILED";
+  const operation = t.transfers.operation[job.operation];
   // By bytes when there are any, by items when there are not — a transfer of a
   // thousand empty files has no bytes to be a fraction of, and a bar stuck at
   // zero for a job that is nearly done is worse than no bar.
@@ -280,12 +287,16 @@ function QueueRow({
       className="border-raised flex flex-col gap-1 border-t px-2.5 py-1.5"
     >
       <div className="flex items-baseline gap-1.5">
-        <span className={`font-mono text-2xs ${failed ? "text-danger-soft" : "text-ink-label"}`}>{job.operation}</span>
+        <span className={`font-mono text-2xs ${failed ? "text-danger-soft" : "text-ink-label"}`}>{operation}</span>
         <span className="text-ink-soft min-w-0 flex-1 truncate font-mono text-xs">{basename(job.dstPath)}</span>
-        <Tooltip content={failed ? "Dismiss" : "Cancel"}>
+        <Tooltip content={failed ? t.transfers.dismiss : t.transfers.cancel}>
           <button
             type="button"
-            aria-label={failed ? `Dismiss ${job.operation} into ${job.dstPath}` : `Cancel ${job.operation}`}
+            aria-label={
+              failed
+                ? interpolate(t.transfers.dismissLabel, { operation, path: job.dstPath })
+                : interpolate(t.transfers.cancelLabel, { operation })
+            }
             // One button, two acts: on a failed job it drops the row locally, on
             // a live one it posts a cancel. Two names, so a take that means the
             // harmless one can never reach the other — and because the
@@ -302,7 +313,7 @@ function QueueRow({
       {failed ? (
         <div className="flex items-baseline gap-1.5">
           <span className="text-danger-soft min-w-0 flex-1 truncate font-mono text-2xs">
-            {job.error ?? "Something went wrong."}
+            {job.error ?? t.transfers.unknownError}
           </span>
           {/* Only the failures re-run, which is why this is offered at all: a
               retry that redid the whole job would move gigabytes to fix one file. */}
@@ -313,7 +324,7 @@ function QueueRow({
               onClick={onRetry}
               className="text-ink-label hover:text-brand flex-none font-mono text-2xs"
             >
-              retry {job.failed}
+              {interpolate(t.transfers.retry, { count: job.failed })}
             </button>
           )}
         </div>
@@ -328,7 +339,7 @@ function QueueRow({
           <div className="text-ink-faint flex items-baseline gap-1.5 font-mono text-2xs">
             <span>{Math.round(Math.min(fraction, 1) * 100)}%</span>
             <span className="min-w-0 flex-1 truncate">
-              {job.status === "QUEUED" ? "queued" : describeRate(job.rate ?? null)}
+              {job.status === "QUEUED" ? t.transfers.queued : describeRate(job.rate ?? null)}
             </span>
             <span>{describeEta(job.etaSeconds ?? null)}</span>
           </div>
@@ -378,20 +389,24 @@ function parse(payload: string): TransferProgress | null {
 
 function describeRate(rate: number | null): string {
   if (rate === null || rate <= 0) return "";
-  return `${formatSize(rate, "file")}/s`;
+  return interpolate(dictionary.ui.transfers.rate, { size: formatSize(rate, "file") });
 }
 
 function describeEta(seconds: number | null): string {
   if (seconds === null || seconds <= 0) return "";
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  return `${Math.round(seconds / 3600)}h`;
+  const units = dictionary.ui.transfers.eta;
+  if (seconds < 60) return interpolate(units.seconds, { n: seconds });
+  if (seconds < 3600) return interpolate(units.minutes, { n: Math.round(seconds / 60) });
+  return interpolate(units.hours, { n: Math.round(seconds / 3600) });
 }
 
 function basename(path: string): string {
   return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
-function count(n: number, singular: string, plural = `${singular}s`): string {
-  return `${n} ${n === 1 ? singular : plural}`;
+/** The completion toast's sentence: the verb by operation, the noun by count. */
+function doneMessage(operation: TransferOperation, items: number): string {
+  const done = dictionary.ui.transfers.done;
+  if (operation === "move") return items === 1 ? done.movedOne : done.movedMany;
+  return items === 1 ? done.copiedOne : done.copiedMany;
 }

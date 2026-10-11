@@ -21,6 +21,11 @@
  * pure input and output.
  */
 
+import { interpolate } from "@i18n/interpolate";
+import { dictionary } from "@text/index";
+
+const WORDS = dictionary.terminal.parser;
+
 /** Everything the terminal answers to. Adding one means adding a parser. */
 export const COMMANDS = [
   "ls",
@@ -84,7 +89,7 @@ export interface TerminalContext {
  */
 const OPERATORS = new Set([";", "|", "&", "`", "$", "(", ")", "<", ">", "\n", "\r"]);
 
-const RESTRICTED = "Trekker's terminal is a restricted set, not a shell. `help` lists what it takes.";
+const RESTRICTED = WORDS.restricted;
 
 export function parse(line: string, context: TerminalContext): Parsed | null {
   const trimmed = line.trim();
@@ -95,7 +100,7 @@ export function parse(line: string, context: TerminalContext): Parsed | null {
 
   const [name, ...rest] = tokens.words;
   if (!isCommand(name)) {
-    return { ok: false, error: `${name}: command not found`, hint: RESTRICTED };
+    return { ok: false, error: interpolate(WORDS.notFound, { name }), hint: RESTRICTED };
   }
 
   return parseCommand(name, rest, context);
@@ -153,8 +158,8 @@ function tokenise(line: string): Tokens | TokenError {
     if (OPERATORS.has(character)) {
       return {
         ok: false,
-        error: `${character} is not something this terminal does`,
-        hint: "No pipes, redirection, substitution or chaining. One command, and it runs through the same guards the buttons do. Quote it — 'a;b' — to mean it as part of a name.",
+        error: interpolate(WORDS.operator, { character }),
+        hint: WORDS.operatorHint,
       };
     }
 
@@ -162,7 +167,7 @@ function tokenise(line: string): Tokens | TokenError {
     started = true;
   }
 
-  if (quote !== null) return { ok: false, error: `unbalanced ${quote} quote` };
+  if (quote !== null) return { ok: false, error: interpolate(WORDS.unbalancedQuote, { quote }) };
   if (started) words.push(current);
   return { ok: true, words };
 }
@@ -182,13 +187,13 @@ function parseCommand(name: CommandName, args: readonly string[], context: Termi
       // aimed at muscle memory.
       const rest = withoutFlags(args, ["-l", "-a", "-la", "-al", "-lah", "-alh"]);
       if (!rest.ok) return refuseFlag(name, rest.flag);
-      if (rest.words.length > 1) return tooMany(name, "one directory");
+      if (rest.words.length > 1) return tooMany(name, WORDS.takesOneDirectory);
       return { ok: true, intent: { kind: "ls", path: resolve(rest.words[0] ?? ".", context) } };
     }
 
     case "cd": {
       if (args.length === 0) return { ok: true, intent: { kind: "cd", path: context.home } };
-      if (args.length > 1) return tooMany(name, "one directory");
+      if (args.length > 1) return tooMany(name, WORDS.takesOneDirectory);
       // `cd -` is the pane's own back button, which is the honest mapping: the
       // pane keeps a history and this is a keyboard route into it.
       if (args[0] === "-") return { ok: true, intent: { kind: "cdBack" } };
@@ -198,13 +203,13 @@ function parseCommand(name: CommandName, args: readonly string[], context: Termi
     case "du": {
       const rest = withoutFlags(args, ["-h", "-s", "-sh", "-hs"]);
       if (!rest.ok) return refuseFlag(name, rest.flag);
-      if (rest.words.length > 1) return tooMany(name, "one directory");
+      if (rest.words.length > 1) return tooMany(name, WORDS.takesOneDirectory);
       return { ok: true, intent: { kind: "du", path: resolve(rest.words[0] ?? ".", context) } };
     }
 
     case "chmod": {
       if (args.length < 2) {
-        return { ok: false, error: "chmod needs a mode and something to apply it to", hint: "chmod 644 notes.txt" };
+        return { ok: false, error: WORDS.chmodNeedsArgs, hint: WORDS.chmodExample };
       }
       const [mode, ...targets] = args;
       // Octal only. The modal speaks octal and symbolic modes are a second
@@ -214,8 +219,8 @@ function parseCommand(name: CommandName, args: readonly string[], context: Termi
       if (!/^[0-7]{3,4}$/.test(mode)) {
         return {
           ok: false,
-          error: `${mode} is not an octal mode`,
-          hint: "Three or four octal digits — 644, 0755, 2775.",
+          error: interpolate(WORDS.notOctal, { mode }),
+          hint: WORDS.octalHint,
         };
       }
       return { ok: true, intent: { kind: "chmod", mode, targets: targets.map((t) => resolve(t, context)) } };
@@ -224,7 +229,7 @@ function parseCommand(name: CommandName, args: readonly string[], context: Termi
     case "rm": {
       const rest = withoutFlags(args, ["-r", "-f", "-rf", "-fr", "-R"]);
       if (!rest.ok) return refuseFlag(name, rest.flag);
-      if (rest.words.length === 0) return { ok: false, error: "rm needs something to remove" };
+      if (rest.words.length === 0) return { ok: false, error: WORDS.rmNeedsTarget };
       // `-f` is parsed and then ignored, deliberately. It means "do not ask" in
       // every shell, and here the asking is the feature: this opens the modal
       // with its typed confirmation whatever the flags said (TRE-25).
@@ -233,14 +238,15 @@ function parseCommand(name: CommandName, args: readonly string[], context: Termi
     }
 
     case "ssh": {
-      if (args.length !== 1) return { ok: false, error: "ssh takes one host", hint: "ssh web-01" };
+      if (args.length !== 1) return { ok: false, error: WORDS.sshTakesOneHost, hint: WORDS.sshExample };
       return { ok: true, intent: { kind: "ssh", host: args[0] } };
     }
 
     case "help": {
       if (args.length === 0) return { ok: true, intent: { kind: "help", topic: null } };
-      if (args.length > 1) return tooMany(name, "one command");
-      if (!isCommand(args[0])) return { ok: false, error: `${args[0]}: command not found`, hint: RESTRICTED };
+      if (args.length > 1) return tooMany(name, WORDS.takesOneCommand);
+      if (!isCommand(args[0]))
+        return { ok: false, error: interpolate(WORDS.notFound, { name: args[0] }), hint: RESTRICTED };
       return { ok: true, intent: { kind: "help", topic: args[0] } };
     }
 
@@ -251,7 +257,7 @@ function parseCommand(name: CommandName, args: readonly string[], context: Termi
     case "hostname":
     case "whoami":
     case "clear":
-      if (args.length > 0) return tooMany(name, "nothing");
+      if (args.length > 0) return tooMany(name, WORDS.takesNothing);
       return { ok: true, intent: { kind: name } };
   }
 }
@@ -281,13 +287,13 @@ function withoutFlags(args: readonly string[], allowed: readonly string[]): Flag
 function refuseFlag(name: CommandName, flag: string): Parsed {
   return {
     ok: false,
-    error: `${name}: ${flag} is not one of the flags this takes`,
-    hint: `help ${name}`,
+    error: interpolate(WORDS.badFlag, { name, flag }),
+    hint: interpolate(WORDS.helpTopic, { name }),
   };
 }
 
 function tooMany(name: CommandName, takes: string): Parsed {
-  return { ok: false, error: `${name} takes ${takes}` };
+  return { ok: false, error: interpolate(WORDS.takes, { name, takes }) };
 }
 
 // ------------------------------------------------------------------- the paths
@@ -307,9 +313,9 @@ export function resolve(argument: string, context: TerminalContext): string {
   // Segments rather than `joinPath`/`parentPath` from `@helpers/listing`, and
   // it is not a second copy of them: this is one walk that applies their rule
   // — split, drop the empties, pop on `..` — once, instead of rebuilding and
-  // re-splitting a string per segment. It also leaves this file importing
-  // nothing, which is what lets `pnpm verify:terminal` run it through Node,
-  // where a tsconfig path alias resolves to nothing at all.
+  // re-splitting a string per segment. It also keeps this file's imports to
+  // the string tree, which `pnpm verify:terminal` answers through the alias
+  // hook in `scripts/aliases.ts` — not the whole of `@helpers/listing`.
   const segments = argument.startsWith("/") ? [] : context.cwd.split("/").filter(Boolean);
 
   for (const segment of argument.split("/")) {
@@ -330,20 +336,7 @@ export function prompt(user: string, host: string, path: string, elevated: boole
 }
 
 /** One line of `help`, and the source of the per-command topic too. */
-export const USAGE: Readonly<Record<CommandName, string>> = {
-  ls: "ls [dir] — list a directory in the active pane's listing",
-  cd: "cd [dir] — move the active pane. `cd -` goes back, bare `cd` goes home",
-  pwd: "pwd — print the active pane's directory",
-  du: "du [dir] — scan disk usage, the same walk the strip runs",
-  df: "df — filesystems on this host, as the sidebar shows them",
-  chmod: "chmod <mode> <path…> — opens the permissions modal, pre-filled",
-  rm: "rm [-r] <path…> — opens the delete modal, which asks you to type the name",
-  hostname: "hostname — the host this pane is bound to",
-  whoami: "whoami — the account the connection uses on that host",
-  ssh: "ssh <host> — rebind the active pane to another host, by slug or address",
-  clear: "clear — empty the output",
-  help: "help [command] — this, or one line about one command",
-};
+export const USAGE: Readonly<Record<CommandName, string>> = dictionary.terminal.usage;
 
 // ------------------------------------------------------------- what it prints
 
@@ -447,7 +440,7 @@ export type Grouped = { ok: true; directory: string; names: string[] } | { ok: f
  * would appear over the first with no way to tell which one it was about.
  */
 export function groupTargets(targets: readonly string[]): Grouped {
-  if (targets.length === 0) return { ok: false, error: "nothing to act on" };
+  if (targets.length === 0) return { ok: false, error: dictionary.terminal.targets.nothing };
 
   const directories = new Set<string>();
   const names: string[] = [];
@@ -456,7 +449,7 @@ export function groupTargets(targets: readonly string[]): Grouped {
     const segments = target.split("/").filter(Boolean);
     const name = segments.pop();
     if (name === undefined) {
-      return { ok: false, error: "/ is not something this can act on" };
+      return { ok: false, error: dictionary.terminal.targets.root };
     }
     directories.add(`/${segments.join("/")}`);
     names.push(name);
@@ -465,8 +458,8 @@ export function groupTargets(targets: readonly string[]): Grouped {
   if (directories.size > 1) {
     return {
       ok: false,
-      error: "every path has to be in the same directory",
-      hint: "The dialogue this opens takes one directory and a list of names. Run it once per directory.",
+      error: dictionary.terminal.targets.sameDirectory,
+      hint: dictionary.terminal.targets.sameDirectoryHint,
     };
   }
 
@@ -480,8 +473,7 @@ export function helpLines(topic: CommandName | null): string[] {
   if (topic !== null) return [USAGE[topic]];
 
   return [
-    "A restricted set, not a shell. Each line is parsed into one intent and run",
-    "through the same guards the buttons use — there is no passthrough.",
+    ...dictionary.terminal.helpIntro,
     "",
     ...columns(
       COMMANDS.map((name) => [name, USAGE[name].split(" — ")[1] ?? ""]),
@@ -563,7 +555,7 @@ export const PROMPT_CHAR_INK = "text-ink-dim";
  * placeholder is "the terminal's last line", and on a fresh tab there is no
  * last line, so it falls back to the sentence the panel would have shown.
  */
-export const EMPTY_SCROLLBACK = "a restricted set, not a shell — `help` lists what it takes";
+export const EMPTY_SCROLLBACK = dictionary.terminal.panel.emptyScrollback;
 
 /** Which ink a line of scrollback takes. */
 export const LINE_INK: Readonly<Record<LineKind, string>> = {

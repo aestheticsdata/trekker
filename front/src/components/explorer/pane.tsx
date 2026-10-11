@@ -22,7 +22,10 @@ import {
 import { droppedFrom } from "@helpers/picked";
 import { PRESS } from "@helpers/press";
 import { isLogDirectory } from "@helpers/tail";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
+import { dictionary } from "@text/index";
 import { useState } from "react";
 
 import type { PaneIndex, PaneView } from "@components/explorer/pane-state";
@@ -200,6 +203,7 @@ export function Pane({
   now: number;
   callbacks: PaneCallbacks;
 }) {
+  const t = useTranslations("explorer");
   const path = pathOf(pane);
 
   // The columns this pane is not drawing, and the tracks that leaves (TRE-124).
@@ -379,9 +383,9 @@ export function Pane({
         ) : host === null ? (
           <Placeholder
             state="unbound"
-            title="no host"
-            detail="This pane has nothing to browse yet. Add the machine the API runs on, or an SSH host."
-            action={{ label: "add a host", onSelect: callbacks.onHostMenu }}
+            title={t.pane.unbound.title}
+            detail={t.pane.unbound.detail}
+            action={{ label: t.pane.unbound.action, onSelect: callbacks.onHostMenu }}
             onUp={callbacks.onUp}
           />
         ) : error ? (
@@ -521,7 +525,7 @@ export function Pane({
               className="whitespace-nowrap"
               data-testid="pane-footer-counts"
             >
-              {directories} folders · {rows.length - directories} files
+              {interpolate(t.pane.footer.counts, { directories, files: rows.length - directories })}
             </span>
             <span
               className="whitespace-nowrap"
@@ -542,14 +546,14 @@ export function Pane({
             className="text-on-pane truncate whitespace-nowrap"
             data-testid="pane-footer-selection"
           >
-            {pane.sel.length} selected · {formatTotal(selectedBytes)}
+            {interpolate(t.pane.footer.selected, { count: pane.sel.length, total: formatTotal(selectedBytes) })}
           </span>
         ) : (
           <span
             className="truncate whitespace-nowrap"
             data-testid="pane-footer-sort"
           >
-            sorted by {pane.sort} {pane.dir === 1 ? "▲" : "▼"}
+            {interpolate(t.pane.footer.sorted, { sort: pane.sort, arrow: pane.dir === 1 ? "▲" : "▼" })}
           </span>
         )}
       </footer>
@@ -570,6 +574,7 @@ function TabStrip({
   callbacks: PaneCallbacks;
   onMenu: (event: React.MouseEvent) => void;
 }) {
+  const t = useTranslations("explorer");
   /**
    * A right-click in the strip, routed by what it landed on (TRE-130).
    *
@@ -648,11 +653,11 @@ function TabStrip({
                 spend eight pixels of a dense strip saying so at once. It keeps
                 its width either way, so nothing moves as the pointer crosses. */}
             {closeable && (
-              <Tooltip content="Close tab">
+              <Tooltip content={t.pane.tabs.close}>
                 <button
                   type="button"
                   onClick={() => callbacks.onCloseTab(index)}
-                  aria-label={`Close tab ${tabPath}`}
+                  aria-label={interpolate(t.pane.tabs.closeNamed, { path: tabPath })}
                   // Its own name, and its own `data-tab`: the accessible name
                   // above carries the path, which moves with every navigation.
                   data-testid="tab-close"
@@ -688,7 +693,7 @@ function TabStrip({
       <button
         type="button"
         onClick={callbacks.onNewTab}
-        aria-label="New tab"
+        aria-label={t.pane.tabs.new}
         className="text-ink-dim hover:text-ink-muted flex items-center px-2.25 font-mono text-sm"
         data-testid="tab-new"
       >
@@ -702,7 +707,7 @@ function TabStrip({
           className="text-brand hidden items-center px-2.5 font-mono text-2xs whitespace-nowrap @[32.5rem]:flex"
           data-testid="pane-active-badge"
         >
-          ACTIVE PANE · ⇥ to switch
+          {t.pane.tabs.activeBadge}
         </span>
       )}
     </div>
@@ -732,6 +737,7 @@ function PathRow({
   callbacks: PaneCallbacks;
   onMenu: (event: React.MouseEvent) => void;
 }) {
+  const t = useTranslations("explorer");
   const badge = badgeFor(meta, volume, shownBytes, unknownShown);
 
   return (
@@ -759,26 +765,26 @@ function PathRow({
           className="size-1.25 rounded-full"
           style={{ backgroundColor: host?.colour ?? "var(--color-ink-faint)" }}
         />
-        {host?.label ?? "no host"}
+        {host?.label ?? t.pane.path.noHost}
         <span className="text-on-pane-muted">▾</span>
       </button>
 
       <NavButton
-        label="Back"
+        label={t.pane.path.back}
         glyph="←"
         enabled={pane.hist.length > 0}
         onClick={callbacks.onBack}
         testId="nav-back"
       />
       <NavButton
-        label="Forward"
+        label={t.pane.path.forward}
         glyph="→"
         enabled={pane.fwd.length > 0}
         onClick={callbacks.onForward}
         testId="nav-forward"
       />
       <NavButton
-        label="Up one level"
+        label={t.pane.path.up}
         glyph="↰"
         enabled
         onClick={callbacks.onUp}
@@ -796,7 +802,7 @@ function PathRow({
           Copying a path out of here by hand is a real thing people do, and the
           app has nothing better to offer over the text itself. */}
       <nav
-        aria-label="Breadcrumb"
+        aria-label={t.pane.path.breadcrumb}
         data-native-menu
         className="flex min-w-0 flex-auto items-center justify-end overflow-hidden"
         data-testid="path-crumbs"
@@ -863,16 +869,20 @@ function badgeFor(
 ): { label: string; hint?: string; alarming: boolean } | null {
   if (meta?.truncated) {
     return {
-      label: `⚠ first ${meta.count} of ${meta.totalEntries}`,
-      hint: "This directory has more entries than one listing carries.",
+      label: interpolate(dictionary.explorer.pane.badge.truncated, { count: meta.count, total: meta.totalEntries }),
+      hint: dictionary.explorer.pane.badge.truncatedHint,
       alarming: true,
     };
   }
 
   if (volume) {
     return {
-      label: `⚠ volume at ${volume.percent}%`,
-      hint: `${volume.mountPoint} is ${volume.percent}% full — ${formatTotal(volume.availableBytes)} free.`,
+      label: interpolate(dictionary.explorer.pane.badge.volume, { percent: volume.percent }),
+      hint: interpolate(dictionary.explorer.pane.badge.volumeHint, {
+        mount: volume.mountPoint,
+        percent: volume.percent,
+        free: formatTotal(volume.availableBytes),
+      }),
       alarming: true,
     };
   }
@@ -883,7 +893,7 @@ function badgeFor(
   // still outstanding. No marker on the number itself (TRE-110) — this badge
   // shares a fixed box with two warnings, and a wider label moves them.
   return {
-    label: `${formatTotal(shownBytes)} total`,
+    label: interpolate(dictionary.explorer.pane.badge.total, { total: formatTotal(shownBytes) }),
     hint: partialTotalHint(unknownShown),
     alarming: false,
   };
@@ -933,10 +943,10 @@ function NavButton({
  * needs no translation between the two vocabularies.
  */
 const COLUMNS: ReadonlyArray<{ key: SortKey & Column; label: string; align?: "right" }> = [
-  { key: "size", label: "SIZE", align: "right" },
-  { key: "mode", label: "MODE" },
-  { key: "owner", label: "OWNER" },
-  { key: "age", label: "AGE", align: "right" },
+  { key: "size", label: dictionary.explorer.pane.columns.size, align: "right" },
+  { key: "mode", label: dictionary.explorer.pane.columns.mode },
+  { key: "owner", label: dictionary.explorer.pane.columns.owner },
+  { key: "age", label: dictionary.explorer.pane.columns.age, align: "right" },
 ];
 
 function ColumnHeader({
@@ -954,6 +964,7 @@ function ColumnHeader({
   onSort: (key: SortKey) => void;
   onColumnMenu: (point: Point) => void;
 }) {
+  const t = useTranslations("explorer");
   const arrow = (key: SortKey) => (sort === key ? (direction === 1 ? " ▲" : " ▼") : "");
   const tone = (key: SortKey) => (sort === key ? "text-on-pane" : "text-on-pane-label");
 
@@ -981,7 +992,8 @@ function ColumnHeader({
         data-testid="column-header"
         data-column="name"
       >
-        NAME{arrow("name")}
+        {t.pane.columns.name}
+        {arrow("name")}
       </button>
       <span />
       {/* Not a button, because it is not a sort: the bar is each row's share of
@@ -993,7 +1005,7 @@ function ColumnHeader({
           data-testid="column-header"
           data-column="share"
         >
-          SHARE
+          {t.pane.columns.share}
         </span>
       )}
       {COLUMNS.filter((column) => !hidden.has(column.key)).map((column) => (
@@ -1220,6 +1232,7 @@ function Row({
  * denied", because it invites waiting for something that is not coming.
  */
 function SizeCell({ row, size, walking }: { row: FileRow; size: DirSize | null; walking: boolean }) {
+  const t = useTranslations("explorer");
   if (row.type !== "dir") return formatSize(row.size, row.type);
 
   if (row.size !== null) {
@@ -1230,7 +1243,7 @@ function SizeCell({ row, size, walking }: { row: FileRow; size: DirSize | null; 
     return size?.partial === true ? (
       <span
         className="text-on-pane-muted"
-        title="Part of this directory could not be read, so the real total is larger."
+        title={t.pane.size.partial}
       >
         {formatSize(row.size, "dir")}
       </span>
@@ -1243,7 +1256,7 @@ function SizeCell({ row, size, walking }: { row: FileRow; size: DirSize | null; 
     return (
       <span
         className="text-danger"
-        title={REFUSALS[size.error] ?? "This directory could not be measured."}
+        title={REFUSALS[size.error] ?? t.pane.size.unmeasured}
       >
         ✕
       </span>
@@ -1256,7 +1269,7 @@ function SizeCell({ row, size, walking }: { row: FileRow; size: DirSize | null; 
     return (
       <span
         className="text-on-pane-muted inline-flex h-full items-center justify-end"
-        title="Measuring…"
+        title={t.pane.size.measuring}
       >
         <MeasuringRing />
       </span>
@@ -1265,16 +1278,10 @@ function SizeCell({ row, size, walking }: { row: FileRow; size: DirSize | null; 
 
   // The feed ended without reaching this row — a closed stream, or a listing
   // that outlived it. Not an error, and not still coming: simply unknown.
-  return "—";
+  return t.pane.size.unknown;
 }
 
-const REFUSALS: Record<string, string> = {
-  EACCES: "This directory cannot be read with the account this host connects as.",
-  ENOENT: "This directory was gone by the time it was measured.",
-  ENOTDIR: "This is no longer a directory.",
-  ENOSYS: "This host cannot run a command, so its directories cannot be measured.",
-  EIO: "This directory could not be measured.",
-};
+const REFUSALS: Record<string, string> = dictionary.explorer.pane.size.refusals;
 
 /** Eleven staggered rows, as the mockup does — a listing arriving, not a spinner. */
 function Skeleton({ hidden, grid }: { hidden: ReadonlySet<Column>; grid: React.CSSProperties }) {
@@ -1332,6 +1339,7 @@ function Placeholder({
   action?: { label: string; onSelect: () => void };
   onUp: () => void;
 }) {
+  const t = useTranslations("explorer");
   return (
     <div
       className="flex h-full flex-col items-center justify-center gap-2.25 p-7"
@@ -1371,7 +1379,7 @@ function Placeholder({
           className="border-pane-dash text-on-pane-label border px-2.5 py-1.25 font-mono text-xs"
           data-testid="placeholder-up"
         >
-          go up ↰
+          {t.pane.placeholder.up}
         </button>
       </div>
     </div>
@@ -1396,13 +1404,16 @@ function EmptyState({
   onClearGlob: () => void;
   onUp: () => void;
 }) {
+  const t = useTranslations("explorer");
   if (hiddenByGlob > 0) {
     return (
       <Placeholder
         state="filtered"
-        title={`no match for ${glob}`}
-        detail={`${hiddenByGlob} ${hiddenByGlob === 1 ? "entry" : "entries"} hidden by the glob filter.`}
-        action={{ label: "clear filter", onSelect: onClearGlob }}
+        title={interpolate(t.pane.filtered.title, { glob })}
+        detail={interpolate(hiddenByGlob === 1 ? t.pane.filtered.detailOne : t.pane.filtered.detailMany, {
+          count: hiddenByGlob,
+        })}
+        action={{ label: t.pane.filtered.action, onSelect: onClearGlob }}
         onUp={onUp}
       />
     );
@@ -1411,8 +1422,8 @@ function EmptyState({
   return (
     <Placeholder
       state="empty"
-      title="empty directory"
-      detail={`Nothing here. ${path} contains no files or folders.`}
+      title={t.pane.empty.title}
+      detail={interpolate(t.pane.empty.detail, { path })}
       onUp={onUp}
     />
   );
@@ -1431,17 +1442,18 @@ function EmptyState({
  * would render for simply never settles (TRE-88).
  */
 function ErrorState({ error, onUp }: { error: unknown; onUp: () => void }) {
+  const t = useTranslations("explorer");
   const status = error instanceof ApiError ? error.status : 0;
-  const message = error instanceof Error ? error.message : "The listing could not be loaded.";
+  const message = error instanceof Error ? error.message : t.pane.error.fallback;
 
   const title =
     status === 403
-      ? "permission denied"
+      ? t.pane.error.forbidden
       : status === 404
-        ? "no such directory"
+        ? t.pane.error.notFound
         : status === 502
-          ? "host unreachable"
-          : "listing failed";
+          ? t.pane.error.unreachable
+          : t.pane.error.failed;
 
   return (
     <Placeholder

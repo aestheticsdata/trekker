@@ -39,6 +39,8 @@ import { globToRegExp, joinPath, parentPath, resolveTarget, sortRows } from "@he
 import { ACTION_GLYPH, GLYPH } from "@helpers/palette";
 import { pickedFromDrop } from "@helpers/picked";
 import { describePanes } from "@helpers/views";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { createBookmark, fetchBookmarks } from "@lib/api/bookmarks";
 import { ApiError } from "@lib/api/client";
 import { fetchDisks } from "@lib/api/disks";
@@ -51,6 +53,7 @@ import { useHashJob } from "@lib/query/use-hash-job";
 import { useSignedLink } from "@lib/query/use-signed-link";
 import { warmDirectory } from "@lib/query/warm-directory";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { dictionary } from "@text/index";
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import type { CompareCopy, CompareTarget } from "@components/explorer/compare-modal";
@@ -115,9 +118,9 @@ const RECENT_LIMIT = 6;
 
 /** The split, as three entries rather than a toggle — the toolbar has three. */
 const SPLITS: ReadonlyArray<{ mode: SplitMode; label: string; detail: string }> = [
-  { mode: "split", label: "show both panes", detail: "the two directories side by side" },
-  { mode: "left", label: "left pane only", detail: "the right one collapses" },
-  { mode: "right", label: "right pane only", detail: "the left one collapses" },
+  { mode: "split", ...dictionary.explorer.splits.split },
+  { mode: "left", ...dictionary.explorer.splits.left },
+  { mode: "right", ...dictionary.explorer.splits.right },
 ];
 
 /**
@@ -144,7 +147,9 @@ function columnRows(hide: string): readonly MenuRow[] {
     checked: !hidden.has(column),
   }));
 
-  return hidden.size === 0 ? columns : [...columns, { rule: true }, { id: "columns:all", label: "show every column" }];
+  return hidden.size === 0
+    ? columns
+    : [...columns, { rule: true }, { id: "columns:all", label: dictionary.explorer.columnMenu.showAll }];
 }
 
 /**
@@ -162,12 +167,13 @@ function columnRows(hide: string): readonly MenuRow[] {
  * place the rule "a pane keeps a tab" is ever stated to anybody.
  */
 function tabRows(pane: PaneView): readonly MenuRow[] {
-  const lone = canCloseTabs(pane) ? undefined : "A pane always keeps one tab.";
+  const text = dictionary.explorer.tabMenu;
+  const lone = canCloseTabs(pane) ? undefined : text.lone;
   return [
-    { id: "tabs:new", label: "new tab" },
+    { id: "tabs:new", label: text.newTab },
     { rule: true },
-    { id: "tabs:close", label: "close tab", unavailableReason: lone },
-    { id: "tabs:closeOthers", label: "close other tabs", unavailableReason: lone },
+    { id: "tabs:close", label: text.closeTab, unavailableReason: lone },
+    { id: "tabs:closeOthers", label: text.closeOthers, unavailableReason: lone },
   ];
 }
 
@@ -396,6 +402,7 @@ export function Explorer({
    */
   onActionContextChange: (context: ActionContext) => void;
 }) {
+  const t = useTranslations("explorer");
   const [memory, dispatch] = useReducer(explorerReducer, undefined, () => initialState());
   const { csrfToken } = useAuth();
   const { push } = useToast();
@@ -756,7 +763,7 @@ export function Explorer({
   useEffect(() => {
     if (!renameEmpty) return;
     onRenameMode(null);
-    push({ tone: "info", message: "Nothing to rename", detail: "Select an entry, or put the cursor on one" });
+    push({ tone: "info", message: t.toasts.nothingToRename, detail: t.toasts.pickSomething });
   }, [renameEmpty, onRenameMode, push]);
 
   /**
@@ -781,7 +788,7 @@ export function Explorer({
   useEffect(() => {
     if (!deleteEmpty) return;
     onDeleteOpenChange(false);
-    push({ tone: "info", message: "Nothing to delete", detail: "Select an entry, or put the cursor on one" });
+    push({ tone: "info", message: t.toasts.nothingToDelete, detail: t.toasts.pickSomething });
   }, [deleteEmpty, onDeleteOpenChange, push]);
 
   /**
@@ -808,7 +815,7 @@ export function Explorer({
   useEffect(() => {
     if (!createEmpty) return;
     onCreateMode(null);
-    push({ tone: "info", message: "No host on this pane", detail: "Bind one from the sidebar first" });
+    push({ tone: "info", message: t.toasts.noHostHere, detail: t.toasts.bindFirst });
   }, [createEmpty, onCreateMode, push]);
 
   /**
@@ -853,12 +860,12 @@ export function Explorer({
           a: {
             hostId: activePane.hostId,
             path: activePane.path,
-            label: hosts.find((host) => host.id === activePane.hostId)?.label ?? "left",
+            label: hosts.find((host) => host.id === activePane.hostId)?.label ?? t.compare.left,
           },
           b: {
             hostId: otherPane.hostId,
             path: otherPane.path,
-            label: hosts.find((host) => host.id === otherPane.hostId)?.label ?? "right",
+            label: hosts.find((host) => host.id === otherPane.hostId)?.label ?? t.compare.right,
           },
         };
 
@@ -866,7 +873,7 @@ export function Explorer({
   useEffect(() => {
     if (!compareEmpty) return;
     onCompareOpenChange(false);
-    push({ tone: "info", message: "Nothing to compare", detail: "Both panes need a host" });
+    push({ tone: "info", message: t.toasts.nothingToCompare, detail: t.toasts.bothPanesNeedHost });
   }, [compareEmpty, onCompareOpenChange, push]);
 
   /**
@@ -906,8 +913,8 @@ export function Explorer({
     onTransferMode(null);
     push(
       otherPane.hostId === null
-        ? { tone: "info", message: "No host on the other pane", detail: "A transfer needs somewhere to go" }
-        : { tone: "info", message: "Nothing to transfer", detail: "Select an entry, or put the cursor on one" },
+        ? { tone: "info", message: t.toasts.noHostOther, detail: t.toasts.transferNeedsDestination }
+        : { tone: "info", message: t.toasts.nothingToTransfer, detail: t.toasts.pickSomething },
     );
   }, [transferEmpty, otherPane.hostId, onTransferMode, push]);
 
@@ -929,8 +936,8 @@ export function Explorer({
     if (activePane.hostId === null || heldNames.length === 0) {
       push({
         tone: "info",
-        message: mode === "cut" ? "Nothing to cut" : "Nothing to copy",
-        detail: "Select an entry, or put the cursor on one",
+        message: mode === "cut" ? t.toasts.nothingToCut : t.toasts.nothingToCopy,
+        detail: t.toasts.pickSomething,
       });
       return;
     }
@@ -964,14 +971,14 @@ export function Explorer({
       return;
     }
     if (decision.kind === "unbound") {
-      push({ tone: "info", message: "No host on this pane", detail: "Bind one from the sidebar first" });
+      push({ tone: "info", message: t.toasts.noHostHere, detail: t.toasts.bindFirst });
       return;
     }
     if (decision.kind === "sameDirectory") {
       // A no-op, not an error: a move onto its own directory has nothing to do
       // and nothing to report, and a modal about zero items would be a worse
       // way to say so than one line.
-      push({ tone: "info", message: "Already here", detail: "These were cut from this directory" });
+      push({ tone: "info", message: t.toasts.paste.alreadyHere, detail: t.toasts.paste.cutFromHere });
       return;
     }
 
@@ -991,7 +998,7 @@ export function Explorer({
     } catch (error) {
       push({
         tone: "warning",
-        message: "Could not read where these came from",
+        message: t.toasts.paste.sourceUnreadable,
         detail: error instanceof ApiError ? error.message : source.directory,
       });
       return;
@@ -1004,14 +1011,18 @@ export function Explorer({
       // worth holding — the argument §1 makes against a clipboard that outlives
       // a reload, arriving a few minutes earlier.
       dispatch({ type: "release" });
-      push({ tone: "info", message: "Nothing left to paste", detail: `${nameList(missing)} no longer there` });
+      push({
+        tone: "info",
+        message: t.toasts.paste.nothingLeft,
+        detail: interpolate(t.toasts.paste.noLongerThere, { names: nameList(missing) }),
+      });
       return;
     }
     if (missing.length > 0) {
       push({
         tone: "info",
-        message: "Some of these are gone",
-        detail: `${nameList(missing)} — the rest still ${operation}`,
+        message: t.toasts.paste.someGone,
+        detail: interpolate(t.toasts.paste.restStill, { names: nameList(missing), operation }),
       });
     }
 
@@ -1117,7 +1128,7 @@ export function Explorer({
         ? (menuView?.path ?? "/")
         : menuEntries.length === 1
           ? menuEntries[0].name
-          : `${menuEntries.length} entries`;
+          : interpolate(t.menuEntries, { count: menuEntries.length });
 
   /** The clipboard, for the two entries that talk to the operating system's. */
   const toClipboard = async (text: string, message: string) => {
@@ -1127,7 +1138,7 @@ export function Explorer({
     } catch {
       // Refused on an insecure origin and in some configurations. Say what
       // happened rather than reporting a failure of the thing being copied.
-      push({ tone: "warning", message: "Could not copy", detail: "This browser refused clipboard access." });
+      push({ tone: "warning", message: t.toasts.clipboard.failed, detail: t.toasts.clipboard.refused });
     }
   };
 
@@ -1136,12 +1147,12 @@ export function Explorer({
     void createBookmark({ hostId, path, label }, csrfToken).then(
       () => {
         void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.BOOKMARKS] });
-        push({ tone: "success", message: "Added to favourites", detail: path });
+        push({ tone: "success", message: t.toasts.favourite.added, detail: path });
       },
       (error: unknown) => {
         push({
           tone: "warning",
-          message: "Could not add that favourite",
+          message: t.toasts.favourite.failed,
           detail: error instanceof ApiError ? error.message : path,
         });
       },
@@ -1251,10 +1262,10 @@ export function Explorer({
         }
         return;
       case "copyPath":
-        void toClipboard(first ? joinPath(view.path, first.name) : view.path, "Path copied");
+        void toClipboard(first ? joinPath(view.path, first.name) : view.path, t.toasts.clipboard.pathCopied);
         return;
       case "copyName":
-        if (first) void toClipboard(first.name, "Name copied");
+        if (first) void toClipboard(first.name, t.toasts.clipboard.nameCopied);
         return;
       case "favourite":
         if (hostId !== null) addFavourite(hostId, first ? joinPath(view.path, first.name) : view.path);
@@ -1294,14 +1305,14 @@ export function Explorer({
     onDownloadRequestedChange(false);
 
     if (activePane.hostId === null || downloadEntries.length === 0) {
-      push({ tone: "info", message: "Nothing to download", detail: "Select an entry, or put the cursor on one" });
+      push({ tone: "info", message: t.toasts.download.nothing, detail: t.toasts.pickSomething });
       return;
     }
     if (downloadEntries.length > 1) {
       push({
         tone: "info",
-        message: "One at a time",
-        detail: "A download takes one entry. Download the directory to get several as a zip.",
+        message: t.toasts.download.oneAtATime,
+        detail: t.toasts.download.oneEntry,
       });
       return;
     }
@@ -1333,7 +1344,7 @@ export function Explorer({
     onDuplicateRequestedChange(false);
 
     if (activePane.hostId === null || duplicateEntries.length === 0) {
-      push({ tone: "info", message: "Nothing to duplicate", detail: "Select an entry, or put the cursor on one" });
+      push({ tone: "info", message: t.toasts.duplicate.nothing, detail: t.toasts.pickSomething });
       return;
     }
 
@@ -1360,8 +1371,11 @@ export function Explorer({
       (error: unknown) => {
         push({
           tone: "warning",
-          message: names.length === 1 ? `Could not duplicate ${names[0]}` : "Could not duplicate",
-          detail: error instanceof ApiError ? error.message : "The host refused.",
+          message:
+            names.length === 1
+              ? interpolate(t.toasts.duplicate.failedOne, { name: names[0] })
+              : t.toasts.duplicate.failed,
+          detail: error instanceof ApiError ? error.message : t.toasts.duplicate.hostRefused,
         });
       },
     );
@@ -1388,14 +1402,14 @@ export function Explorer({
    */
   const askUploadFromDrop = (pane: PaneIndex, dropped: DroppedItems) => {
     if (views[pane].hostId === null) {
-      push({ tone: "info", message: "No host on that pane", detail: "Bind one from the sidebar first" });
+      push({ tone: "info", message: t.toasts.noHostThere, detail: t.toasts.bindFirst });
       return;
     }
     void pickedFromDrop(dropped).then((picked) => {
       // An empty folder, or a drag that turned out to carry nothing readable.
       // Raising an empty modal for it would be a dialog with nothing to say.
       if (picked.files.length === 0) {
-        push({ tone: "info", message: "Nothing to upload", detail: "That drop carried no files" });
+        push({ tone: "info", message: t.toasts.upload.nothing, detail: t.toasts.upload.dropEmpty });
         return;
       }
       setUploadPick({ pane, picked });
@@ -1440,7 +1454,7 @@ export function Explorer({
     onUploadRequestedChange(false);
 
     if (activePane.hostId === null) {
-      push({ tone: "info", message: "No host on this pane", detail: "Bind one from the sidebar first" });
+      push({ tone: "info", message: t.toasts.noHostHere, detail: t.toasts.bindFirst });
       return;
     }
     // Empty, and that is the point: the dialogue is opened from inside the
@@ -1615,10 +1629,10 @@ export function Explorer({
       offered.add(activeHost.homePath);
       goToEntries.push({
         id: "go:home",
-        group: "GO TO",
+        group: dictionary.actions.palette.groups.goTo,
         icon: GLYPH.goTo,
         label: activeHost.homePath,
-        detail: `home directory on ${activeHost.label}`,
+        detail: interpolate(t.palette.goTo.home, { host: activeHost.label }),
         run: () => go(active, activeHost.homePath),
       });
     }
@@ -1627,11 +1641,13 @@ export function Explorer({
       offered.add(bookmark.path);
       goToEntries.push({
         id: `go:favourite:${bookmark.id}`,
-        group: "GO TO",
+        group: dictionary.actions.palette.groups.goTo,
         icon: GLYPH.goTo,
         label: bookmark.path,
         detail:
-          bookmark.hint === null ? `favourite · ${bookmark.label}` : `favourite · ${bookmark.label} · ${bookmark.hint}`,
+          bookmark.hint === null
+            ? interpolate(t.palette.goTo.favourite, { label: bookmark.label })
+            : interpolate(t.palette.goTo.favouriteWithHint, { label: bookmark.label, hint: bookmark.hint }),
         run: () => go(active, bookmark.path),
       });
     }
@@ -1642,10 +1658,10 @@ export function Explorer({
       recents += 1;
       goToEntries.push({
         id: `go:recent:${path}`,
-        group: "GO TO",
+        group: dictionary.actions.palette.groups.goTo,
         icon: GLYPH.goTo,
         label: path,
-        detail: "recently in this pane",
+        detail: t.palette.goTo.recent,
         run: () => go(active, path),
       });
       if (recents === RECENT_LIMIT) break;
@@ -1660,7 +1676,7 @@ export function Explorer({
           : [
               {
                 id: `action:${row.id}`,
-                group: "ACTIONS",
+                group: dictionary.actions.palette.groups.actions,
                 icon: ACTION_GLYPH[row.id],
                 label: row.label,
                 detail: row.note ?? "",
@@ -1674,30 +1690,30 @@ export function Explorer({
 
       {
         id: "view:inspector",
-        group: "VIEW",
+        group: dictionary.actions.palette.groups.view,
         icon: GLYPH.inspector,
-        label: inspector ? "hide the inspector" : "show the inspector",
-        detail: "the panel beside the panes",
+        label: inspector ? t.palette.view.hideInspector : t.palette.view.showInspector,
+        detail: t.palette.view.inspectorDetail,
         hint: hintFor("inspector"),
         run: () => onInspectorChange(!inspector),
       },
       ...SPLITS.map(
         (split): PaletteEntry => ({
           id: `view:split:${split.mode}`,
-          group: "VIEW",
+          group: dictionary.actions.palette.groups.view,
           icon: GLYPH.split,
           label: split.label,
           detail: split.detail,
-          unavailableReason: splitMode === split.mode ? "The panes are already like this" : undefined,
+          unavailableReason: splitMode === split.mode ? t.palette.view.alreadySplit : undefined,
           run: () => onSplitModeChange(split.mode),
         }),
       ),
       {
         id: "view:heat",
-        group: "VIEW",
+        group: dictionary.actions.palette.groups.view,
         icon: GLYPH.heat,
-        label: heat ? "hide the age heat map" : "show the age heat map",
-        detail: "colour every row by how long ago it changed",
+        label: heat ? t.palette.view.hideHeat : t.palette.view.showHeat,
+        detail: t.palette.view.heatDetail,
         run: () => onHeatChange(!heat),
       },
 
@@ -1709,9 +1725,12 @@ export function Explorer({
       ...HIDEABLE.map(
         (column): PaletteEntry => ({
           id: `view:column:${column}`,
-          group: "VIEW",
+          group: dictionary.actions.palette.groups.view,
           icon: GLYPH.columns,
-          label: parseHidden(activePane.hide).has(column) ? `show the ${column} column` : `hide the ${column} column`,
+          label: interpolate(
+            parseHidden(activePane.hide).has(column) ? t.palette.view.showColumn : t.palette.view.hideColumn,
+            { column },
+          ),
           detail: activePane.path,
           run: () => toggleColumn(active, column),
         }),
@@ -1721,9 +1740,9 @@ export function Explorer({
         : [
             {
               id: "view:columns:all",
-              group: "VIEW" as const,
+              group: dictionary.actions.palette.groups.view,
               icon: GLYPH.columns,
-              label: "show every column",
+              label: t.palette.view.showAllColumns,
               detail: activePane.path,
               run: () => resetColumns(active),
             },
@@ -1731,9 +1750,9 @@ export function Explorer({
 
       {
         id: "shell:terminal",
-        group: "SHELL",
+        group: dictionary.actions.palette.groups.shell,
         icon: GLYPH.shell,
-        label: terminalOpen ? "close the terminal" : "open the terminal here",
+        label: terminalOpen ? t.palette.shell.closeTerminal : t.palette.shell.openTerminal,
         detail: activePane.path,
         hint: hintFor("terminal"),
         run: () => onTerminalOpenChange(!terminalOpen),
@@ -1742,40 +1761,47 @@ export function Explorer({
       ...savedViews.map(
         (view): PaletteEntry => ({
           id: `views:restore:${view.id}`,
-          group: "VIEWS",
+          group: dictionary.actions.palette.groups.views,
           icon: GLYPH.view,
-          label: `restore the view ${view.name}`,
+          label: interpolate(t.palette.views.restore, { name: view.name }),
           detail: describePanes(view.layout, (hostId) => hosts.find((host) => host.id === hostId)?.label ?? null),
           hint: view.slot === null ? undefined : writeViewSlot(view.slot),
           // Offered even when it is the one already restored: what is on screen
           // may have moved away from it since, and re-running it is how you get
           // back. `unavailableReason` here would be a claim that nothing has
           // changed, which is the dirty dot's job and not this row's.
-          unavailableReason: onRestoreView === undefined ? "Saved views are not available here" : undefined,
+          unavailableReason: onRestoreView === undefined ? t.palette.views.unavailable : undefined,
           run: () => onRestoreView?.(view.id),
         }),
       ),
       {
         id: "views:save",
-        group: "VIEWS",
+        group: dictionary.actions.palette.groups.views,
         icon: GLYPH.saveView,
-        label: "save this layout as a view",
-        detail: "both panes, their sorts, the split and the glob",
-        unavailableReason: onSaveView === undefined ? "Saved views are not available here" : undefined,
+        label: t.palette.views.save,
+        detail: t.palette.views.saveDetail,
+        unavailableReason: onSaveView === undefined ? t.palette.views.unavailable : undefined,
         run: () => onSaveView?.(),
       },
 
       ...hosts.map((host, index): PaletteEntry => {
         const summary = summaries[index]?.data;
-        const where = host.transport === "LOCAL" ? "local" : `${host.username ?? "?"}@${host.address ?? "?"}`;
-        const ping = summary?.pingMs == null ? "—" : `${summary.pingMs} ms`;
+        const servers = t.palette.servers;
+        const where =
+          host.transport === "LOCAL"
+            ? servers.local
+            : interpolate(servers.remote, {
+                user: host.username ?? servers.unknownPart,
+                address: host.address ?? servers.unknownPart,
+              });
+        const ping = summary?.pingMs == null ? servers.noPing : interpolate(servers.pingMs, { ms: summary.pingMs });
         return {
           id: `server:${host.id}`,
-          group: "SERVERS",
+          group: dictionary.actions.palette.groups.servers,
           icon: GLYPH.server,
-          label: `connect this pane to ${host.label}`,
-          detail: `${where} · ${ping}`,
-          unavailableReason: host.id === activePane.hostId ? "This pane is already on it" : undefined,
+          label: interpolate(servers.connect, { host: host.label }),
+          detail: interpolate(servers.detail, { where, ping }),
+          unavailableReason: host.id === activePane.hostId ? servers.alreadyOn : undefined,
           run: () => bindPane(active, host),
         };
       }),
@@ -1791,7 +1817,7 @@ export function Explorer({
       if (row.linkInsideRoot === false) {
         push({
           tone: "warning",
-          message: "That link leaves the allowed roots",
+          message: t.toasts.linkLeavesRoots,
           detail: row.linkTarget ?? row.name,
         });
         return;
@@ -1803,7 +1829,7 @@ export function Explorer({
         return;
       }
     }
-    push({ tone: "info", message: row.name, detail: "Read-only preview arrives with the inspector (TRE-17)" });
+    push({ tone: "info", message: row.name, detail: t.toasts.previewPending });
   };
 
   useKeyboard({
@@ -2252,11 +2278,8 @@ export function Explorer({
       (error: unknown) => {
         push({
           tone: "warning",
-          message: "Could not remember these columns",
-          detail:
-            error instanceof ApiError
-              ? error.message
-              : "This pane is showing what you asked for; the machine will not remember it.",
+          message: t.toasts.columns.notRemembered,
+          detail: error instanceof ApiError ? error.message : t.toasts.columns.notRememberedDetail,
         });
       },
     );
@@ -2604,7 +2627,7 @@ export function Explorer({
           // Named for the pane it will change, not "columns". The two panes have
           // their own sets, and a menu that did not say which one it was about
           // would be the ambiguity this design exists to remove.
-          label={`columns · ${views[columnMenu.pane].path}`}
+          label={interpolate(t.columnMenu.label, { path: views[columnMenu.pane].path })}
           rows={columnRows(views[columnMenu.pane].hide)}
           onChoose={(id) => {
             const pane = columnMenu.pane;

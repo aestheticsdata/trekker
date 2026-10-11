@@ -5,6 +5,9 @@ import { HostForm } from "@components/hosts/host-form";
 import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
+import { dictionary } from "@text/index";
 import { useState } from "react";
 
 import type { HostView } from "@lib/api/hosts";
@@ -57,6 +60,7 @@ export function HostManager({
   onChanged: (event: { host: HostView; deleted?: boolean }) => void;
   onClose: () => void;
 }) {
+  const t = useTranslations("hosts");
   const { push } = useToast();
   // What the caller asked for — except on a deployment with no hosts, which has
   // exactly one useful thing to show whichever door was used to get here.
@@ -72,7 +76,7 @@ export function HostManager({
 
   return (
     <Overlay
-      label="Hosts"
+      label={t.manager.dialog}
       onClosed={onClose}
       testId="host-manager"
       panelClassName="bg-app border-line-strong flex h-full max-h-[36rem] w-full max-w-[46rem] overflow-hidden rounded-sm border shadow-2xl"
@@ -81,7 +85,7 @@ export function HostManager({
         <>
           <div className="border-line bg-chrome flex w-52 flex-none flex-col border-r">
             <header className="border-line text-ink-muted flex h-toolbar flex-none items-center justify-between border-b px-2.5 font-mono text-2xs tracking-label">
-              HOSTS
+              {t.manager.listHeading}
               <span className="text-ink-faint">{hosts.length}</span>
             </header>
 
@@ -103,9 +107,7 @@ export function HostManager({
                 />
               ))}
               {hosts.length === 0 && (
-                <p className="text-ink-faint p-2.5 font-mono text-2xs/relaxed">
-                  No hosts yet. Add the machine the API runs on, or an SSH host.
-                </p>
+                <p className="text-ink-faint p-2.5 font-mono text-2xs/relaxed">{t.manager.empty}</p>
               )}
             </div>
 
@@ -116,19 +118,23 @@ export function HostManager({
                 data-testid="host-new"
                 className="w-full justify-center"
               >
-                + new host
+                {t.manager.newHost}
               </Button>
             </div>
           </div>
 
           <div className="flex min-w-0 flex-1 flex-col">
             <header className="border-line text-ink-muted flex h-toolbar flex-none items-center justify-between border-b px-3 font-mono text-2xs tracking-label">
-              {mode.kind === "create" ? "NEW HOST" : mode.kind === "edit" ? mode.host.slug : "SELECT A HOST"}
-              <Tooltip content="Close (⎋)">
+              {mode.kind === "create"
+                ? t.manager.newHostHeading
+                : mode.kind === "edit"
+                  ? mode.host.slug
+                  : t.manager.idleHeading}
+              <Tooltip content={t.manager.closeTooltip}>
                 <button
                   type="button"
                   onClick={close}
-                  aria-label="Close"
+                  aria-label={t.manager.close}
                   data-testid="host-manager-close"
                   className="text-ink-faint hover:text-ink px-1 font-mono text-sm"
                 >
@@ -139,7 +145,7 @@ export function HostManager({
 
             {mode.kind === "idle" ? (
               <p className="text-ink-faint flex flex-1 items-center justify-center p-6 text-center font-mono text-2xs/relaxed">
-                Pick a host on the left to open it in this pane, or its name to edit it.
+                {t.manager.idle}
               </p>
             ) : (
               <HostForm
@@ -150,12 +156,16 @@ export function HostManager({
                 localTaken={localTaken}
                 onSaved={(host) => {
                   onChanged({ host });
-                  push({ tone: "success", message: `${host.label} saved`, detail: describe(host) });
+                  push({
+                    tone: "success",
+                    message: interpolate(t.manager.saved, { label: host.label }),
+                    detail: describe(host),
+                  });
                   setMode({ kind: "edit", host });
                 }}
                 onDeleted={(host) => {
                   onChanged({ host, deleted: true });
-                  push({ tone: "warning", message: `${host.label} deleted` });
+                  push({ tone: "warning", message: interpolate(t.manager.deleted, { label: host.label }) });
                   setMode({ kind: "idle" });
                 }}
                 onCancel={() => setMode({ kind: "idle" })}
@@ -181,6 +191,8 @@ function HostRow({
   onEdit: () => void;
   onPick: () => void;
 }) {
+  const t = useTranslations("hosts");
+
   return (
     // `hosts-row`, not `server-row`: the sidebar lists the same hosts under
     // that name, and the slug is the companion on both.
@@ -203,11 +215,11 @@ function HostRow({
         <span className="text-ink-soft w-full truncate font-mono text-xs">{host.label}</span>
         <span className="text-ink-dim w-full truncate font-mono text-2xs">{describe(host)}</span>
       </button>
-      <Tooltip content={bound ? "Already open in this pane" : "Open in this pane"}>
+      <Tooltip content={bound ? t.row.alreadyOpen : t.row.open}>
         <button
           type="button"
           onClick={onPick}
-          aria-label={`Open ${host.label} in this pane`}
+          aria-label={interpolate(t.row.openNamed, { label: host.label })}
           // The glyph is `→` or `●` by state and the accessible name embeds the
           // label, so the slug is what a script binds by.
           data-testid="hosts-bind"
@@ -222,6 +234,11 @@ function HostRow({
 }
 
 function describe(host: HostView): string {
-  if (host.transport === "LOCAL") return `local · ${host.homePath}`;
-  return `${host.username ?? "?"}@${host.address ?? "?"}${host.port === 22 ? "" : `:${host.port}`}`;
+  const text = dictionary.hosts.row;
+  if (host.transport === "LOCAL") return interpolate(text.describeLocal, { home: host.homePath });
+  return interpolate(text.describeSsh, {
+    username: host.username ?? text.unknown,
+    address: host.address ?? text.unknown,
+    port: host.port === 22 ? "" : interpolate(text.portSuffix, { port: host.port }),
+  });
 }

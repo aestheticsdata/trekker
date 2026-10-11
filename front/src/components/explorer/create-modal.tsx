@@ -5,9 +5,12 @@ import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import { PRESS, SELECTED } from "@helpers/press";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { createDirectory, createFile } from "@lib/api/create";
 import { useMutation } from "@tanstack/react-query";
+import { dictionary } from "@text/index";
 import { useEffect, useRef, useState } from "react";
 
 import type { FileRowDetail } from "@lib/api/fs";
@@ -52,9 +55,11 @@ export function CreateModal({
   /** The entry as the server statted it, so the caller can go and select it. */
   onCreated: (entry: FileRowDetail) => void;
 }) {
+  const t = useTranslations("dialogs");
+
   return (
     <Overlay
-      label={`New entry in ${target.directory}`}
+      label={interpolate(t.create.dialog, { directory: target.directory })}
       onClosed={onClose}
       testId="create-modal"
       panelClassName="bg-app border-line-strong flex w-full max-w-[28rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
@@ -82,6 +87,7 @@ function CreatePanel({
   close: () => void;
   onCreated: (entry: FileRowDetail) => void;
 }) {
+  const t = useTranslations("dialogs");
   const { csrfToken } = useAuth();
   const { push } = useToast();
   const { hostId, directory, existing } = target;
@@ -96,7 +102,7 @@ function CreatePanel({
   // have to be: the server refuses with a 409 either way, and this only saves
   // the round trip for the case the operator can already see.
   const collides = typed !== null && existing.includes(name);
-  const problem = typed === null ? null : (nameProblem(name) ?? (collides ? "Already in this directory." : null));
+  const problem = typed === null ? null : (nameProblem(name) ?? (collides ? t.create.collides : null));
 
   const create = useMutation({
     mutationFn: () => {
@@ -107,11 +113,11 @@ function CreatePanel({
     throwOnError: false,
     onSuccess: (entry) => {
       onCreated(entry);
-      push({ tone: "success", message: `${entry.name} created`, detail: directory });
+      push({ tone: "success", message: interpolate(t.create.created, { name: entry.name }), detail: directory });
       close();
     },
     onError: (error) => {
-      setFailure(error instanceof ApiError ? error.message : "The entry could not be created.");
+      setFailure(error instanceof ApiError ? error.message : t.create.failure);
     },
   });
 
@@ -130,12 +136,12 @@ function CreatePanel({
   return (
     <>
       <header className="bg-line border-line-strong flex h-topbar flex-none items-center gap-2.25 border-b px-3">
-        <span className="text-ink font-mono text-xs font-semibold tracking-label">new</span>
+        <span className="text-ink font-mono text-xs font-semibold tracking-label">{t.create.title}</span>
         <div className="flex-1" />
         {/* Both, always visible: whichever one the caller opened, the other is
             one click away rather than behind a second entry point. */}
         <fieldset
-          aria-label="What to create"
+          aria-label={t.create.modeLabel}
           className="border-line-strong flex h-5 flex-none overflow-hidden rounded-sm border"
         >
           {(["dir", "file"] as const).map((option) => {
@@ -152,20 +158,20 @@ function CreatePanel({
                   active ? `${SELECTED} font-medium` : "text-ink-muted"
                 }`}
               >
-                {option}
+                {t.create.modes[option]}
               </button>
             );
           })}
         </fieldset>
-        <Tooltip content="Close (⎋)">
+        <Tooltip content={t.common.closeTooltip}>
           <button
             type="button"
             onClick={close}
-            aria-label="Close"
+            aria-label={t.common.close}
             data-testid="create-close"
             className="text-ink-dim font-mono text-2xs"
           >
-            esc ✕
+            {t.common.escClose}
           </button>
         </Tooltip>
       </header>
@@ -174,7 +180,7 @@ function CreatePanel({
         {/* Where this lands, above the field, so the directory is never a thing
             the operator has to remember from the pane behind the dialog. */}
         <div className="text-ink-faint mb-1.25 flex items-baseline gap-2 font-sans text-3xs/none font-medium tracking-[0.12em] uppercase">
-          <span>in</span>
+          <span>{t.create.in}</span>
           <Tooltip content={directory}>
             <span className="text-ink-dim min-w-0 truncate font-mono text-2xs/none tracking-normal normal-case">
               {directory}
@@ -183,7 +189,9 @@ function CreatePanel({
         </div>
 
         <div className="mb-1.25 flex items-baseline justify-between gap-2">
-          <span className="text-ink-faint font-sans text-3xs/none font-medium tracking-[0.12em] uppercase">name</span>
+          <span className="text-ink-faint font-sans text-3xs/none font-medium tracking-[0.12em] uppercase">
+            {t.create.name}
+          </span>
           {/* Always rendered, so nothing on the form moves when a problem
               appears — the rule the auth screens set. */}
           <span
@@ -201,8 +209,8 @@ function CreatePanel({
           onKeyDown={(event) => {
             if (event.key === "Enter" && ready) create.mutate();
           }}
-          placeholder={mode === "dir" ? "reports" : "notes.md"}
-          aria-label={mode === "dir" ? "New directory name" : "New file name"}
+          placeholder={t.create.placeholders[mode]}
+          aria-label={t.create.nameLabels[mode]}
           // The accessible name follows the mode, so a script names the field by this.
           data-testid="create-name"
           className={`bg-chrome text-ink w-full border px-2.25 py-1.75 font-mono text-name/none ${
@@ -218,9 +226,7 @@ function CreatePanel({
       )}
 
       <footer className="bg-chrome border-line flex h-11 flex-none items-center gap-2 border-t px-3.5">
-        <span className="text-ink-muted font-mono text-2xs/none">
-          {mode === "dir" ? "an empty directory" : "an empty file, 0 bytes"}
-        </span>
+        <span className="text-ink-muted font-mono text-2xs/none">{t.create.descriptions[mode]}</span>
         <div className="flex-1" />
         <button
           type="button"
@@ -228,7 +234,7 @@ function CreatePanel({
           data-testid="create-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
-          cancel
+          {t.common.cancel}
         </button>
         <button
           type="button"
@@ -239,7 +245,7 @@ function CreatePanel({
           data-testid="create-submit"
           className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
-          {create.isPending ? "creating…" : mode === "dir" ? "mkdir" : "create"}
+          {create.isPending ? t.create.creating : t.create.submit[mode]}
         </button>
       </footer>
     </>
@@ -259,9 +265,10 @@ function CreatePanel({
  * eventually disagrees with the filesystem it is guessing about.
  */
 function nameProblem(name: string): string | null {
-  if (name.includes("/")) return "A name is one segment — it cannot contain “/”.";
-  if (name === "." || name === "..") return `“${name}” names a directory, not a file.`;
-  if (name !== name.trim()) return "A name cannot start or end with a space.";
-  if (name.endsWith(".")) return "A name cannot end with a dot.";
+  const text = dictionary.dialogs.create.problems;
+  if (name.includes("/")) return text.slash;
+  if (name === "." || name === "..") return interpolate(text.dots, { name });
+  if (name !== name.trim()) return text.spaces;
+  if (name.endsWith(".")) return text.trailingDot;
   return null;
 }

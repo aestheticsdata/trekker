@@ -22,23 +22,16 @@
  * into it.
  */
 
-import {
-  ACTION_GLYPH,
-  commonPrefix,
-  completions,
-  GROUPS,
-  joinInto,
-  pathQuery,
-  rank,
-  score,
-  withHeads,
-} from "../src/helpers/palette.ts";
 import { registerAliases } from "./aliases.ts";
 
-// The registry imports `@helpers/keys`; see `aliases.ts` for why this has to be
-// a dynamic import rather than a static one.
+// The registry imports `@helpers/keys`, and since TRE-116 both it and
+// `helpers/palette.ts` import `@text/index`; see `aliases.ts` for why these
+// have to be dynamic imports rather than static ones.
 registerAliases();
 const { isRule, resolveActions } = await import("../src/components/shell/actions.ts");
+const { ACTION_GLYPH, commonPrefix, completions, GROUPS, joinInto, pathQuery, rank, score, withHeads } = await import(
+  "../src/helpers/palette.ts"
+);
 
 import type { Candidate } from "../src/helpers/palette.ts";
 
@@ -88,11 +81,7 @@ ok("the description is searchable", score("pattern", RENAME) !== null);
 const COPY_TO = entry("copy to other pane", "with each conflict decided per entry");
 ok("tokens may arrive in any order", score("pane copy", COPY_TO) !== null);
 ok("in either order", score("copy pane", COPY_TO) !== null);
-check(
-  "and the order does not change the score",
-  score("pane copy", COPY_TO),
-  score("copy pane", COPY_TO),
-);
+check("and the order does not change the score", score("pane copy", COPY_TO), score("copy pane", COPY_TO));
 
 console.log("--- and what beats what ---");
 
@@ -143,7 +132,9 @@ check(
 );
 check(
   "`re` puts the two that start with it above the three that contain it",
-  rank(LIST, "re").slice(0, 2).map((item) => item.label),
+  rank(LIST, "re")
+    .slice(0, 2)
+    .map((item) => item.label),
   ["rename", "refresh"],
 );
 check("a query nothing answers returns nothing", rank(LIST, "zzz").length, 0);

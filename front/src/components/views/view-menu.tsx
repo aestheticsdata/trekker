@@ -5,10 +5,13 @@ import { ContextMenu } from "@components/ui/context-menu";
 import { useToast } from "@components/ui/toast";
 import { VIEW_SLOTS, writeViewSlot } from "@helpers/keys";
 import { freeSlot, isDirty } from "@helpers/views";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { createView, deleteView, updateView } from "@lib/api/views";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { dictionary } from "@text/index";
 
 import type { MenuRow } from "@components/shell/actions";
 import type { ViewSlot } from "@helpers/keys";
@@ -67,6 +70,7 @@ export function ViewMenu({
   onAdopt: () => void;
   onClose: () => void;
 }) {
+  const t = useTranslations("views");
   const { csrfToken } = useAuth();
   const { push } = useToast();
   const queryClient = useQueryClient();
@@ -81,9 +85,13 @@ export function ViewMenu({
     onSuccess: async () => {
       await refresh();
       onAdopt();
-      push({ tone: "success", message: `${view.name} updated`, detail: "from what is on screen" });
+      push({
+        tone: "success",
+        message: interpolate(t.menu.updated, { name: view.name }),
+        detail: t.menu.updatedDetail,
+      });
     },
-    onError: (error) => failed(error, `Could not update ${view.name}`),
+    onError: (error) => failed(error, interpolate(t.menu.updateFailed, { name: view.name })),
   });
 
   const duplicate = useMutation({
@@ -106,11 +114,11 @@ export function ViewMenu({
       await refresh();
       push({
         tone: "success",
-        message: `${made.name} saved`,
-        detail: made.slot === null ? "no shortcut free" : writeViewSlot(made.slot),
+        message: interpolate(t.menu.saved, { name: made.name }),
+        detail: made.slot === null ? t.menu.noSlotFree : writeViewSlot(made.slot),
       });
     },
-    onError: (error) => failed(error, `Could not duplicate ${view.name}`),
+    onError: (error) => failed(error, interpolate(t.menu.duplicateFailed, { name: view.name })),
   });
 
   const remove = useMutation({
@@ -118,25 +126,25 @@ export function ViewMenu({
     throwOnError: false,
     onSuccess: async () => {
       await refresh();
-      push({ tone: "info", message: `${view.name} deleted` });
+      push({ tone: "info", message: interpolate(t.menu.deleted, { name: view.name }) });
     },
-    onError: (error) => failed(error, `Could not delete ${view.name}`),
+    onError: (error) => failed(error, interpolate(t.menu.deleteFailed, { name: view.name })),
   });
 
   const rows: readonly MenuRow[] = [
-    { id: RESTORE, label: "Restore", hint: view.slot === null ? undefined : writeViewSlot(view.slot) },
+    { id: RESTORE, label: t.menu.restore, hint: view.slot === null ? undefined : writeViewSlot(view.slot) },
     {
       id: UPDATE,
-      label: "Update from current",
+      label: t.menu.update,
       // Only ever dead for the view actually on screen, and then only because
       // there is nothing to write. Any other view is a perfectly good thing to
       // overwrite with what is showing.
-      unavailableReason: isDirty(view.layout, current) ? undefined : "This is already what is on screen",
+      unavailableReason: isDirty(view.layout, current) ? undefined : t.menu.alreadyOnScreen,
     },
-    { id: RENAME, label: "Rename…" },
-    { id: DUPLICATE, label: "Duplicate" },
+    { id: RENAME, label: t.menu.rename },
+    { id: DUPLICATE, label: t.menu.duplicate },
     { rule: true },
-    { id: DELETE, label: "Delete view", danger: true },
+    { id: DELETE, label: t.menu.delete, danger: true },
   ];
 
   return (
@@ -181,10 +189,10 @@ export function ViewMenu({
  */
 function copyName(name: string, views: readonly SavedView[]): string {
   const taken = new Set(views.map((view) => view.name));
-  const base = `${name} copy`.slice(0, 64);
+  const base = interpolate(dictionary.views.menu.copyName, { name }).slice(0, 64);
   if (!taken.has(base)) return base;
   for (let n = 2; n < 100; n += 1) {
-    const candidate = `${base} ${n}`.slice(0, 64);
+    const candidate = interpolate(dictionary.views.menu.copyNumbered, { name: base, n }).slice(0, 64);
     if (!taken.has(candidate)) return candidate;
   }
   return base;

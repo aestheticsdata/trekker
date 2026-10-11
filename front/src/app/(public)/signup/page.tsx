@@ -4,6 +4,8 @@ import useCredentials from "@auth/helpers/useCredentials";
 import { AuthCard, AuthLinks, AuthNotice } from "@components/auth/auth-card";
 import { AuthField, StrengthMeter } from "@components/auth/auth-field";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { fetchSignupStatus, register as registerAccount } from "@lib/api/users";
 import { MIN_PASSPHRASE, registerSchema } from "@schemas/auth";
@@ -15,6 +17,7 @@ import type { AuthStatus } from "@components/auth/auth-card";
 import type { RegisterValues } from "@schemas/auth";
 
 export default function SignupPage() {
+  const t = useTranslations("auth");
   const { setCredentials } = useCredentials();
   const [status, setStatus] = useState<AuthStatus>("IDLE");
   const [failure, setFailure] = useState<string | null>(null);
@@ -44,7 +47,7 @@ export default function SignupPage() {
       setCredentials(auth);
     } catch (error) {
       setStatus("REJECTED");
-      setFailure(error instanceof ApiError ? error.message : "The API could not be reached.");
+      setFailure(error instanceof ApiError ? error.message : t.unreachable);
     }
   };
 
@@ -58,27 +61,20 @@ export default function SignupPage() {
   const links = (
     <AuthLinks
       links={[
-        { href: "/login", label: "sign in" },
-        { href: "/about", label: "about" },
+        { href: "/login", label: t.links.signIn },
+        { href: "/about", label: t.links.about },
       ]}
     />
   );
 
   return (
     <AuthCard
-      title="TREKKER"
-      subtitle="Register"
+      title={t.title}
+      subtitle={t.signup.subtitle}
       status={status}
       failure={failure}
       footer={links}
-      notice={
-        open === false ? (
-          <AuthNotice tone="warning">
-            Registration is closed on this instance. An open sign-up on an app that stores SSH keys is not a feature —
-            whoever runs it opens registration deliberately.
-          </AuthNotice>
-        ) : undefined
-      }
+      notice={open === false ? <AuthNotice tone="warning">{t.signup.closed}</AuthNotice> : undefined}
     >
       <form
         onSubmit={handleSubmit(onSubmit)}
@@ -86,7 +82,7 @@ export default function SignupPage() {
         noValidate
       >
         <AuthField
-          label="Identity"
+          label={t.fields.identity}
           type="email"
           autoComplete="username"
           autoFocus
@@ -97,7 +93,7 @@ export default function SignupPage() {
 
         <div className="flex flex-col gap-1.5">
           <AuthField
-            label="Key"
+            label={t.fields.key}
             secret
             autoComplete="new-password"
             registration={register("password")}
@@ -108,7 +104,7 @@ export default function SignupPage() {
         </div>
 
         <AuthField
-          label="Confirm key"
+          label={t.fields.confirmKey}
           secret
           autoComplete="new-password"
           registration={register("passwordConfirm")}
@@ -116,22 +112,19 @@ export default function SignupPage() {
           disabled={locked}
         />
 
-        <AuthNotice tone="warning">
-          There is no recovery email. The passphrase below is the only way back into this account — write it down before
-          you continue.
-        </AuthNotice>
+        <AuthNotice tone="warning">{t.signup.noRecoveryEmail}</AuthNotice>
 
         <AuthField
-          label="Recovery passphrase"
+          label={t.fields.recoveryPassphrase}
           secret
           autoComplete="new-password"
           registration={register("passphrase")}
           error={errors.passphrase?.message}
           disabled={locked}
-          hint={`At least ${MIN_PASSPHRASE} characters. A sentence works better than a word.`}
+          hint={interpolate(t.signup.passphraseHint, { count: MIN_PASSPHRASE })}
         />
         <AuthField
-          label="Confirm passphrase"
+          label={t.fields.confirmPassphrase}
           secret
           autoComplete="new-password"
           registration={register("passphraseConfirm")}
@@ -144,7 +137,7 @@ export default function SignupPage() {
           disabled={isSubmitting || locked}
           className="border-accent text-ink hover:bg-accent/20 mt-1 rounded-xs border py-1.5 text-sm tracking-caps disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isSubmitting ? "CREATING…" : open === false ? "REGISTRATION CLOSED" : "CREATE ACCOUNT"}
+          {isSubmitting ? t.signup.submitting : open === false ? t.signup.submitClosed : t.signup.submit}
         </button>
       </form>
     </AuthCard>

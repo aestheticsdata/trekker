@@ -4,6 +4,8 @@ import { useAuth } from "@auth/context/AuthContext";
 import { useToast } from "@components/ui/toast";
 import { headDigest } from "@helpers/digest";
 import { formatSize } from "@helpers/listing";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { resumeOffset, surveyUploads, UploadRefusal, uploadBatch } from "@lib/api/upload";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
@@ -102,6 +104,7 @@ const MAX_WAIT_SECONDS = 120;
 let nextId = 1;
 
 export function UploadProvider({ children }: { children: ReactNode }) {
+  const t = useTranslations("ui");
   const [rows, setRows] = useState<readonly UploadRow[]>([]);
   const { csrfToken } = useAuth();
   const { push } = useToast();
@@ -152,11 +155,11 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     for (const { id, picked } of rows) {
       const outcome = answers.get(picked.path);
       if (outcome === undefined) {
-        changes.set(id, { state: "failed", detail: "The server did not answer for this file." });
+        changes.set(id, { state: "failed", detail: t.uploads.noAnswer });
       } else if (outcome.code === "ESKIPPED") {
-        changes.set(id, { state: "done", progress: 1, detail: "already there" });
+        changes.set(id, { state: "done", progress: 1, detail: t.uploads.alreadyThere });
       } else if (!outcome.ok) {
-        changes.set(id, { state: "failed", detail: outcome.message ?? "The host refused it." });
+        changes.set(id, { state: "failed", detail: outcome.message ?? t.uploads.refused });
       } else {
         // The name, because it may not be the one that was sent: a conflict
         // answered with `keepBoth` lands as `report (2).txt`, and a tray that
@@ -238,7 +241,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           patchAll(ids, {
             state: "sending",
             progress: resume.from / resume.claim.size,
-            detail: `continuing — ${formatSize(resume.from, "file")} already there`,
+            detail: interpolate(t.uploads.continuing, { size: formatSize(resume.from, "file") }),
           });
         }
 
@@ -275,11 +278,11 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           if (waitable && waits < MAX_WAITS) {
             waits += 1;
             const seconds = Math.min((error as UploadRefusal).retryAfterSeconds ?? 0, MAX_WAIT_SECONDS);
-            patchAll(ids, { state: "waiting", progress: 0, detail: `rate limit — resuming in ${seconds}s` });
+            patchAll(ids, { state: "waiting", progress: 0, detail: interpolate(t.uploads.rateLimited, { seconds }) });
             await sleep(seconds * 1000);
             if (!cancelled) continue;
 
-            patchAll(ids, { state: "failed", detail: "Cancelled." });
+            patchAll(ids, { state: "failed", detail: t.uploads.cancelled });
             return;
           }
 
@@ -305,7 +308,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                 new Map(
                   pending
                     .filter((member) => landed.has(member.picked.path))
-                    .map((member) => [member.id, { state: "done" as const, progress: 1, detail: "already there" }]),
+                    .map((member) => [
+                      member.id,
+                      { state: "done" as const, progress: 1, detail: t.uploads.alreadyThere },
+                    ]),
                 ),
               );
               pending = pending.filter((member) => !landed.has(member.picked.path));
@@ -323,17 +329,17 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             // Progress left where it stopped: on a resumable file those bytes
             // are on the host, and a bar falling to zero would be describing a
             // restart that is not going to happen.
-            patchAll(waiting, { state: "waiting", detail: `connection lost — continuing in ${seconds}s` });
+            patchAll(waiting, { state: "waiting", detail: interpolate(t.uploads.connectionLost, { seconds }) });
             await sleep(seconds * 1000);
             if (!cancelled) continue;
 
-            patchAll(waiting, { state: "failed", detail: "Cancelled." });
+            patchAll(waiting, { state: "failed", detail: t.uploads.cancelled });
             return;
           }
 
-          const message = error instanceof ApiError ? error.message : "The upload did not complete.";
+          const message = error instanceof ApiError ? error.message : t.uploads.incomplete;
           const aborted = error instanceof ApiError && error.code === "EABORTED";
-          patchAll(ids, { state: "failed", detail: aborted ? "Cancelled with its batch." : message });
+          patchAll(ids, { state: "failed", detail: aborted ? t.uploads.cancelledWithBatch : message });
           sending = false;
 
           if (aborted) return;
@@ -342,7 +348,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           // fail the same way, so the run stops here rather than painting
           // twenty rows red with one message repeated on each of them.
           if (error instanceof ApiError && error.code === "ENOSPACE") {
-            push({ tone: "danger", message: "No room at the destination", detail: message });
+            push({ tone: "danger", message: t.uploads.noSpace, detail: message });
             return;
           }
 
@@ -350,7 +356,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           // nothing useful to wait for inside one sitting. Said once, loudly,
           // rather than repeated on every remaining row.
           if (error instanceof ApiError && error.status === 429) {
-            push({ tone: "warning", message: "Upload limit reached", detail: message });
+            push({ tone: "warning", message: t.uploads.limitReached, detail: message });
             return;
           }
         }
@@ -494,6 +500,7 @@ function useUploadRows(): readonly UploadRow[] {
  * would have finished uploads shove in-flight ones around the screen.
  */
 function UploadTray() {
+  const t = useTranslations("ui");
   const rows = useUploadRows();
   const { dismiss } = useUploads();
   if (rows.length === 0) return null;
@@ -506,18 +513,18 @@ function UploadTray() {
 
   return (
     <section
-      aria-label="Uploads"
+      aria-label={t.uploads.label}
       data-testid="upload-tray"
       className="bg-app border-line-strong fixed bottom-[calc(var(--spacing-statusbar)+0.5rem)] left-3 z-50 flex w-76 flex-col rounded-sm border shadow-2xl"
     >
       <header className="border-line flex items-center gap-2 border-b px-2.5 py-1.5">
-        <span className="text-ink-label font-mono text-2xs tracking-label">uploads</span>
+        <span className="text-ink-label font-mono text-2xs tracking-label">{t.uploads.heading}</span>
         <span className="text-ink-faint font-mono text-2xs">
           {live === 0
-            ? `${rows.length} finished`
+            ? interpolate(t.uploads.finished, { count: rows.length })
             : waiting > 0
-              ? `${live} queued, waiting on the limit`
-              : `${sending} in flight`}
+              ? interpolate(t.uploads.queued, { count: live })
+              : interpolate(t.uploads.inFlight, { count: sending })}
         </span>
         <div className="flex-1" />
         <button
@@ -533,7 +540,7 @@ function UploadTray() {
           }}
           className="text-ink-dim hover:text-ink font-mono text-2xs"
         >
-          {live > 0 ? "cancel all" : "clear"}
+          {live > 0 ? t.uploads.cancelAll : t.uploads.clear}
         </button>
       </header>
 
@@ -557,6 +564,7 @@ function UploadTray() {
 }
 
 function UploadTrayRow({ row, onDismiss }: { row: UploadRow; onDismiss: () => void }) {
+  const t = useTranslations("ui");
   const tone =
     row.state === "failed"
       ? "text-danger-soft"
@@ -579,7 +587,12 @@ function UploadTrayRow({ row, onDismiss }: { row: UploadRow; onDismiss: () => vo
         <span className="text-ink-dim font-mono text-2xs/none">{formatSize(row.bytes, "file")}</span>
         <button
           type="button"
-          aria-label={row.state === "sending" || row.state === "waiting" ? `Cancel ${row.name}` : `Dismiss ${row.name}`}
+          aria-label={interpolate(
+            row.state === "sending" || row.state === "waiting" ? t.uploads.cancelRow : t.uploads.dismissRow,
+            {
+              name: row.name,
+            },
+          )}
           // Aborts the whole batch while the row is in flight; the label above
           // says which it is doing, and changes.
           data-testid="upload-dismiss"

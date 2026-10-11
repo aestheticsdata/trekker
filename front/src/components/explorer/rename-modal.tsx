@@ -6,10 +6,13 @@ import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import { joinPath } from "@helpers/listing";
 import { ON_FILL, PRESS, SELECTED } from "@helpers/press";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { applyRename, previewRename, renameEntry } from "@lib/api/rename";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { dictionary } from "@text/index";
 import { useEffect, useRef, useState } from "react";
 
 import type { FileRow } from "@lib/api/fs";
@@ -70,12 +73,15 @@ export function RenameModal({
   onClose: () => void;
   onApplied: () => void;
 }) {
+  const t = useTranslations("dialogs");
   const subject =
-    target.entries.length === 1 ? target.entries[0].name : `${target.entries.length} entries in ${target.directory}`;
+    target.entries.length === 1
+      ? target.entries[0].name
+      : interpolate(t.common.entriesIn, { count: target.entries.length, directory: target.directory });
 
   return (
     <Overlay
-      label={`Rename ${subject}`}
+      label={interpolate(t.rename.dialog, { subject })}
       onClosed={onClose}
       testId="rename-modal"
       panelClassName="bg-app border-line-strong flex w-full max-w-[46.25rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
@@ -106,6 +112,7 @@ function RenamePanel({
   close: () => void;
   onApplied: () => void;
 }) {
+  const t = useTranslations("dialogs");
   const { csrfToken } = useAuth();
   const { push } = useToast();
   const { hostId, directory, entries } = target;
@@ -183,21 +190,24 @@ function RenamePanel({
         // The one outcome that must not be a toast that scrolls away: entries
         // are sitting in the directory under a name the app invented.
         setFailure(
-          `The rename failed part-way and ${result.stranded.length} ${result.stranded.length === 1 ? "entry is" : "entries are"} under a temporary name: ${result.stranded.join(", ")}`,
+          interpolate(result.stranded.length === 1 ? t.rename.strandedOne : t.rename.strandedMany, {
+            count: result.stranded.length,
+            names: result.stranded.join(", "),
+          }),
         );
         return;
       }
       push({
         tone: "success",
         message: single
-          ? `${single.name} → ${name}`
-          : `Renamed ${result.renamed} ${result.renamed === 1 ? "entry" : "entries"}`,
+          ? interpolate(t.rename.renamedSingle, { from: single.name, to: name })
+          : interpolate(result.renamed === 1 ? t.rename.renamedOne : t.rename.renamedMany, { count: result.renamed }),
         detail: single ? undefined : `s/${pattern}/${replacement}/`,
       });
       close();
     },
     onError: (error: unknown) => {
-      setFailure(error instanceof ApiError ? error.message : "The rename could not be applied.");
+      setFailure(error instanceof ApiError ? error.message : t.rename.failure);
     },
   });
 
@@ -226,14 +236,14 @@ function RenamePanel({
   return (
     <>
       <header className="bg-line border-line-strong flex h-topbar flex-none items-center gap-2.25 border-b px-3">
-        <span className="text-ink font-mono text-xs font-semibold tracking-label">rename</span>
+        <span className="text-ink font-mono text-xs font-semibold tracking-label">{t.rename.title}</span>
         <span className="text-ink-muted min-w-0 truncate font-mono text-cmd">{subject}</span>
         <div className="flex-1" />
         {/* Both forms, always visible, so neither entry point is a dead end:
             the toolbar's `rename` opens on the pattern and the name is one
             click away, and F2 on one entry does the reverse. */}
         <fieldset
-          aria-label="Rename by"
+          aria-label={t.rename.modeLabel}
           className="border-line-strong flex h-5 flex-none overflow-hidden rounded-sm border"
         >
           {(["name", "pattern"] as const).map((option) => {
@@ -244,7 +254,7 @@ function RenamePanel({
             return (
               <Tooltip
                 key={option}
-                content={disabled ? "One entry at a time — the pattern renames a selection" : undefined}
+                content={disabled ? t.rename.nameNeedsOne : undefined}
               >
                 <button
                   type="button"
@@ -261,28 +271,28 @@ function RenamePanel({
                     active ? `${SELECTED} font-medium` : "text-ink-muted"
                   }`}
                 >
-                  {option}
+                  {t.rename.modes[option]}
                 </button>
               </Tooltip>
             );
           })}
         </fieldset>
-        <Tooltip content="Close (⎋)">
+        <Tooltip content={t.common.closeTooltip}>
           <button
             type="button"
             onClick={close}
-            aria-label="Close"
+            aria-label={t.common.close}
             data-testid="rename-close"
             className="text-ink-dim font-mono text-2xs"
           >
-            esc ✕
+            {t.common.escClose}
           </button>
         </Tooltip>
       </header>
 
       {single ? (
         <div className="px-3.5 pt-3.25 pb-2.5">
-          <Label>name</Label>
+          <Label>{t.rename.labels.name}</Label>
           <input
             ref={field}
             value={name}
@@ -290,7 +300,7 @@ function RenamePanel({
             onKeyDown={(event) => {
               if (event.key === "Enter" && renameable && !apply.isPending) apply.mutate();
             }}
-            aria-label="New name"
+            aria-label={t.rename.newName}
             data-testid="rename-name"
             className="bg-chrome border-accent text-ink w-full border px-2.25 py-1.75 font-mono text-name/none"
           />
@@ -298,13 +308,14 @@ function RenamePanel({
       ) : (
         <div className="grid grid-cols-[1fr_1fr_6rem] gap-2 px-3.5 pt-3.25 pb-2.5">
           <div>
-            <Label>match</Label>
+            <Label>{t.rename.labels.match}</Label>
             <input
               ref={field}
               value={pattern}
               onChange={(event) => setPattern(event.target.value)}
+              // verify-text: an example regex, not copy
               placeholder="^dump-(\d{4})-(\d{2})-(\d{2})"
-              aria-label="Pattern"
+              aria-label={t.rename.pattern}
               data-testid="rename-pattern"
               className={`bg-chrome text-ink w-full border px-2.25 py-1.75 font-mono text-name/none ${
                 plan?.error ? "border-danger" : "border-accent"
@@ -312,18 +323,19 @@ function RenamePanel({
             />
           </div>
           <div>
-            <Label>replace</Label>
+            <Label>{t.rename.labels.replace}</Label>
             <input
               value={replacement}
               onChange={(event) => setReplacement(event.target.value)}
+              // verify-text: an example replacement with capture groups, not copy
               placeholder="atlas_$1$2$3"
-              aria-label="Replacement"
+              aria-label={t.rename.replacement}
               data-testid="rename-replacement"
               className="bg-chrome border-line-strong text-ink w-full border px-2.25 py-1.75 font-mono text-name/none"
             />
           </div>
           <div>
-            <Label>flags</Label>
+            <Label>{t.rename.labels.flags}</Label>
             <div className="flex gap-1">
               <Flag
                 label="g"
@@ -369,7 +381,7 @@ function RenamePanel({
           data-testid="rename-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
-          cancel
+          {t.common.cancel}
         </button>
         <button
           type="button"
@@ -381,7 +393,7 @@ function RenamePanel({
           data-testid={single ? "rename-submit" : "rename-apply-pattern"}
           className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
-          {apply.isPending ? "renaming…" : ctaOf(single !== null, plan)}
+          {apply.isPending ? t.rename.renaming : ctaOf(single !== null, plan)}
         </button>
       </footer>
     </>
@@ -391,6 +403,7 @@ function RenamePanel({
 /* ---- the rows ----------------------------------------------------------- */
 
 function Row({ row }: { row: RenameMapping }) {
+  const t = useTranslations("dialogs");
   const before = row.match ? row.name.slice(0, row.match.index) : row.name;
   const hit = row.match ? row.name.slice(row.match.index, row.match.index + row.match.length) : "";
   const after = row.match ? row.name.slice(row.match.index + row.match.length) : "";
@@ -417,15 +430,15 @@ function Row({ row }: { row: RenameMapping }) {
         // "duplicate" on its own leaves the reader to find the other row by eye.
         // The row truncates, so the whole sentence is on the tooltip — the part
         // that gets cut is the end, which is where the other name is.
-        <Tooltip content={`${row.next} — ${row.problem.message}`}>
+        <Tooltip content={interpolate(t.rename.problem, { next: row.next, message: row.problem.message })}>
           <span className="text-danger-soft truncate font-mono text-xs/[1.3]">
-            {row.next} — {row.problem.message}
+            {interpolate(t.rename.problem, { next: row.next, message: row.problem.message })}
           </span>
         </Tooltip>
       ) : (
         <Tooltip content={row.changed ? row.next : undefined}>
           <span className={`truncate font-mono text-xs/[1.3] ${row.changed ? "text-ink" : "text-ink-faint"}`}>
-            {row.changed ? row.next : "unchanged"}
+            {row.changed ? row.next : t.rename.unchanged}
           </span>
         </Tooltip>
       )}
@@ -442,11 +455,13 @@ function Label({ children }: { children: string }) {
 }
 
 function Flag({ label, on, onToggle }: { label: string; on: boolean; onToggle: () => void }) {
+  const t = useTranslations("dialogs");
+
   return (
     <button
       type="button"
       aria-pressed={on}
-      aria-label={label === "g" ? "Replace every occurrence" : "Ignore case"}
+      aria-label={label === "g" ? t.rename.flagGlobal : t.rename.flagIgnoreCase}
       data-testid="rename-flag"
       data-flag={label}
       onClick={onToggle}
@@ -475,20 +490,22 @@ function summaryOf({
   rows: readonly RenameMapping[];
   pattern: string;
 }): string {
-  if (single) return rows[0]?.changed ? "1 name changes" : "unchanged";
-  if (pattern === "") return "type a pattern to preview";
-  if (plan?.error) return "fix the pattern to preview";
-  if (plan === null || stale) return "previewing…";
+  const text = dictionary.dialogs.rename;
+  if (single) return rows[0]?.changed ? text.summary.singleChanges : text.unchanged;
+  if (pattern === "") return text.summary.typePattern;
+  if (plan?.error) return text.summary.fixPattern;
+  if (plan === null || stale) return text.summary.previewing;
 
   const colliding = plan.mappings.filter((row) => row.problem !== null).length;
-  const counted = `${plan.changed} of ${plan.mappings.length} names change`;
-  return colliding === 0 ? counted : `${counted} · ${colliding} collide, nothing will be renamed`;
+  const counted = interpolate(text.summary.counted, { changed: plan.changed, total: plan.mappings.length });
+  return colliding === 0 ? counted : interpolate(text.summary.colliding, { counted, count: colliding });
 }
 
 function ctaOf(single: boolean, plan: RenamePlan | null): string {
-  if (single) return "rename";
+  const text = dictionary.dialogs.rename.cta;
+  if (single) return text.single;
   const count = plan?.changed ?? 0;
-  return `rename ${count} ${count === 1 ? "file" : "files"}`;
+  return interpolate(count === 1 ? text.one : text.many, { count });
 }
 
 /** A row for the single-entry case, shaped like the ones the server returns. */

@@ -2,6 +2,8 @@
 
 import { Tooltip } from "@components/ui/tooltip";
 import { clampBase, UI_BASE_DEFAULT, UI_BASE_KEY, UI_BASE_MAX, UI_BASE_MIN } from "@helpers/ui-scale";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { useEffect, useState } from "react";
 
 /**
@@ -12,6 +14,7 @@ import { useEffect, useState } from "react";
  * One button per pixel, and everything moves at once.
  */
 export function UiScale() {
+  const t = useTranslations("shell").uiScale;
   const [base, setBase] = useState(UI_BASE_DEFAULT);
 
   // The inline script has already applied the stored value to the root, so
@@ -37,10 +40,10 @@ export function UiScale() {
       className="flex flex-none items-center gap-0.5 whitespace-nowrap"
       data-testid="ui-scale"
     >
-      <span className="text-ink-faint mr-0.5">ui</span>
+      <span className="text-ink-faint mr-0.5">{t.label}</span>
       <Step
         glyph="−"
-        label="Smaller interface"
+        label={t.smaller}
         testId="ui-scale-smaller"
         disabled={base <= UI_BASE_MIN}
         onSelect={() => step(-1)}
@@ -49,11 +52,11 @@ export function UiScale() {
         className="text-ink-muted tabular-nums"
         data-testid="ui-scale-value"
       >
-        {base}px
+        {interpolate(t.value, { base })}
       </span>
       <Step
         glyph="+"
-        label="Larger interface"
+        label={t.larger}
         testId="ui-scale-larger"
         disabled={base >= UI_BASE_MAX}
         onSelect={() => step(1)}

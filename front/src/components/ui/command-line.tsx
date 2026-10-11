@@ -1,6 +1,8 @@
 "use client";
 
 import { COMMAND_SURFACE, PROMPT_ELEVATED_INK, PROMPT_INK } from "@helpers/sudo";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { useSudoWindow } from "@lib/query/use-sudo";
 
 /**
@@ -36,6 +38,7 @@ export function CommandLine({
   /** The box's own overflow behaviour, which differs per modal. */
   className?: string;
 }) {
+  const t = useTranslations("terminal");
   const { host, open } = useSudoWindow(hostId);
 
   return (
@@ -61,8 +64,10 @@ export function CommandLine({
           data-testid="command-line-note"
           className={`${PROMPT_ELEVATED_INK} mt-1.5 font-mono text-2xs/[1.6]`}
         >
-          sudo is open on {host?.label ?? "this host"}. Entries {host?.username ?? "this account"} is refused on are
-          retried as root; everything else runs unelevated, as it would with the window closed.
+          {interpolate(t.commandLine.sudoNote, {
+            host: host?.label ?? t.commandLine.thisHost,
+            user: host?.username ?? t.commandLine.thisAccount,
+          })}
         </p>
       )}
     </>

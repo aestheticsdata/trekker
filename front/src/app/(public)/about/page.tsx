@@ -1,34 +1,30 @@
 import { AuthCard, AuthLinks } from "@components/auth/auth-card";
+import useTranslations from "@i18n/useTranslations";
 
 /**
- * The legal notice, same rows as a sibling app's about page (TRE-15 §1).
+ * The legal notice (TRE-15 §1); its rows live in the auth zone.
  *
  * A server component: there is nothing here to interact with, so there is no
  * reason to ship it as JavaScript.
  */
-const NOTICE = [
-  "Website hosted by OVH SAS",
-  "Registered office: 2 rue Kellermann — 59100 Roubaix — France",
-  "APE code 2620Z",
-  "VAT no.: FR 22 424 761 419",
-] as const;
-
 export default function AboutPage() {
+  const t = useTranslations("auth");
+
   return (
     <AuthCard
-      title="TREKKER"
-      subtitle="About"
+      title={t.title}
+      subtitle={t.about.subtitle}
       footer={
         <AuthLinks
           links={[
-            { href: "/login", label: "sign in" },
-            { href: "/signup", label: "register" },
+            { href: "/login", label: t.links.signIn },
+            { href: "/signup", label: t.links.register },
           ]}
         />
       }
     >
       <ul className="flex flex-col gap-2.5">
-        {NOTICE.map((line) => (
+        {t.about.notice.map((line) => (
           <li
             key={line}
             className="border-line text-ink-muted border-l-2 pl-3 text-sm leading-relaxed"
@@ -38,12 +34,8 @@ export default function AboutPage() {
         ))}
       </ul>
 
-      {/* The domain is deliberate and stays: it is the operator's published
-          identity, which is a legal requirement, not an infrastructure leak.
-          Recorded here so TRE-5's sweeps stop re-raising it. */}
-      <p className="border-line text-ink-faint mt-2 border-t pt-3 text-center font-mono text-xs">
-        trekker · 1991computer.com
-      </p>
+      {/* The operator's published identity — see the note in the auth zone. */}
+      <p className="border-line text-ink-faint mt-2 border-t pt-3 text-center font-mono text-xs">{t.about.operator}</p>
     </AuthCard>
   );
 }

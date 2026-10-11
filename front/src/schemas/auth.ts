@@ -1,3 +1,5 @@
+import { interpolate } from "@i18n/interpolate";
+import { dictionary } from "@text/index";
 import { z } from "zod";
 
 /**
@@ -47,7 +49,9 @@ export const SignupStatusSchema = z.object({ open: z.boolean() });
 // accept whatever an older account already has, while registration sets the
 // floor for every new one. The API enforces 12 on the way in.
 
-const EMAIL = z.email({ message: "That does not look like an email address." });
+const MESSAGES = dictionary.validation.auth;
+
+const EMAIL = z.email({ message: MESSAGES.email });
 
 export const MIN_KEY_SIGN_IN = 8;
 export const MIN_KEY_REGISTER = 12;
@@ -57,7 +61,7 @@ export const MIN_PASSPHRASE = 10;
 
 export const signInSchema = z.object({
   email: EMAIL,
-  password: z.string().min(MIN_KEY_SIGN_IN, { message: `The key is at least ${MIN_KEY_SIGN_IN} characters.` }),
+  password: z.string().min(MIN_KEY_SIGN_IN, { message: interpolate(MESSAGES.keySignIn, { min: MIN_KEY_SIGN_IN }) }),
 });
 
 export const registerSchema = z
@@ -65,35 +69,35 @@ export const registerSchema = z
     email: EMAIL,
     password: z
       .string()
-      .min(MIN_KEY_REGISTER, { message: `A new key must be at least ${MIN_KEY_REGISTER} characters.` }),
+      .min(MIN_KEY_REGISTER, { message: interpolate(MESSAGES.keyRegister, { min: MIN_KEY_REGISTER }) }),
     passwordConfirm: z.string(),
     passphrase: z
       .string()
-      .min(MIN_PASSPHRASE, { message: `The recovery passphrase must be at least ${MIN_PASSPHRASE} characters.` }),
+      .min(MIN_PASSPHRASE, { message: interpolate(MESSAGES.passphraseMin, { min: MIN_PASSPHRASE }) }),
     passphraseConfirm: z.string(),
   })
   // Each mismatch names its own field: "check the fields" tells someone who
   // typed two long strings nothing about which one to look at.
   .refine((values) => values.password === values.passwordConfirm, {
-    message: "The two keys do not match.",
+    message: MESSAGES.keysMismatch,
     path: ["passwordConfirm"],
   })
   .refine((values) => values.passphrase === values.passphraseConfirm, {
-    message: "The two passphrases do not match.",
+    message: MESSAGES.passphrasesMismatch,
     path: ["passphraseConfirm"],
   });
 
 export const recoverSchema = z
   .object({
     email: EMAIL,
-    passphrase: z.string().min(1, { message: "The recovery passphrase is required." }),
+    passphrase: z.string().min(1, { message: MESSAGES.passphraseRequired }),
     newPassword: z
       .string()
-      .min(MIN_KEY_REGISTER, { message: `A new key must be at least ${MIN_KEY_REGISTER} characters.` }),
+      .min(MIN_KEY_REGISTER, { message: interpolate(MESSAGES.keyRegister, { min: MIN_KEY_REGISTER }) }),
     newPasswordConfirm: z.string(),
   })
   .refine((values) => values.newPassword === values.newPasswordConfirm, {
-    message: "The two keys do not match.",
+    message: MESSAGES.keysMismatch,
     path: ["newPasswordConfirm"],
   });
 
@@ -115,4 +119,4 @@ export function scoreKey(key: string): number {
   return score;
 }
 
-export const STRENGTH_LABELS = ["", "weak", "fair", "good", "strong"] as const;
+export const STRENGTH_LABELS = dictionary.auth.strength;

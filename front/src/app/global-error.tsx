@@ -1,6 +1,7 @@
 "use client";
 
 import "@styles/globals.css";
+import useTranslations from "@i18n/useTranslations";
 import { IBM_Plex_Mono } from "next/font/google";
 
 /**
@@ -30,6 +31,8 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export default function GlobalError({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
+  const t = useTranslations("app");
+
   return (
     <html
       lang="en"
@@ -37,7 +40,7 @@ export default function GlobalError({ error, retry }: { error: Error & { digest?
     >
       <body className="bg-app text-ink font-mono antialiased">
         <main className="flex h-screen flex-col items-center justify-center gap-4 text-sm">
-          <p className="text-ink">Trekker could not start.</p>
+          <p className="text-ink">{t.globalError.message}</p>
           {/* Redacted to a digest in a production build, deliberately, so the
               sentence is not always worth showing — the identifier always is:
               it is what matches this crash to a line in the API log. */}
@@ -48,7 +51,7 @@ export default function GlobalError({ error, retry }: { error: Error & { digest?
             onClick={() => retry()}
             className="border-line text-ink-dim hover:text-ink border px-3 py-1.5 text-xs tracking-widest"
           >
-            RETRY
+            {t.globalError.retry}
           </button>
         </main>
       </body>

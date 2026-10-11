@@ -1,6 +1,7 @@
 "use client";
 
 import { ContextMenu } from "@components/ui/context-menu";
+import useTranslations from "@i18n/useTranslations";
 
 import type { MenuRow } from "@components/shell/actions";
 import type { Point } from "@helpers/menu";
@@ -28,7 +29,8 @@ interface HostMenuProps {
 }
 
 export function HostMenu({ host, point, onEdit, onClose }: HostMenuProps) {
-  const rows: readonly MenuRow[] = [{ id: EDIT, label: "Edit host…" }];
+  const t = useTranslations("hosts");
+  const rows: readonly MenuRow[] = [{ id: EDIT, label: t.menu.edit }];
 
   return (
     <ContextMenu

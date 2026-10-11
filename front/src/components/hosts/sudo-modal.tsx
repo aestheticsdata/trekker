@@ -4,6 +4,8 @@ import { useAuth } from "@auth/context/AuthContext";
 import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
 import { ELEVATE_FILL, ELEVATE_INK, SUDO_INK, SUDO_SURFACE } from "@helpers/sudo";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { fetchSudoRequirement, formatWindow, openSudo } from "@lib/api/sudo";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -32,9 +34,11 @@ import type { ReactNode } from "react";
  */
 
 export function SudoModal({ host, onClose }: { host: HostView; onClose: () => void }) {
+  const t = useTranslations("hosts");
+
   return (
     <Overlay
-      label={`Elevate with sudo on ${host.label}`}
+      label={interpolate(t.sudo.modal.dialog, { label: host.label })}
       onClosed={onClose}
       testId="sudo-modal"
       panelClassName="bg-app border-warning flex w-full max-w-[30rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
@@ -50,6 +54,7 @@ export function SudoModal({ host, onClose }: { host: HostView; onClose: () => vo
 }
 
 function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
+  const t = useTranslations("hosts");
   const { csrfToken } = useAuth();
   const queryClient = useQueryClient();
   const { push } = useToast();
@@ -87,13 +92,13 @@ function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
       void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.HOSTS] });
       push({
         tone: "warning",
-        message: `sudo open on ${window.hostLabel}`,
-        detail: `${formatWindow(window.remainingMs)} left · prompts show #`,
+        message: interpolate(t.sudo.modal.opened, { label: window.hostLabel }),
+        detail: interpolate(t.sudo.modal.openedDetail, { left: formatWindow(window.remainingMs) }),
       });
       close();
     },
     onError: (error) => {
-      setFailure(error instanceof ApiError ? error.message : "The request could not be sent.");
+      setFailure(error instanceof ApiError ? error.message : t.sudo.modal.sendFailed);
       // Cleared rather than kept for a second try. A refused password is the
       // one string in this app most likely to be a near-miss of a different
       // secret, and leaving it in a focused field invites sending it again.
@@ -109,19 +114,19 @@ function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
   return (
     <>
       <header className={`${SUDO_SURFACE} border-warning flex h-topbar flex-none items-center gap-2 border-b px-3`}>
-        <span className={`${SUDO_INK} font-mono text-xs font-semibold tracking-label`}>sudo</span>
+        <span className={`${SUDO_INK} font-mono text-xs font-semibold tracking-label`}>{t.sudo.modal.heading}</span>
         <span className="text-ink-muted min-w-0 truncate font-mono text-cmd">{host.label}</span>
         {host.username && <span className="text-ink-faint flex-none font-mono text-2xs">{host.username}</span>}
       </header>
 
       <div className="flex flex-col gap-2.5 px-3.5 py-3">
-        {requirement.isPending && <p className="text-ink-faint font-mono text-xs">asking the host…</p>}
+        {requirement.isPending && <p className="text-ink-faint font-mono text-xs">{t.sudo.modal.asking}</p>}
 
         {requirement.error !== null && (
           <Notice tone="bad">
             {requirement.error instanceof ApiError
               ? requirement.error.message
-              : `${host.label} could not be asked whether sudo would work.`}
+              : interpolate(t.sudo.modal.askFailed, { label: host.label })}
           </Notice>
         )}
 
@@ -130,7 +135,9 @@ function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
         {needs === "password" && (
           <label className="flex flex-col gap-1">
             <span className="text-ink-faint font-mono text-2xs tracking-label">
-              {host.username ? `password for ${host.username}` : "account password"}
+              {host.username
+                ? interpolate(t.sudo.modal.passwordFor, { username: host.username })
+                : t.sudo.modal.accountPassword}
             </span>
             <input
               type="password"
@@ -149,7 +156,11 @@ function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
               autoFocus
               autoComplete="off"
               spellCheck={false}
-              aria-label={host.username ? `Password for ${host.username}` : "Account password"}
+              aria-label={
+                host.username
+                  ? interpolate(t.sudo.modal.passwordForLabel, { username: host.username })
+                  : t.sudo.modal.accountPasswordLabel
+              }
               data-testid="sudo-password"
               className="bg-chrome border-line-strong text-ink focus:border-warning w-full border px-2.25 py-1.75 font-mono text-name/none"
             />
@@ -160,8 +171,7 @@ function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
             and this install may not be running the default fifteen. */}
         {answerable && requirement.data && (
           <p className="text-ink-faint font-mono text-2xs/[1.6]">
-            The window lasts {formatWindow(requirement.data.windowMs)} and covers this host only, in this browser
-            session only. Close it early from the badge at any time.
+            {interpolate(t.sudo.modal.window, { window: formatWindow(requirement.data.windowMs) })}
           </p>
         )}
 
@@ -176,7 +186,7 @@ function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
           data-testid="sudo-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
-          cancel
+          {t.sudo.modal.cancel}
         </button>
         {answerable && (
           <button
@@ -189,7 +199,7 @@ function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
             // look like the save on a settings form.
             className={`${ELEVATE_FILL} ${ELEVATE_INK} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
           >
-            {elevate.isPending ? "asking sudo…" : "elevate"}
+            {elevate.isPending ? t.sudo.modal.elevating : t.sudo.modal.elevate}
           </button>
         )}
       </footer>
@@ -206,48 +216,30 @@ function SudoPanel({ host, close }: { host: HostView; close: () => void }) {
  * read as a bug in Trekker — and it is not one, it is the host's sudoers file.
  */
 function Explanation({ needs }: { needs: SudoRequirement }) {
+  const t = useTranslations("hosts");
+
   if (needs === "password") {
-    return (
-      <p className="text-ink-soft font-mono text-cmd/[1.6]">
-        This host asks for the account's own login password before it will run sudo. It is sent once, held in the API's
-        memory for the length of the window, and never written down — not beside the SSH credential, not to disk, not to
-        the audit log.
-      </p>
-    );
+    return <p className="text-ink-soft font-mono text-cmd/[1.6]">{t.sudo.explanation.password}</p>;
   }
 
   if (needs === "none") {
     return (
       <>
-        <p className="text-ink-soft font-mono text-cmd/[1.6]">
-          This account may run sudo here without a password, so there is nothing to type. Confirming is the whole check.
-        </p>
+        <p className="text-ink-soft font-mono text-cmd/[1.6]">{t.sudo.explanation.none}</p>
         {/* Not Trekker's doing, and worth saying rather than hiding: on a
             NOPASSWD host the stored SSH credential is already sufficient for
             root, so this window is a deliberate gesture rather than a barrier.
             Only a change on the server makes it one. */}
-        <Notice tone="warn">
-          Because sudo asks this account for nothing, the credential Trekker already holds for this host is enough to
-          become root on it. This window records the intent; it cannot add a check the machine does not make.
-        </Notice>
+        <Notice tone="warn">{t.sudo.explanation.noneWarning}</Notice>
       </>
     );
   }
 
   if (needs === "not-a-sudoer") {
-    return (
-      <Notice tone="bad">
-        This account is not permitted to run sudo on this host. An administrator has to grant it there before Trekker
-        can use it — nothing typed here will change that.
-      </Notice>
-    );
+    return <Notice tone="bad">{t.sudo.explanation.notSudoer}</Notice>;
   }
 
-  return (
-    <Notice tone="bad">
-      There is no sudo on this host, so there is nothing for Trekker to elevate with. Root-owned paths stay read-only.
-    </Notice>
-  );
+  return <Notice tone="bad">{t.sudo.explanation.noSudo}</Notice>;
 }
 
 function Notice({ tone, children }: { tone: "warn" | "bad"; children: ReactNode }) {

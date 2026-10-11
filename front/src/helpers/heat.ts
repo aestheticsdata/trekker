@@ -18,6 +18,10 @@
  * resolves to nothing and the chip silently disappears.
  */
 
+import { dictionary } from "@text/index";
+
+const BUCKET_LABELS = dictionary.shell.heat;
+
 /**
  * Where each bucket ends, in days, and what to call it.
  *
@@ -26,13 +30,13 @@
  * no end.
  */
 export const AGE_BUCKETS: ReadonlyArray<{ label: string; untilDays: number }> = [
-  { label: "under an hour", untilDays: 1 / 24 },
-  { label: "under 12 hours", untilDays: 0.5 },
-  { label: "under 3 days", untilDays: 3 },
-  { label: "under 2 weeks", untilDays: 14 },
-  { label: "under 2 months", untilDays: 60 },
-  { label: "under 7 months", untilDays: 210 },
-  { label: "older", untilDays: Number.POSITIVE_INFINITY },
+  { label: BUCKET_LABELS.underAnHour, untilDays: 1 / 24 },
+  { label: BUCKET_LABELS.under12Hours, untilDays: 0.5 },
+  { label: BUCKET_LABELS.under3Days, untilDays: 3 },
+  { label: BUCKET_LABELS.under2Weeks, untilDays: 14 },
+  { label: BUCKET_LABELS.under2Months, untilDays: 60 },
+  { label: BUCKET_LABELS.under7Months, untilDays: 210 },
+  { label: BUCKET_LABELS.older, untilDays: Number.POSITIVE_INFINITY },
 ];
 
 export interface HeatPaint {

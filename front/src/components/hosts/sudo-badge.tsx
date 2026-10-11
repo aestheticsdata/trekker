@@ -5,6 +5,8 @@ import { SudoModal } from "@components/hosts/sudo-modal";
 import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import { SUDO_INK, SUDO_SURFACE } from "@helpers/sudo";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { dropSudo, formatWindow } from "@lib/api/sudo";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useSudoWindow } from "@lib/query/use-sudo";
@@ -29,6 +31,7 @@ import type { HostView } from "@lib/api/hosts";
  * and not once in between.
  */
 export function SudoBadge({ host }: { host: HostView }) {
+  const t = useTranslations("hosts");
   const { csrfToken } = useAuth();
   const queryClient = useQueryClient();
   const { push } = useToast();
@@ -44,16 +47,24 @@ export function SudoBadge({ host }: { host: HostView }) {
       // Silent when there was nothing to close. The route is idempotent so the
       // button may lose a race with the expiry timer, and a toast announcing
       // that a window nobody had was closed is noise about a non-event.
-      if (result.wasOpen) push({ tone: "info", message: `sudo closed on ${host.label}`, detail: "prompts show $" });
+      if (result.wasOpen) {
+        push({
+          tone: "info",
+          message: interpolate(t.sudo.badge.closed, { label: host.label }),
+          detail: t.sudo.badge.closedDetail,
+        });
+      }
     },
-    onError: () => push({ tone: "danger", message: `Could not close the sudo window on ${host.label}` }),
+    onError: () => push({ tone: "danger", message: interpolate(t.sudo.badge.closeFailed, { label: host.label }) }),
   });
 
   return (
     <>
       <Tooltip
         content={
-          open ? `Drop sudo on ${host.label} — ${formatWindow(remainingMs)} left` : `Elevate with sudo on ${host.label}`
+          open
+            ? interpolate(t.sudo.badge.dropTooltip, { label: host.label, left: formatWindow(remainingMs) })
+            : interpolate(t.sudo.badge.elevate, { label: host.label })
         }
       >
         <button
@@ -64,8 +75,8 @@ export function SudoBadge({ host }: { host: HostView }) {
           // `14:32` — a control whose entire announced name is a clock.
           aria-label={
             open
-              ? `Drop sudo on ${host.label}, ${formatWindow(remainingMs)} left`
-              : `Elevate with sudo on ${host.label}`
+              ? interpolate(t.sudo.badge.dropLabel, { label: host.label, left: formatWindow(remainingMs) })
+              : interpolate(t.sudo.badge.elevate, { label: host.label })
           }
           // ⚠️ The accessible name above changes every second while a window
           // is open, and the same click that opens the dialog DROPS the window
@@ -83,7 +94,7 @@ export function SudoBadge({ host }: { host: HostView }) {
               root shell shows, and anyone who would care already reads it
               faster than they would read the word. */}
           <span aria-hidden>{open ? "#" : "$"}</span>
-          <span>{open ? formatWindow(remainingMs) : "sudo"}</span>
+          <span>{open ? formatWindow(remainingMs) : t.sudo.badge.label}</span>
         </button>
       </Tooltip>
 

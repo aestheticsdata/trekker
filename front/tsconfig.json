@@ -26,6 +26,8 @@
       "@helpers/*": ["./src/helpers/*"],
       "@lib/*": ["./src/lib/*"],
       "@schemas/*": ["./src/schemas/*"],
+      "@text/*": ["./src/text/*"],
+      "@i18n/*": ["./src/i18n/*"],
       "@e2e/*": ["./e2e/*"]
     },
     "plugins": [{ "name": "next" }],

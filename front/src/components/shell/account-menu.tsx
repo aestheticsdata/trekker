@@ -4,6 +4,7 @@ import { useAuth } from "@auth/context/AuthContext";
 import { LOGIN_PATH } from "@auth/paths";
 import { ContextMenu } from "@components/ui/context-menu";
 import { useToast } from "@components/ui/toast";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { logout } from "@lib/api/users";
 import { useRef, useState } from "react";
@@ -47,6 +48,7 @@ const REOPEN_GRACE_MS = 250;
 
 export function AccountMenu({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
   const { user, csrfToken } = useAuth();
+  const t = useTranslations("shell").account;
   const { push } = useToast();
   /** Where the menu is, or null when it is closed. */
   const [point, setPoint] = useState<Point | null>(null);
@@ -101,11 +103,11 @@ export function AccountMenu({ onOpenChange }: { onOpenChange?: (open: boolean) =
       setLeaving(false);
       push({
         tone: "danger",
-        message: "Could not sign out",
-        detail: error instanceof ApiError ? error.message : "The API did not answer.",
+        message: t.signOutFailed.message,
+        detail: error instanceof ApiError ? error.message : t.signOutFailed.noAnswer,
         action: {
-          label: "Leave anyway",
-          title: "Return to the sign-in screen. The session stays open until it expires.",
+          label: t.signOutFailed.leaveAnyway,
+          title: t.signOutFailed.leaveAnywayHint,
           onClick: () => window.location.replace(LOGIN_PATH),
         },
       });
@@ -118,7 +120,7 @@ export function AccountMenu({ onOpenChange }: { onOpenChange?: (open: boolean) =
   const rows: readonly MenuRow[] = [
     // Not `danger`. Signing out loses nothing and one more sign-in undoes it —
     // and this menu's red is `rm`'s, which should never come to look routine.
-    { id: SIGN_OUT, label: "Sign out" },
+    { id: SIGN_OUT, label: t.signOut },
   ];
 
   return (
@@ -156,7 +158,7 @@ export function AccountMenu({ onOpenChange }: { onOpenChange?: (open: boolean) =
             what tells two accounts apart on a shared machine. Truncated rather
             than shortened to the local part, so the domain survives where there
             is room for it. */}
-        <span className="truncate">{leaving ? "signing out…" : user.email}</span>
+        <span className="truncate">{leaving ? t.signingOut : user.email}</span>
       </button>
 
       {point && (

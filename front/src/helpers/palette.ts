@@ -1,3 +1,5 @@
+import { dictionary } from "@text/index";
+
 import type { ActionId } from "@components/shell/actions";
 
 /**
@@ -14,7 +16,8 @@ import type { ActionId } from "@components/shell/actions";
  * but not JSX. The class names live here for the same reason — they are pairs
  * of colours, and `pnpm verify:contrast` measures pairs it can import.
  *
- * Imports nothing but a type.
+ * Imports nothing but a type and the string tree (TRE-116), which a verify
+ * script reaches through the alias hook in `scripts/aliases.ts`.
  */
 
 // ------------------------------------------------------------- what a row is
@@ -27,7 +30,8 @@ import type { ActionId } from "@components/shell/actions";
  * deliberate. `rank` never reorders these — it reorders entries, and the
  * headers follow wherever they land.
  */
-export const GROUPS = ["GO TO", "ACTIONS", "VIEW", "SHELL", "VIEWS", "SERVERS"] as const;
+const HEADS = dictionary.actions.palette.groups;
+export const GROUPS = [HEADS.goTo, HEADS.actions, HEADS.view, HEADS.shell, HEADS.views, HEADS.servers] as const;
 
 export type PaletteGroup = (typeof GROUPS)[number];
 

@@ -18,11 +18,14 @@ import { formatTotal, parentPath } from "@helpers/listing";
 import { PRESS } from "@helpers/press";
 import { TOOLTIP_WARNING_INK } from "@helpers/tooltip";
 import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK, treemapBands } from "@helpers/treemap";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { fetchDisks } from "@lib/api/disks";
 import { cancelScan, fetchScanState, scanStreamUrl, startScan } from "@lib/api/scans";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { dictionary } from "@text/index";
 import { useEffect, useState } from "react";
 
 import type { TreemapBand } from "@helpers/treemap";
@@ -90,6 +93,7 @@ export function DiskUsage({
   const { csrfToken } = useAuth();
   const queryClient = useQueryClient();
   const { push } = useToast();
+  const t = useTranslations("shell").diskUsage;
 
   /** The newest frame off the progress feed, terminal ones included. */
   const [progress, setProgress] = useState<ScanProgress | null>(null);
@@ -154,7 +158,7 @@ export function DiskUsage({
       if (frame.status === "FAILED") {
         push({
           tone: "danger",
-          message: `The scan of ${frame.root} failed`,
+          message: interpolate(t.toasts.scanFailed, { root: frame.root }),
           detail: frame.error ?? undefined,
         });
       }
@@ -196,10 +200,7 @@ export function DiskUsage({
     onError: (error) =>
       push({
         tone: "danger",
-        message:
-          error instanceof ApiError && error.status === 409
-            ? "A scan is already running on this host"
-            : "Could not start the scan",
+        message: error instanceof ApiError && error.status === 409 ? t.toasts.alreadyRunning : t.toasts.startFailed,
         detail: error instanceof ApiError ? error.message : undefined,
       }),
   });
@@ -210,7 +211,7 @@ export function DiskUsage({
     onError: (error) =>
       push({
         tone: "danger",
-        message: "Could not stop the scan",
+        message: t.toasts.stopFailed,
         detail: error instanceof ApiError ? error.message : undefined,
       }),
   });
@@ -270,7 +271,7 @@ export function DiskUsage({
 
   return (
     <section
-      aria-label="Disk usage"
+      aria-label={t.region}
       data-testid="disk-usage"
       className={`${STRIP_SURFACE} border-line h-strip flex-none border-t px-2.5 py-2`}
     >
@@ -283,7 +284,7 @@ export function DiskUsage({
           data-testid="du-title"
           className={`${STRIP_LABEL_INK} flex min-w-0 items-baseline gap-1 font-sans text-caps leading-none font-semibold tracking-[0.16em]`}
         >
-          <span className="flex-none whitespace-nowrap">DISK USAGE</span>
+          <span className="flex-none whitespace-nowrap">{t.title}</span>
           {host && (
             <Tooltip content={`${host.label}:${root}`}>
               <span className="min-w-0 truncate font-mono tracking-normal">
@@ -315,28 +316,28 @@ export function DiskUsage({
             <Action
               onClick={() => stop.mutate()}
               disabled={stop.isPending}
-              hint="Stop the scan running on this host"
+              hint={t.actions.cancelHint}
               testId="du-cancel"
             >
-              cancel ✕
+              {t.actions.cancel}
             </Action>
           ) : (
             <Action
               onClick={() => begin.mutate(panePath)}
               disabled={begin.isPending}
-              hint={`Walk ${panePath} with du and keep the result`}
+              hint={interpolate(t.actions.scanHint, { path: panePath })}
               testId="du-scan"
             >
-              scan ⟳
+              {t.actions.scan}
             </Action>
           ))}
 
         <Action
           onClick={onHide}
-          hint="Collapse the strip and give the space back to the panes"
+          hint={t.actions.hideHint}
           testId="du-hide"
         >
-          hide ▾
+          {t.actions.hide}
         </Action>
       </div>
 
@@ -396,6 +397,7 @@ function Summary({
   /** The scan-state request itself failed — which is not "never scanned". */
   failed: boolean;
 }) {
+  const t = useTranslations("shell").diskUsage;
   const line = "min-w-0 flex-1 truncate font-mono text-caption leading-none";
 
   // The same name on every arm: which sentence is up is the state itself.
@@ -405,14 +407,12 @@ function Summary({
         data-testid="du-summary"
         className={`${line} ${STRIP_QUIET_INK}`}
       >
-        No host in the active pane.
+        {t.summary.noHost}
       </p>
     );
 
   if (running) {
-    const counted = live
-      ? `${formatCount(live.inodes)} entries · ${formatTotal(Number(live.bytes))} · ${live.elapsedSeconds}s`
-      : null;
+    const counted = live ? formatProgress(live) : null;
 
     return (
       <p
@@ -423,9 +423,11 @@ function Summary({
           aria-hidden
           className="bg-accent-soft h-1.25 w-5 flex-none animate-shimmer"
         />
-        <span className={`${STRIP_VALUE_INK} flex-none`}>{live ? PHASE_LABEL[live.phase] : "starting a scan"}</span>
+        <span className={`${STRIP_VALUE_INK} flex-none`}>
+          {live ? PHASE_LABEL[live.phase] : t.summary.startingScan}
+        </span>
         <span className="min-w-0 truncate">
-          {[counted, scan ? `showing the scan from ${formatAgo(scan.ageSeconds)}` : null]
+          {[counted, scan ? interpolate(t.summary.showingScanFrom, { ago: formatAgo(scan.ageSeconds) }) : null]
             .filter((part): part is string => part !== null)
             .join(" · ")}
         </span>
@@ -439,7 +441,7 @@ function Summary({
         data-testid="du-summary"
         className={`${line} ${STRIP_QUIET_INK}`}
       >
-        Looking for a kept scan…
+        {t.summary.looking}
       </p>
     );
   // Before the "never scanned" arm, because they are different claims and only
@@ -452,7 +454,7 @@ function Summary({
         data-testid="du-summary"
         className={`${line} ${STRIP_ALARM_INK}`}
       >
-        Could not read this host's scans.
+        {t.summary.readFailed}
       </p>
     );
   if (!scan)
@@ -461,20 +463,23 @@ function Summary({
         data-testid="du-summary"
         className={`${line} ${STRIP_QUIET_INK}`}
       >
-        Never scanned.
+        {t.summary.neverScanned}
       </p>
     );
 
   const parts = [
     volume
-      ? `${formatTotal(Number(scan.totalBytes ?? 0))} of ${formatTotal(volume.totalBytes)}`
+      ? interpolate(t.summary.usedOfTotal, {
+          used: formatTotal(Number(scan.totalBytes ?? 0)),
+          total: formatTotal(volume.totalBytes),
+        })
       : formatTotal(Number(scan.totalBytes ?? 0)),
-    `scan finished ${formatAgo(scan.ageSeconds)}`,
-    scan.inodes ? `${formatCount(scan.inodes)} inodes` : null,
+    interpolate(t.summary.finished, { ago: formatAgo(scan.ageSeconds) }),
+    scan.inodes ? interpolate(t.summary.inodes, { count: formatCount(scan.inodes) }) : null,
     // Both of these change what the numbers beside them mean, so they ride on
     // the same line rather than waiting to be discovered in a tooltip.
-    scan.truncated ? "partial: the tree outgrew what one scan keeps" : null,
-    scan.unreadableCount > 0 ? `${formatCount(scan.unreadableCount)} unreadable` : null,
+    scan.truncated ? t.summary.truncated : null,
+    scan.unreadableCount > 0 ? interpolate(t.summary.unreadable, { count: formatCount(scan.unreadableCount) }) : null,
   ].filter((part): part is string => part !== null);
 
   return (
@@ -483,12 +488,12 @@ function Summary({
       className={`${line} ${STRIP_QUIET_INK} flex items-baseline gap-1.5`}
     >
       {scan.stale && (
-        <Tooltip content={`This install calls a scan current for ${formatDuration(scan.staleAfterSeconds)}.`}>
+        <Tooltip content={interpolate(t.summary.staleHint, { duration: formatDuration(scan.staleAfterSeconds) })}>
           <span
             data-testid="du-stale"
             className={`${WARN_CHIP_FILL} ${WARN_CHIP_INK} flex-none rounded-xs px-1 py-0.5 leading-none`}
           >
-            ⚠ stale
+            {t.summary.stale}
           </span>
         </Tooltip>
       )}
@@ -536,10 +541,7 @@ const BAND_DENIED_NOTE = (
     >
       {BAND_DENIED_MARK}
     </span>
-    <span>
-      Trekker's own key material — the master key that decrypts every stored credential, or the API user's SSH keys. It
-      stays closed to the browser; reach it over SSH.
-    </span>
+    <span>{dictionary.shell.diskUsage.treemap.denied}</span>
   </span>
 );
 
@@ -551,7 +553,9 @@ const BAND_DENIED_NOTE = (
  * gaps do not, and the error lands in whichever band is drawn last.
  */
 function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavigate: (path: string) => void }) {
-  if (bands.length === 0) return <Note>This directory holds nothing to divide up.</Note>;
+  const t = useTranslations("shell").diskUsage.treemap;
+
+  if (bands.length === 0) return <Note>{t.empty}</Note>;
 
   return (
     <div
@@ -579,14 +583,12 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
             key={band.path ?? "rest"}
             content={
               <TooltipBlock
-                note={
-                  band.denied ? BAND_DENIED_NOTE : target === null ? undefined : "Click to open it in the active pane."
-                }
+                note={band.denied ? BAND_DENIED_NOTE : target === null ? undefined : t.openHint}
                 rows={[
-                  { label: "size", value: formatTotal(band.bytes) },
-                  { label: "share", value: `${percent}%` },
+                  { label: t.size, value: formatTotal(band.bytes) },
+                  { label: t.share, value: `${percent}%` },
                 ]}
-                subject={band.path ?? "everything below the five largest"}
+                subject={band.path ?? t.restSubject}
               />
             }
           >
@@ -657,6 +659,8 @@ function Treemap({ bands, onNavigate }: { bands: readonly TreemapBand[]; onNavig
  * counted so far, and how long it has been going.
  */
 function Working({ live }: { live: ScanProgress | null }) {
+  const t = useTranslations("shell").diskUsage;
+
   return (
     <div
       data-testid="du-working"
@@ -666,22 +670,13 @@ function Working({ live }: { live: ScanProgress | null }) {
         aria-hidden
         className="bg-accent-soft h-1.25 w-6 flex-none animate-shimmer"
       />
-      <span className={`${STRIP_VALUE_INK} flex-none`}>{live ? PHASE_LABEL[live.phase] : "starting…"}</span>
-      {live && (
-        <span className="min-w-0 truncate">
-          {formatCount(live.inodes)} entries · {formatTotal(Number(live.bytes))} · {live.elapsedSeconds}s
-        </span>
-      )}
+      <span className={`${STRIP_VALUE_INK} flex-none`}>{live ? PHASE_LABEL[live.phase] : t.starting}</span>
+      {live && <span className="min-w-0 truncate">{formatProgress(live)}</span>}
     </div>
   );
 }
 
-const PHASE_LABEL: Record<ScanProgress["phase"], string> = {
-  probing: "probing the host's du",
-  walking: "walking the tree",
-  hashing: "hashing duplicate candidates",
-  saving: "writing the result",
-};
+const PHASE_LABEL: Record<ScanProgress["phase"], string> = dictionary.shell.diskUsage.phases;
 
 /**
  * No scan, or one that failed.
@@ -704,7 +699,9 @@ function Blank({
   onScan: (() => void) | null;
   pending: boolean;
 }) {
-  if (!host) return <Note>Bind the active pane to a host and its disk usage appears here.</Note>;
+  const t = useTranslations("shell").diskUsage;
+
+  if (!host) return <Note>{t.blank.noHost}</Note>;
 
   return (
     <div
@@ -717,7 +714,7 @@ function Blank({
             failure ? STRIP_ALARM_INK : STRIP_QUIET_INK
           }`}
         >
-          {failure ?? `${root} has not been scanned yet — du walks it once and the result is kept.`}
+          {failure ?? interpolate(t.blank.notScanned, { root })}
         </p>
       </Tooltip>
       {onScan && (
@@ -729,7 +726,7 @@ function Blank({
           data-testid="du-blank-scan"
           className={`${PRESS} flex-none px-2.5 py-1 font-mono text-2xs leading-none font-medium disabled:opacity-60`}
         >
-          {pending ? "starting…" : failure ? "try again" : "scan now"}
+          {pending ? t.starting : failure ? t.blank.tryAgain : t.blank.scanNow}
         </button>
       )}
     </div>
@@ -747,6 +744,7 @@ function Facts({ scan }: { scan: ScanView | null }) {
   const largest = scan?.facts.largest;
   const duplicates = scan?.facts.duplicates;
   const old = scan?.facts.oldFiles;
+  const t = useTranslations("shell").diskUsage.facts;
 
   return (
     <div
@@ -754,7 +752,7 @@ function Facts({ scan }: { scan: ScanView | null }) {
       className={`${STRIP_QUIET_INK} mt-1.5 flex gap-4 overflow-hidden font-mono text-caption leading-none whitespace-nowrap`}
     >
       <Fact
-        label="largest"
+        label={t.largest}
         fact="largest"
         hint={largest?.path}
       >
@@ -762,7 +760,7 @@ function Facts({ scan }: { scan: ScanView | null }) {
       </Fact>
 
       <Fact
-        label="duplicates"
+        label={t.duplicates}
         fact="duplicates"
         hint={
           duplicates ? (
@@ -772,34 +770,37 @@ function Facts({ scan }: { scan: ScanView | null }) {
               // second as the first would promise reclaimable space that may not
               // exist — which is why they are three rows here rather than the
               // one flat line a `title` could hold.
-              note="Only the confirmed groups are reclaimable."
+              note={t.duplicatesNote}
               rows={[
-                { label: "candidates", value: formatCount(duplicates.candidates) },
-                { label: "confirmed", value: formatCount(duplicates.confirmed) },
-                { label: "too large to hash", value: formatCount(duplicates.skipped) },
+                { label: t.candidates, value: formatCount(duplicates.candidates) },
+                { label: t.confirmed, value: formatCount(duplicates.confirmed) },
+                { label: t.tooLarge, value: formatCount(duplicates.skipped) },
               ]}
-              subject="duplicates, by size then by hash"
+              subject={t.duplicatesSubject}
             />
           ) : undefined
         }
       >
         {duplicates
-          ? `${formatCount(duplicates.confirmed)} · ${formatTotal(Number(duplicates.reclaimableBytes))} reclaimable`
+          ? interpolate(t.duplicatesValue, {
+              count: formatCount(duplicates.confirmed),
+              bytes: formatTotal(Number(duplicates.reclaimableBytes)),
+            })
           : null}
       </Fact>
 
       <Fact
-        label="files > 1 year"
+        label={t.oldFiles}
         // The payload's own key, not the label: `>` in a selector is a combinator.
         fact="old-files"
         hint={
           old ? (
             <TooltipBlock
               rows={[
-                { label: "size", value: formatTotal(Number(old.bytes)) },
-                { label: "untouched since", value: old.before.slice(0, 10) },
+                { label: t.size, value: formatTotal(Number(old.bytes)) },
+                { label: t.untouchedSince, value: old.before.slice(0, 10) },
               ]}
-              subject="files older than a year"
+              subject={t.oldFilesSubject}
             />
           ) : undefined
         }
@@ -881,14 +882,25 @@ function Note({ children }: { children: ReactNode }) {
 
 /** How long ago, in one unit — the age column's own habit. */
 function formatAgo(seconds: number | null): string {
-  return seconds === null ? "just now" : `${formatDuration(seconds)} ago`;
+  const words = dictionary.shell.diskUsage;
+  return seconds === null ? words.justNow : interpolate(words.ago, { duration: formatDuration(seconds) });
 }
 
 function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${Math.max(1, Math.round(seconds))}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
-  if (seconds < 86_400) return `${Math.round(seconds / 3600)} h`;
-  return `${Math.round(seconds / 86_400)} d`;
+  const unit = dictionary.shell.diskUsage.duration;
+  if (seconds < 60) return interpolate(unit.seconds, { n: Math.max(1, Math.round(seconds)) });
+  if (seconds < 3600) return interpolate(unit.minutes, { n: Math.round(seconds / 60) });
+  if (seconds < 86_400) return interpolate(unit.hours, { n: Math.round(seconds / 3600) });
+  return interpolate(unit.days, { n: Math.round(seconds / 86_400) });
+}
+
+/** What a running scan has counted so far — the summary line and the working box say it alike. */
+function formatProgress(live: ScanProgress): string {
+  return interpolate(dictionary.shell.diskUsage.progress, {
+    count: formatCount(live.inodes),
+    bytes: formatTotal(Number(live.bytes)),
+    seconds: live.elapsedSeconds,
+  });
 }
 
 /**

@@ -4,6 +4,7 @@ import useCredentials from "@auth/helpers/useCredentials";
 import { AuthCard, AuthLinks } from "@components/auth/auth-card";
 import { AuthField } from "@components/auth/auth-field";
 import { zodResolver } from "@hookform/resolvers/zod";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { signIn } from "@lib/api/users";
 import { signInSchema } from "@schemas/auth";
@@ -14,6 +15,7 @@ import type { AuthStatus } from "@components/auth/auth-card";
 import type { SignInValues } from "@schemas/auth";
 
 export default function LoginPage() {
+  const t = useTranslations("auth");
   const { setCredentials } = useCredentials();
   const [status, setStatus] = useState<AuthStatus>("IDLE");
   const [failure, setFailure] = useState<string | null>(null);
@@ -39,22 +41,22 @@ export default function LoginPage() {
       // The API's own words. "Invalid credentials" is deliberately vague on
       // the server side — it must not say which half was wrong — and that
       // vagueness is the message, not something to replace.
-      setFailure(error instanceof ApiError ? error.message : "The API could not be reached.");
+      setFailure(error instanceof ApiError ? error.message : t.unreachable);
     }
   };
 
   return (
     <AuthCard
-      title="TREKKER"
-      subtitle="Sign in"
+      title={t.title}
+      subtitle={t.login.subtitle}
       status={status}
       failure={failure}
       footer={
         <AuthLinks
           links={[
-            { href: "/signup", label: "register" },
-            { href: "/recover", label: "recover" },
-            { href: "/about", label: "about" },
+            { href: "/signup", label: t.links.register },
+            { href: "/recover", label: t.links.recover },
+            { href: "/about", label: t.links.about },
           ]}
         />
       }
@@ -66,7 +68,7 @@ export default function LoginPage() {
         noValidate
       >
         <AuthField
-          label="Identity"
+          label={t.fields.identity}
           type="email"
           autoComplete="username"
           autoFocus
@@ -75,7 +77,7 @@ export default function LoginPage() {
           testId="login-email"
         />
         <AuthField
-          label="Key"
+          label={t.fields.key}
           secret
           autoComplete="current-password"
           registration={register("password")}
@@ -87,11 +89,10 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={isSubmitting}
-          // `CONNECT` reads `CONNECTING…` for the length of the request.
           data-testid="login-submit"
           className="border-accent text-ink hover:bg-accent/20 mt-1 rounded-xs border py-1.5 text-sm tracking-caps disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isSubmitting ? "CONNECTING…" : "CONNECT"}
+          {isSubmitting ? t.login.submitting : t.login.submit}
         </button>
       </form>
     </AuthCard>

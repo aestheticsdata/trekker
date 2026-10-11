@@ -9,6 +9,9 @@
  * which is precisely the pair someone opens this panel to tell apart.
  */
 
+import { interpolate } from "@i18n/interpolate";
+import { dictionary } from "@text/index";
+
 export type PermissionClass = "user" | "group" | "other";
 
 export interface PermissionCell {
@@ -26,6 +29,8 @@ export interface PermissionRow {
   cells: [PermissionCell, PermissionCell, PermissionCell];
 }
 
+const text = dictionary.dialogs.permissions;
+
 /**
  * The fourth octal digit, and what it does to each class's execute column.
  *
@@ -34,9 +39,9 @@ export interface PermissionRow {
  * meant to be: a setuid binary nobody can execute is almost always a mistake.
  */
 const SPECIAL: Record<PermissionClass, { bit: number; on: string; off: string; name: string }> = {
-  user: { bit: 0o4000, on: "s", off: "S", name: "setuid" },
-  group: { bit: 0o2000, on: "s", off: "S", name: "setgid" },
-  other: { bit: 0o1000, on: "t", off: "T", name: "sticky" },
+  user: { bit: 0o4000, on: "s", off: "S", name: text.special.setuid },
+  group: { bit: 0o2000, on: "s", off: "S", name: text.special.setgid },
+  other: { bit: 0o1000, on: "t", off: "T", name: text.special.sticky },
 };
 
 const CLASSES: readonly PermissionClass[] = ["user", "group", "other"];
@@ -71,7 +76,7 @@ export function permissionRows(mode: string): PermissionRow[] | null {
           ? {
               glyph: executable ? special.on : special.off,
               granted: executable,
-              note: executable ? special.name : `${special.name}, without execute`,
+              note: executable ? special.name : interpolate(text.describe.withoutExecute, { name: special.name }),
             }
           : { glyph: executable ? "✓" : "·", granted: executable },
       ],
@@ -87,15 +92,19 @@ export function permissionRows(mode: string): PermissionRow[] | null {
  */
 export function describeMode(mode: string): string {
   const rows = permissionRows(mode);
-  if (!rows) return `Permissions ${mode}`;
+  if (!rows) return interpolate(text.describe.unparsed, { mode });
 
-  const named = ["read", "write", "execute"];
+  const { rights } = text.describe;
+  const named = [rights.read, rights.write, rights.execute];
   const parts = rows.map(({ who, cells }) => {
     const granted = cells.map((cell, index) => (cell.granted ? named[index] : null)).filter(Boolean);
     const notes = cells.map((cell) => cell.note).filter(Boolean);
-    const list = granted.length > 0 ? granted.join(", ") : "nothing";
-    return notes.length > 0 ? `${who} ${list} (${notes.join(", ")})` : `${who} ${list}`;
+    const list = granted.length > 0 ? granted.join(", ") : text.describe.nothing;
+    const whom = text.classes[who];
+    return notes.length > 0
+      ? interpolate(text.describe.lineNoted, { who: whom, list, notes: notes.join(", ") })
+      : interpolate(text.describe.line, { who: whom, list });
   });
 
-  return `Permissions ${mode}: ${parts.join("; ")}`;
+  return interpolate(text.describe.parsed, { mode, parts: parts.join("; ") });
 }

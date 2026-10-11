@@ -4,6 +4,8 @@ import { Sparkline } from "@components/shell/sparkline";
 import { Tooltip } from "@components/ui/tooltip";
 import { hintFor } from "@helpers/keys";
 import { PRESS } from "@helpers/press";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 
 import type { ReactNode } from "react";
 
@@ -86,6 +88,8 @@ export function TopBar({
    */
   onManageHost?: () => void;
 }) {
+  const t = useTranslations("shell");
+
   return (
     <header
       className="bg-chrome border-line flex h-topbar shrink-0 items-center gap-2.5 border-b px-2.5"
@@ -145,7 +149,7 @@ export function TopBar({
           className="text-brand text-sm font-bold tracking-caps"
           data-testid="top-bar-wordmark"
         >
-          TREKKER
+          {t.wordmark}
         </span>
       </span>
 
@@ -154,7 +158,7 @@ export function TopBar({
         // from a `HostView` and this shape carries no slug. The label is the
         // Hosts row's own name, passed verbatim — the latency beside it is the
         // part that changes, and it is what a text locator would trip on.
-        <Tooltip content={`Edit ${host.label}`}>
+        <Tooltip content={interpolate(t.topBar.editHost, { host: host.label })}>
           <button
             type="button"
             onClick={onManageHost}
@@ -171,7 +175,7 @@ export function TopBar({
             {/* Transport is configuration, not a measurement: only the number degrades. */}
             <span className="text-ink-dim font-mono text-2xs">
               {host.transport ? `${host.transport} · ` : ""}
-              {host.pingMs === null ? "—" : `${host.pingMs} ms`}
+              {host.pingMs === null ? "—" : interpolate(t.topBar.pingMs, { ms: host.pingMs })}
             </span>
           </button>
         </Tooltip>
@@ -200,18 +204,22 @@ export function TopBar({
         <dl className="text-ink-muted divide-line hidden items-center divide-x font-mono text-xs stats:flex">
           <Stat
             term="up"
+            label={t.topBar.stats.up}
             value={stats.uptime}
           />
           <Stat
             term="cpu"
+            label={t.topBar.stats.cpu}
             value={stats.cpu}
           />
           <Stat
             term="ram"
+            label={t.topBar.stats.ram}
             value={stats.ram}
           />
           <Stat
             term="io"
+            label={t.topBar.stats.throughput}
             value={stats.io}
           />
           {stats.load.length > 0 && (
@@ -222,12 +230,12 @@ export function TopBar({
               data-testid="host-stat"
               data-term="load"
             >
-              <dt>load</dt>
+              <dt>{t.topBar.stats.load}</dt>
               <dd className="text-ink font-medium">{stats.load[stats.load.length - 1]?.toFixed(2)}</dd>
               <dd>
                 <Sparkline
                   values={stats.load}
-                  label={`Load average over the last ${stats.load.length} samples`}
+                  label={interpolate(t.topBar.loadHint, { count: stats.load.length })}
                 />
               </dd>
             </div>
@@ -254,15 +262,18 @@ export function TopBar({
   );
 }
 
-/** A stat renders its dash rather than vanishing: a missing value is a fact. */
-function Stat({ term, value }: { term: string; value: string | null }) {
+/**
+ * A stat renders its dash rather than vanishing: a missing value is a fact.
+ * `term` is the stable key `data-term` carries; `label` is the word on screen.
+ */
+function Stat({ term, label, value }: { term: string; label: string; value: string | null }) {
   return (
     <div
       className="flex items-center gap-1 px-2.5"
       data-testid="host-stat"
       data-term={term}
     >
-      <dt>{term}</dt>
+      <dt>{label}</dt>
       <dd className="text-ink font-medium">{value ?? "—"}</dd>
     </div>
   );

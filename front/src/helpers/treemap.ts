@@ -1,3 +1,5 @@
+import { dictionary } from "@text/index";
+
 import type { ScanLevel } from "@lib/api/scans";
 
 /**
@@ -136,7 +138,7 @@ export function treemapBands(level: ScanLevel): TreemapBand[] {
       path: null,
       isDirectory: false,
       denied: false,
-      label: "rest",
+      label: dictionary.shell.treemap.rest,
       bytes: Number(rest),
       share: shareOf(rest, total),
     });

@@ -7,6 +7,8 @@ import { Overlay } from "@components/ui/overlay";
 import { useToast } from "@components/ui/toast";
 import { extensionOf, formatSize, MARK_ON_PANEL, rowTypeOf } from "@helpers/listing";
 import { DANGER_FILL, DANGER_INK } from "@helpers/press";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { deletePaths, planDelete } from "@lib/api/delete";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -55,12 +57,15 @@ export function DeleteModal({
   onClose: () => void;
   onApplied: () => void;
 }) {
+  const t = useTranslations("dialogs");
   const subject =
-    target.entries.length === 1 ? target.entries[0].name : `${target.entries.length} entries in ${target.directory}`;
+    target.entries.length === 1
+      ? target.entries[0].name
+      : interpolate(t.common.entriesIn, { count: target.entries.length, directory: target.directory });
 
   return (
     <Overlay
-      label={`Delete ${subject}`}
+      label={interpolate(t.delete.dialog, { subject })}
       onClosed={onClose}
       testId="delete-modal"
       panelClassName="bg-app border-danger-mid flex w-full max-w-[46.25rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
@@ -88,6 +93,7 @@ function DeletePanel({
   close: () => void;
   onApplied: () => void;
 }) {
+  const t = useTranslations("dialogs");
   const { csrfToken } = useAuth();
   const queryClient = useQueryClient();
   const { push } = useToast();
@@ -124,14 +130,19 @@ function DeletePanel({
         const survived = result.results.filter((outcome) => !outcome.ok);
         push({
           tone: "warning",
-          message: `Deleted ${result.entriesRemoved} of ${result.entriesRemoved + survived.length}`,
-          detail: survived[0]?.message ?? "Some entries could not be removed.",
+          message: interpolate(t.delete.partial, {
+            removed: result.entriesRemoved,
+            total: result.entriesRemoved + survived.length,
+          }),
+          detail: survived[0]?.message ?? t.delete.someFailed,
         });
       } else {
         push({
           tone: "success",
-          message: `Deleted ${count(result.entriesRemoved, "entry", "entries")}`,
-          detail: `${formatSize(result.bytesFreed, "file")} freed`,
+          message: interpolate(t.delete.deleted, {
+            entries: count(result.entriesRemoved, t.common.entryOne, t.common.entryMany),
+          }),
+          detail: interpolate(t.delete.freed, { size: formatSize(result.bytesFreed, "file") }),
         });
       }
 
@@ -139,7 +150,7 @@ function DeletePanel({
       close();
     },
     onError: (error) => {
-      setFailure(error instanceof ApiError ? error.message : "The delete could not be sent.");
+      setFailure(error instanceof ApiError ? error.message : t.delete.failure);
     },
   });
 
@@ -150,7 +161,7 @@ function DeletePanel({
   return (
     <>
       <header className="bg-danger-wash border-danger-mid flex h-topbar flex-none items-center gap-2 border-b px-3">
-        <span className="text-danger-soft font-mono text-xs font-semibold tracking-label">delete</span>
+        <span className="text-danger-soft font-mono text-xs font-semibold tracking-label">{t.delete.title}</span>
         <span className="text-ink-muted min-w-0 truncate font-mono text-cmd">{subject}</span>
       </header>
 
@@ -162,12 +173,15 @@ function DeletePanel({
 
       {plan.data?.needsElevation === true && (
         <div className="bg-danger-wash border-warning text-warning mx-3.5 mt-2.5 border px-2.5 py-1.75 font-mono text-cmd/[1.5]">
-          {`This would remove ${plan.data.entries.toLocaleString("en-GB")} entries, above the ${plan.data.threshold.toLocaleString("en-GB")} an unelevated session may delete.`}
+          {interpolate(t.delete.elevation, {
+            entries: plan.data.entries.toLocaleString("en-GB"),
+            threshold: plan.data.threshold.toLocaleString("en-GB"),
+          })}
         </div>
       )}
 
       <div className="border-line max-h-70 flex-1 overflow-y-auto border-t border-b">
-        {plan.isPending && <div className="text-ink-faint px-3.5 py-3 font-mono text-xs">walking the tree…</div>}
+        {plan.isPending && <div className="text-ink-faint px-3.5 py-3 font-mono text-xs">{t.delete.walking}</div>}
         {plan.data?.targets.map((row) => (
           <div
             key={row.path}
@@ -182,7 +196,11 @@ function DeletePanel({
             />
             <span className="text-ink-muted truncate font-mono text-xs/[1.3]">{row.name}</span>
             <span className="text-ink-dim font-mono text-2xs/none">
-              {row.kind === "directory" ? `recursive · ${count(row.entries, "entry", "entries")}` : row.kind}
+              {row.kind === "directory"
+                ? interpolate(t.delete.recursive, {
+                    entries: count(row.entries, t.common.entryOne, t.common.entryMany),
+                  })
+                : row.kind}
             </span>
             <span className="text-ink-soft w-20 text-right font-mono text-xs/[1.3]">
               {formatSize(row.bytes, "file")}
@@ -206,7 +224,7 @@ function DeletePanel({
 
           <label className="flex flex-col gap-1">
             <span className="text-ink-faint font-mono text-2xs tracking-label">
-              {`type ${plan.data.token} to confirm`}
+              {interpolate(t.delete.tokenPrompt, { token: plan.data.token })}
             </span>
             <input
               value={typed}
@@ -218,7 +236,7 @@ function DeletePanel({
               // field that is already focused is one a reflex can type into.
               spellCheck={false}
               autoComplete="off"
-              aria-label={`Type ${plan.data.token} to confirm`}
+              aria-label={interpolate(t.delete.tokenLabel, { token: plan.data.token })}
               // The accessible name carries the server's token, so it is
               // different for every plan — this is the stable handle.
               data-testid="delete-token"
@@ -240,7 +258,10 @@ function DeletePanel({
         <span className="text-ink-muted font-mono text-2xs/none">
           {plan.data === undefined
             ? ""
-            : `${count(plan.data.entries, "entry", "entries")} · ${formatSize(plan.data.bytes, "file")}`}
+            : interpolate(t.delete.summary, {
+                entries: count(plan.data.entries, t.common.entryOne, t.common.entryMany),
+                size: formatSize(plan.data.bytes, "file"),
+              })}
         </span>
         <div className="flex-1" />
         <button
@@ -249,7 +270,7 @@ function DeletePanel({
           data-testid="delete-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
-          cancel
+          {t.common.cancel}
         </button>
         <button
           type="button"
@@ -263,7 +284,7 @@ function DeletePanel({
           // like the one beside it.
           className={`${DANGER_FILL} ${DANGER_INK} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
-          {remove.isPending ? "deleting…" : "delete"}
+          {remove.isPending ? t.delete.deleting : t.delete.confirm}
         </button>
       </footer>
     </>
@@ -277,21 +298,44 @@ function DeletePanel({
  * because a line that always says something is a line nobody reads.
  */
 function RiskLine({ plan }: { plan: DeletePlan }) {
+  const t = useTranslations("dialogs");
+  const { common } = t;
   const notes: string[] = [];
-  if (plan.risk.directories > 0) notes.push(count(plan.risk.directories, "directory", "directories"));
-  if (plan.risk.rootOwned > 0) notes.push(`${count(plan.risk.rootOwned, "entry", "entries")} owned by root`);
-  if (plan.risk.links > 0) notes.push(`${count(plan.risk.links, "symlink")} (targets untouched)`);
-  if (plan.risk.unreadable > 0) notes.push(`${count(plan.risk.unreadable, "directory", "directories")} unreadable`);
+  if (plan.risk.directories > 0) notes.push(count(plan.risk.directories, common.directoryOne, common.directoryMany));
+  if (plan.risk.rootOwned > 0) {
+    notes.push(
+      interpolate(t.delete.risk.rootOwned, {
+        entries: count(plan.risk.rootOwned, common.entryOne, common.entryMany),
+      }),
+    );
+  }
+  if (plan.risk.links > 0) {
+    notes.push(
+      interpolate(t.delete.risk.links, { links: count(plan.risk.links, common.symlinkOne, common.symlinkMany) }),
+    );
+  }
+  if (plan.risk.unreadable > 0) {
+    notes.push(
+      interpolate(t.delete.risk.unreadable, {
+        directories: count(plan.risk.unreadable, common.directoryOne, common.directoryMany),
+      }),
+    );
+  }
 
   if (notes.length === 0) return null;
 
-  return <span className="text-warning font-mono text-2xs/[1.6]">contains {notes.join(" · ")}</span>;
+  return (
+    <span className="text-warning font-mono text-2xs/[1.6]">
+      {interpolate(t.delete.risk.contains, { notes: notes.join(" · ") })}
+    </span>
+  );
 }
 
 function joinPath(directory: string, name: string): string {
   return directory.endsWith("/") ? `${directory}${name}` : `${directory}/${name}`;
 }
 
-function count(n: number, singular: string, plural = `${singular}s`): string {
-  return `${n} ${n === 1 ? singular : plural}`;
+/** A count in words, from the zone's `{count}` pair. */
+function count(n: number, one: string, many: string): string {
+  return interpolate(n === 1 ? one : many, { count: n });
 }

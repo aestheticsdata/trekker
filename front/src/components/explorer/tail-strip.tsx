@@ -14,6 +14,8 @@ import {
   TAIL_NOTE_INK,
   TAIL_SURFACE,
 } from "@helpers/tail";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { useEffect, useRef, useState } from "react";
 
 import type { TailEntry } from "@components/explorer/use-tail";
@@ -99,6 +101,7 @@ function TailFeedView({
   path: string;
   onTail: (path: string | null) => void;
 }) {
+  const t = useTranslations("explorer");
   /**
    * Bumped to open the stream again after it ended.
    *
@@ -165,14 +168,13 @@ function TailFeedView({
             <TooltipBlock
               subject={feed.ready?.path ?? path}
               rows={[
-                { label: "source", value: feed.ready?.source === "tail" ? "tail -F" : "polling" },
-                { label: "lines", value: String(feed.received) },
+                {
+                  label: t.tail.tooltip.source,
+                  value: feed.ready?.source === "tail" ? t.tail.tooltip.tail : t.tail.tooltip.polling,
+                },
+                { label: t.tail.tooltip.lines, value: String(feed.received) },
               ]}
-              note={
-                feed.ready?.shared === true
-                  ? "Another tab is following this file. Both share one reader on the host."
-                  : undefined
-              }
+              note={feed.ready?.shared === true ? t.tail.tooltip.shared : undefined}
             />
           }
         >
@@ -196,7 +198,7 @@ function TailFeedView({
               className={`${TAIL_BUTTON_FILL} ${TAIL_BUTTON_INK} px-1.5 py-0.5 font-medium whitespace-nowrap`}
               data-testid="tail-retry"
             >
-              retry
+              {t.tail.retry}
             </button>
           )}
 
@@ -209,14 +211,14 @@ function TailFeedView({
               className={`${TAIL_BUTTON_FILL} ${TAIL_BUTTON_INK} px-1.5 py-0.5 font-medium whitespace-nowrap`}
               data-testid="tail-follow"
             >
-              ↓ {pending > 0 ? `${pending} new` : "follow"}
+              {pending > 0 ? interpolate(t.tail.pending, { count: pending }) : t.tail.follow}
             </button>
           )}
 
           <button
             type="button"
             onClick={() => onTail(null)}
-            aria-label="Stop following this file"
+            aria-label={t.tail.stop}
             className={`${TAIL_HEADER_INK} px-1 font-mono hover:opacity-70`}
             data-testid="tail-stop"
           >
@@ -235,7 +237,7 @@ function TailFeedView({
         // open. Off and labelled means a screen reader can be taken to it and
         // read it, rather than being read at by it.
         aria-live="off"
-        aria-label={`Live tail of ${path}`}
+        aria-label={interpolate(t.tail.body, { path })}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box with no other keyboard route has to be focusable, or its content is reachable by pointer alone
         tabIndex={0}
         className={`${TAIL_BODY_INK} scroll-composited h-tailbody overflow-x-hidden overflow-y-auto font-mono text-caption leading-log`}
@@ -243,9 +245,7 @@ function TailFeedView({
       >
         <ScrollThumbRail />
         {feed.entries.length === 0 ? (
-          <p className={TAIL_NOTE_INK}>
-            {feed.status === "ended" ? (feed.ended ?? "The tail ended.") : "waiting for the first line…"}
-          </p>
+          <p className={TAIL_NOTE_INK}>{feed.status === "ended" ? (feed.ended ?? t.tail.ended) : t.tail.waiting}</p>
         ) : (
           feed.entries.map((entry) => (
             <Line
@@ -277,13 +277,14 @@ function TailPicker({
   rows: readonly FileRow[];
   onTail: (path: string | null) => void;
 }) {
+  const t = useTranslations("explorer");
   const candidates = rows.filter((row) => row.type === "file" && looksLikeLog(row.name));
 
   return (
-    <Frame title={<span className="min-w-0 truncate">pick a file to follow</span>}>
+    <Frame title={<span className="min-w-0 truncate">{t.tail.picker.title}</span>}>
       <div className={`${TAIL_NOTE_INK} flex flex-wrap gap-1 py-0.5 font-mono text-caption`}>
         {candidates.length === 0 ? (
-          <p>nothing here looks like a log — right-click a file and choose “tail this file”</p>
+          <p>{t.tail.picker.none}</p>
         ) : (
           candidates.map((row) => (
             <button
@@ -319,6 +320,8 @@ function Frame({
   controls?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const t = useTranslations("explorer");
+
   return (
     // One strip per pane, and both panes can stand in log directories at once —
     // scope by the pane wrapper's `[data-pane]` before reaching for anything in
@@ -331,7 +334,7 @@ function Frame({
           `uppercase` on the row would take the file name with them, and
           `ACCESS.LOG` at 0.14em is not the name of anything on the host. */}
       <header className={`${TAIL_HEADER_INK} flex h-3.5 items-center gap-1.5 text-3xs leading-none`}>
-        <span className="tracking-caps flex-none font-medium uppercase">live tail</span>
+        <span className="tracking-caps flex-none font-medium uppercase">{t.tail.header}</span>
         <span
           aria-hidden
           className="border-pane-line h-2 flex-none border-l"
@@ -348,6 +351,8 @@ function Frame({
 
 /** What the stream is doing, in one word, and only when it is not simply live. */
 function StatusWord({ feed }: { feed: ReturnType<typeof useTail> }) {
+  const t = useTranslations("explorer");
+
   // `tail-status` on every word and on none of the silence: a take that finds
   // it absent is looking at a live, healthy tail — the one state this slot
   // deliberately says nothing about, below.
@@ -358,7 +363,7 @@ function StatusWord({ feed }: { feed: ReturnType<typeof useTail> }) {
           className="text-log-server whitespace-nowrap"
           data-testid="tail-status"
         >
-          ended
+          {t.tail.status.ended}
         </span>
       </Tooltip>
     );
@@ -370,7 +375,7 @@ function StatusWord({ feed }: { feed: ReturnType<typeof useTail> }) {
         className="text-log-client whitespace-nowrap"
         data-testid="tail-status"
       >
-        reconnecting…
+        {t.tail.status.reconnecting}
       </span>
     );
   if (feed.status === "connecting")
@@ -379,7 +384,7 @@ function StatusWord({ feed }: { feed: ReturnType<typeof useTail> }) {
         className="whitespace-nowrap opacity-70"
         data-testid="tail-status"
       >
-        connecting…
+        {t.tail.status.connecting}
       </span>
     );
 
@@ -390,7 +395,7 @@ function StatusWord({ feed }: { feed: ReturnType<typeof useTail> }) {
           className="text-log-server whitespace-nowrap"
           data-testid="tail-status"
         >
-          host not answering
+          {t.tail.status.unanswered}
         </span>
       </Tooltip>
     );

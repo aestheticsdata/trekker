@@ -20,6 +20,8 @@ import {
   TERMINAL_SURFACE,
   TERMINAL_TITLE_INK,
 } from "@helpers/terminal";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { fetchHostSummary } from "@lib/api/hosts";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useSudoWindow } from "@lib/query/use-sudo";
@@ -129,6 +131,7 @@ export function TerminalPanel({
    */
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useTranslations("terminal");
   const [lines, setLines] = useState<readonly TerminalLine[]>([]);
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<readonly string[]>(readHistory);
@@ -263,10 +266,10 @@ export function TerminalPanel({
         return;
       }
       write([
-        { kind: "error", text: `${parsed.intent.kind}: this pane is not bound to a host` },
+        { kind: "error", text: interpolate(t.panel.unbound, { command: parsed.intent.kind }) },
         {
           kind: "hint",
-          text: hostsPending ? "Still reading the host list." : "Pick one in the sidebar, or `ssh <host>`.",
+          text: hostsPending ? t.panel.hostsPending : t.panel.pickHost,
         },
       ]);
       return;
@@ -339,7 +342,7 @@ export function TerminalPanel({
       className={`${TERMINAL_SURFACE} border-line flex flex-none flex-col border-t ${
         open ? "h-terminal" : "h-omnibar cursor-text"
       }`}
-      aria-label="Terminal"
+      aria-label={t.panel.label}
       data-testid="terminal"
       // `⎋` puts the terminal away, from anywhere inside it (TRE-35 §3, TRE-123).
       //
@@ -383,15 +386,15 @@ export function TerminalPanel({
         <header
           className={`${TERMINAL_BAR} ${TERMINAL_LABEL_INK} border-line h-termbar flex flex-none items-center gap-2.5 border-b px-2.5 font-mono text-caption leading-none`}
         >
-          <span className={`${TERMINAL_TITLE_INK} tracking-label flex-none`}>TERMINAL</span>
-          <span className="min-w-0 flex-1 truncate">{world?.host.label ?? "no host"}</span>
+          <span className={`${TERMINAL_TITLE_INK} tracking-label flex-none`}>{t.panel.title}</span>
+          <span className="min-w-0 flex-1 truncate">{world?.host.label ?? t.panel.noHost}</span>
           <button
             type="button"
             onClick={() => setLines([])}
             className="flex-none hover:opacity-70"
             data-testid="terminal-clear"
           >
-            clear
+            {t.panel.clear}
           </button>
           {/* `×` rather than `close ⌥↩`: since TRE-85 nothing closes. The panel
             puts its scrollback away and leaves the prompt where it was, and a
@@ -400,7 +403,7 @@ export function TerminalPanel({
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            aria-label="Collapse the terminal"
+            aria-label={t.panel.collapse}
             className="flex-none hover:opacity-70"
             data-testid="terminal-collapse"
           >
@@ -417,7 +420,7 @@ export function TerminalPanel({
           // and output that is read aloud as it lands would talk over somebody
           // still typing the next line. Labelled, so it can be read on purpose.
           aria-live="off"
-          aria-label="Terminal output"
+          aria-label={t.panel.output}
           // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box with no other keyboard route has to be focusable, or its content is reachable by pointer alone
           tabIndex={0}
           className={`${TERMINAL_OUTPUT_INK} scroll-composited min-h-0 flex-1 overflow-x-auto overflow-y-auto px-2.5 py-1.75 font-mono text-xs leading-term whitespace-pre`}
@@ -548,7 +551,7 @@ export function TerminalPanel({
           spellCheck={false}
           autoComplete="off"
           autoCapitalize="off"
-          aria-label="Terminal input"
+          aria-label={t.panel.input}
           data-testid="terminal-input"
           // Focus is the one signal that the person has come to the terminal,
           // and every route to it ends here: a press anywhere on the row, the
@@ -568,9 +571,7 @@ export function TerminalPanel({
         />
 
         {!open && (
-          <span className={`${TERMINAL_LABEL_INK} flex-none text-caption leading-none`}>
-            ⌥↩ expand to terminal · ↑ history
-          </span>
+          <span className={`${TERMINAL_LABEL_INK} flex-none text-caption leading-none`}>{t.panel.stripHint}</span>
         )}
       </label>
     </section>,

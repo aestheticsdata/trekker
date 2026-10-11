@@ -2,6 +2,8 @@
 
 import { Button, Segmented, TextInput } from "@components/hosts/field";
 import { Tooltip } from "@components/ui/tooltip";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { contains } from "@schemas/host";
 
 import type { HostRoot } from "@lib/api/hosts";
@@ -38,6 +40,7 @@ export function RootsEditor({
   error?: string;
   onChange: (roots: HostRoot[]) => void;
 }) {
+  const t = useTranslations("hosts");
   const replace = (index: number, patch: Partial<HostRoot>) => {
     onChange(roots.map((root, position) => (position === index ? { ...root, ...patch } : root)));
   };
@@ -50,7 +53,7 @@ export function RootsEditor({
       className="flex flex-col gap-1"
     >
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-ink-muted font-mono text-2xs tracking-label">roots</span>
+        <span className="text-ink-muted font-mono text-2xs tracking-label">{t.roots.heading}</span>
         <span className="text-danger-soft truncate text-right font-mono text-2xs">{error ?? ""}</span>
       </div>
 
@@ -59,8 +62,8 @@ export function RootsEditor({
           explain it, reads as a bug rather than as a privilege. */}
       {!enforced && (
         <p className="text-ink-muted font-mono text-2xs/relaxed">
-          You own this install, so these rows are saved without being enforced — your panes resolve against{" "}
-          <code>/</code>. They bind again the moment this host belongs to an account that is not the owner.
+          {t.roots.unenforced.before} <code>/</code>
+          {t.roots.unenforced.after}
         </p>
       )}
 
@@ -81,8 +84,8 @@ export function RootsEditor({
               <TextInput
                 value={root.path}
                 onChange={(event) => replace(index, { path: event.target.value })}
-                placeholder="/srv"
-                aria-label={`Root ${index + 1} path`}
+                placeholder={t.roots.pathPlaceholder}
+                aria-label={interpolate(t.roots.pathLabel, { index: index + 1 })}
                 spellCheck={false}
                 autoComplete="off"
                 data-testid="host-root-path"
@@ -90,27 +93,27 @@ export function RootsEditor({
               />
 
               {/* Says why this row cannot be removed before the button is reached for. */}
-              <Tooltip content={holdsHome ? "The home sits inside this root" : undefined}>
+              <Tooltip content={holdsHome ? t.roots.holdsHome : undefined}>
                 <span
                   className={`w-8 flex-none text-center font-mono text-3xs tracking-label ${
                     holdsHome ? "text-ink-label" : "text-transparent"
                   }`}
                 >
-                  HOME
+                  {t.roots.home}
                 </span>
               </Tooltip>
 
               <Segmented
-                label={`Root ${index + 1} access`}
+                label={interpolate(t.roots.accessLabel, { index: index + 1 })}
                 value={root.access}
                 onChange={(access) => replace(index, { access })}
                 options={[
-                  { value: "READ", label: "read" },
-                  { value: "WRITE", label: "write", hint: "Write implies read" },
+                  { value: "READ", label: t.roots.read },
+                  { value: "WRITE", label: t.roots.write, hint: t.roots.writeHint },
                 ]}
               />
 
-              <Tooltip content={pinned ? "A host needs at least one root" : "Remove this root"}>
+              <Tooltip content={pinned ? t.roots.lastRoot : t.roots.remove}>
                 <button
                   type="button"
                   // `aria-disabled`, not `disabled` (TRE-76): the pinned case is
@@ -118,7 +121,7 @@ export function RootsEditor({
                   // could hover or reach.
                   aria-disabled={pinned}
                   onClick={() => !pinned && onChange(roots.filter((_, position) => position !== index))}
-                  aria-label={`Remove root ${index + 1}`}
+                  aria-label={interpolate(t.roots.removeLabel, { index: index + 1 })}
                   data-testid="host-root-remove"
                   className={`px-1 font-mono text-xs ${
                     pinned ? "text-line-strong cursor-not-allowed" : "text-ink-faint hover:text-danger-soft"
@@ -133,11 +136,7 @@ export function RootsEditor({
 
         {/* Only an owner can get here, and the box would otherwise collapse to a
             border around nothing, which reads as a failed render. */}
-        {roots.length === 0 && (
-          <p className="text-ink-faint p-2 font-mono text-2xs">
-            No roots. Nothing about this host is written down as a boundary.
-          </p>
-        )}
+        {roots.length === 0 && <p className="text-ink-faint p-2 font-mono text-2xs">{t.roots.empty}</p>}
       </div>
 
       <div>
@@ -146,7 +145,7 @@ export function RootsEditor({
           onClick={() => onChange([...roots, { path: "", access: "READ" }])}
           data-testid="host-root-add"
         >
-          + add root
+          {t.roots.add}
         </Button>
       </div>
     </div>

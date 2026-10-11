@@ -3,10 +3,13 @@
 import { useAuth } from "@auth/context/AuthContext";
 import { useToast } from "@components/ui/toast";
 import { Tooltip, TooltipBlock } from "@components/ui/tooltip";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { fetchActivity } from "@lib/api/activity";
 import { undoChmod, undoChown } from "@lib/api/permissions";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { dictionary } from "@text/index";
 
 import type { ActivityOutcome, ActivityView } from "@lib/api/activity";
 
@@ -25,6 +28,7 @@ import type { ActivityOutcome, ActivityView } from "@lib/api/activity";
 const STRIP_LIMIT = 8;
 
 export function ActivityStrip() {
+  const t = useTranslations("sidebar");
   const { data } = useQuery({
     queryKey: [QUERY_KEYS.ACTIVITY, STRIP_LIMIT],
     queryFn: () => fetchActivity({ limit: STRIP_LIMIT }),
@@ -36,7 +40,7 @@ export function ActivityStrip() {
   });
 
   const items = data?.items ?? [];
-  if (items.length === 0) return <Empty>Nothing yet.</Empty>;
+  if (items.length === 0) return <Empty>{t.activity.empty}</Empty>;
 
   return (
     <ul
@@ -54,6 +58,7 @@ export function ActivityStrip() {
 }
 
 function Row({ item }: { item: ActivityView }) {
+  const t = useTranslations("sidebar");
   const undoable = (item.kind === "file.chmod" || item.kind === "file.chown") && item.outcome === "success";
 
   return (
@@ -71,8 +76,8 @@ function Row({ item }: { item: ActivityView }) {
           // Only shown when there is something to say — a button is the default
           // and a row marked "from: ui" on every entry marks nothing (TRE-35).
           rows={[
-            { label: "when", value: stamp(item.createdAt) },
-            ...(item.origin === null ? [] : [{ label: "from", value: item.origin }]),
+            { label: t.activity.when, value: stamp(item.createdAt) },
+            ...(item.origin === null ? [] : [{ label: t.activity.from, value: item.origin }]),
           ]}
           subject={item.summary}
         />
@@ -108,16 +113,17 @@ function UndoButton({ item }: { item: ActivityView }) {
   const { csrfToken } = useAuth();
   const { push } = useToast();
   const queryClient = useQueryClient();
+  const t = useTranslations("sidebar");
 
   const undo = () => {
     const call = item.kind === "file.chmod" ? undoChmod : undoChown;
     call(item.id, csrfToken)
       .then(() => {
         queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.DIRECTORY] });
-        push({ tone: "info", message: "Reverted." });
+        push({ tone: "info", message: t.activity.reverted });
       })
       .catch(() => {
-        push({ tone: "danger", message: "Could not undo — it may have expired." });
+        push({ tone: "danger", message: t.activity.undoFailed });
       });
   };
 
@@ -125,8 +131,8 @@ function UndoButton({ item }: { item: ActivityView }) {
     <button
       type="button"
       onClick={undo}
-      aria-label="Undo"
-      title="Undo — restores only what this change touched, not anything altered since."
+      aria-label={t.activity.undo}
+      title={t.activity.undoHint}
       // A write, so its own name: one glyph beside the summary of a row a take
       // otherwise only hovers.
       data-testid="activity-undo"
@@ -191,8 +197,9 @@ function stamp(iso: string): string {
  */
 function since(iso: string): string {
   const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h`;
-  return `${Math.floor(seconds / 86_400)}d`;
+  const units = dictionary.sidebar.activity.since;
+  if (seconds < 60) return interpolate(units.seconds, { n: seconds });
+  if (seconds < 3600) return interpolate(units.minutes, { n: Math.floor(seconds / 60) });
+  if (seconds < 86_400) return interpolate(units.hours, { n: Math.floor(seconds / 3600) });
+  return interpolate(units.days, { n: Math.floor(seconds / 86_400) });
 }

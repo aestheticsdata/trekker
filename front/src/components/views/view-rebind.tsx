@@ -4,6 +4,9 @@ import { Overlay } from "@components/ui/overlay";
 import { Tooltip } from "@components/ui/tooltip";
 import { PRESS } from "@helpers/press";
 import { FORM_LABEL_INK, FORM_QUIET_INK, rebind } from "@helpers/views";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
+import { dictionary } from "@text/index";
 import { useState } from "react";
 
 import type { BrokenPane, PaneKey } from "@helpers/views";
@@ -42,9 +45,10 @@ export function ViewRebind({
   onClose: () => void;
   onRestore: (layout: ViewLayout) => void;
 }) {
+  const t = useTranslations("views");
   return (
     <Overlay
-      label={`${view.name} cannot be restored as saved`}
+      label={interpolate(t.rebind.label, { name: view.name })}
       testId="view-rebind"
       onClosed={onClose}
       panelClassName="bg-app border-line-strong flex w-full max-w-[28rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
@@ -77,23 +81,24 @@ function RebindPanel({
 }) {
   // Null means "open that pane on nothing", which is a real answer: a view of
   // two machines is still worth half-restoring when one of them is gone.
+  const t = useTranslations("views");
   const [choice, setChoice] = useState<Partial<Record<PaneKey, string | null>>>({});
 
   return (
     <>
       <header className="bg-line border-line-strong flex h-topbar flex-none items-center gap-2.25 border-b px-3">
-        <span className="text-ink font-mono text-xs font-semibold tracking-label">host missing</span>
+        <span className="text-ink font-mono text-xs font-semibold tracking-label">{t.rebind.title}</span>
         <span className="text-ink-muted min-w-0 truncate font-mono text-2xs">{view.name}</span>
         <div className="flex-1" />
-        <Tooltip content="Close (⎋)">
+        <Tooltip content={t.close.hint}>
           <button
             type="button"
             onClick={close}
-            aria-label="Close"
+            aria-label={t.close.label}
             data-testid="view-rebind-close"
             className="text-ink-dim flex-none font-mono text-2xs"
           >
-            esc ✕
+            {t.close.glyph}
           </button>
         </Tooltip>
       </header>
@@ -101,8 +106,8 @@ function RebindPanel({
       <div className="px-3.5 pt-3.25 pb-2.5">
         <p className="text-ink-soft mb-3 font-mono text-xs/[1.5]">
           {broken.length === 1
-            ? `This view opens one pane on ${nameFor(broken[0])}, which this account no longer has.`
-            : `This view opens both panes on hosts this account no longer has: ${broken.map(nameFor).join(" and ")}.`}
+            ? interpolate(t.rebind.onePane, { host: nameFor(broken[0]) })
+            : interpolate(t.rebind.bothPanes, { hosts: broken.map(nameFor).join(t.rebind.hostsJoin) })}
         </p>
 
         {broken.map((pane) => (
@@ -113,12 +118,12 @@ function RebindPanel({
             <div
               className={`${FORM_LABEL_INK} mb-1.25 font-sans text-3xs/none font-medium tracking-[0.12em] uppercase`}
             >
-              pane {pane.pane.toUpperCase()} — was {nameFor(pane)}
+              {interpolate(t.rebind.paneWas, { pane: pane.pane.toUpperCase(), host: nameFor(pane) })}
             </div>
             <select
               value={choice[pane.pane] ?? ""}
               onChange={(event) => setChoice({ ...choice, [pane.pane]: event.target.value || null })}
-              aria-label={`Host for pane ${pane.pane.toUpperCase()}`}
+              aria-label={interpolate(t.rebind.hostFor, { pane: pane.pane.toUpperCase() })}
               // `a` | `b`, the layout's own key for a pane — not `data-pane`,
               // which is the explorer's 0 | 1 and would make one attribute
               // carry two spellings.
@@ -126,7 +131,7 @@ function RebindPanel({
               data-pane-key={pane.pane}
               className="bg-chrome border-line-strong text-ink w-full border px-2.5 py-1.75 font-mono text-xs"
             >
-              <option value="">leave it on nothing</option>
+              <option value="">{t.rebind.nothing}</option>
               {hosts.map((host) => (
                 <option
                   key={host.id}
@@ -141,14 +146,14 @@ function RebindPanel({
                 different box is how a rebound view lands in an empty directory
                 and reads as broken rather than as moved. */}
             <p className={`${FORM_QUIET_INK} mt-1 font-mono text-caption`}>
-              {choice[pane.pane] ? "opens at its home directory" : "opens unbound, at /"}
+              {choice[pane.pane] ? t.rebind.opensHome : t.rebind.opensUnbound}
             </p>
           </div>
         ))}
       </div>
 
       <footer className="bg-chrome border-line flex h-11 flex-none items-center gap-2 border-t px-3.5">
-        <span className="text-ink-muted font-mono text-2xs/none">the view itself is not changed</span>
+        <span className="text-ink-muted font-mono text-2xs/none">{t.rebind.unchanged}</span>
         <div className="flex-1" />
         <button
           type="button"
@@ -156,7 +161,7 @@ function RebindPanel({
           data-testid="view-rebind-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
-          cancel
+          {t.rebind.cancel}
         </button>
         <button
           type="button"
@@ -169,7 +174,7 @@ function RebindPanel({
           data-testid="view-rebind-restore"
           className={`${PRESS} px-3.5 py-1.75 font-mono text-xs/none font-medium`}
         >
-          restore
+          {t.rebind.restore}
         </button>
       </footer>
     </>
@@ -178,5 +183,5 @@ function RebindPanel({
 
 /** What the missing host was called, or an honest shrug when nothing was kept. */
 function nameFor(pane: BrokenPane): string {
-  return pane.was ?? "a host that has been removed";
+  return pane.was ?? dictionary.views.rebind.removedHost;
 }

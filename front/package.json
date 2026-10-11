@@ -8,7 +8,7 @@
     "lint": "biome check ./src ./e2e",
     "lint:fix": "biome check --write ./src ./e2e",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'no front tests yet — test tooling lands with TRE-39'",
+    "test": "node scripts/verify-text.ts",
     "verify:clipboard": "node scripts/verify-clipboard.ts",
     "verify:contrast": "node scripts/verify-contrast.ts",
     "verify:cursor": "node scripts/verify-cursor.ts",
@@ -21,6 +21,7 @@
     "verify:preview-cache": "node scripts/verify-preview-cache.ts",
     "verify:tabs": "node scripts/verify-tabs.ts",
     "verify:terminal": "node scripts/verify-terminal.ts",
+    "verify:text": "node scripts/verify-text.ts",
     "verify:views": "node scripts/verify-views.ts",
     "verify:virtual": "node scripts/verify-virtual.ts",
     "video:generate": "playwright test --config playwright.demo.config.ts"

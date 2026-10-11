@@ -4,6 +4,8 @@ import { AddButton } from "@components/ui/add-button";
 import { Tooltip } from "@components/ui/tooltip";
 import { writeViewSlot } from "@helpers/keys";
 import { DIRTY_DOT, describeHosts, ROW_INK, ROW_KEY_INK, ROW_ON_INK } from "@helpers/views";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 
 import type { LabelOf } from "@helpers/views";
 import type { SavedView } from "@schemas/layout";
@@ -40,11 +42,10 @@ export function ViewList({
   onMenu: (id: string, point: { x: number; y: number }) => void;
   onSave: () => void;
 }) {
+  const t = useTranslations("views");
   return (
     <>
-      {views.length === 0 && (
-        <p className="text-ink-dim px-2.5 py-1 font-mono text-2xs">None yet. Arrange both panes, then save.</p>
-      )}
+      {views.length === 0 && <p className="text-ink-dim px-2.5 py-1 font-mono text-2xs">{t.list.empty}</p>}
 
       {views.map((view) => {
         const on = view.id === activeId;
@@ -89,7 +90,7 @@ export function ViewList({
             {on && dirty && (
               <span
                 role="img"
-                aria-label="unsaved changes"
+                aria-label={t.unsaved}
                 data-testid="view-dirty"
                 className={`size-1 flex-none rounded-full ${DIRTY_DOT}`}
               />
@@ -99,14 +100,14 @@ export function ViewList({
               <span className={`flex-none font-mono text-caps ${ROW_KEY_INK}`}>{writeViewSlot(view.slot)}</span>
             )}
 
-            <Tooltip content="More">
+            <Tooltip content={t.list.more}>
               <button
                 type="button"
                 onClick={(event) => {
                   const box = event.currentTarget.getBoundingClientRect();
                   onMenu(view.id, { x: box.right + 4, y: box.top });
                 }}
-                aria-label={`More for ${view.name}`}
+                aria-label={interpolate(t.list.moreFor, { name: view.name })}
                 // ⚠️ Opens the menu whose last row is `Delete view`. Hidden
                 // until the row is hovered, and named rather than reached
                 // through the `aria-label` above, which embeds the name.
@@ -126,13 +127,12 @@ export function ViewList({
           it, which is the one thing a named, saved thing must never look like. */}
       {unreadable > 0 && (
         <p className="text-warning px-2.5 py-1 font-mono text-2xs">
-          {unreadable === 1 ? "1 view was" : `${unreadable} views were`} saved by a different version and cannot be
-          read.
+          {interpolate(unreadable === 1 ? t.list.unreadableOne : t.list.unreadableMany, { count: unreadable })}
         </p>
       )}
 
       <AddButton
-        label="＋ save current view…"
+        label={t.list.add}
         onClick={onSave}
       />
     </>

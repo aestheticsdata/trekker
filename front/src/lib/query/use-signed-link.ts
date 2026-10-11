@@ -2,6 +2,8 @@
 
 import { useAuth } from "@auth/context/AuthContext";
 import { useToast } from "@components/ui/toast";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { mintLink } from "@lib/api/link";
 import { useMutation } from "@tanstack/react-query";
@@ -20,6 +22,7 @@ import { useMutation } from "@tanstack/react-query";
  * is the kind that survives in one place and rots in two.
  */
 export function useSignedLink() {
+  const t = useTranslations("query");
   const { csrfToken } = useAuth();
   const { push } = useToast();
 
@@ -30,7 +33,11 @@ export function useSignedLink() {
       const expires = new Date(minted.expiresAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
       try {
         await navigator.clipboard.writeText(minted.url);
-        push({ tone: "success", message: "Link copied", detail: `${minted.filename} · expires at ${expires}` });
+        push({
+          tone: "success",
+          message: t.signedLink.copied,
+          detail: interpolate(t.signedLink.copiedDetail, { filename: minted.filename, time: expires }),
+        });
       } catch {
         // Clipboard access is refused on an insecure origin and in some
         // configurations. The link exists either way, so say so rather than
@@ -38,16 +45,16 @@ export function useSignedLink() {
         // for the reason above.
         push({
           tone: "warning",
-          message: "Link created, but not copied",
-          detail: "This browser refused clipboard access. Try again from a secure origin.",
+          message: t.signedLink.notCopied,
+          detail: t.signedLink.notCopiedDetail,
         });
       }
     },
     onError: (error) => {
       push({
         tone: "danger",
-        message: "No link",
-        detail: error instanceof ApiError ? error.message : "The link could not be created.",
+        message: t.signedLink.failed,
+        detail: error instanceof ApiError ? error.message : t.signedLink.failedDetail,
       });
     },
   });

@@ -5,11 +5,14 @@ import { Overlay } from "@components/ui/overlay";
 import { Tooltip } from "@components/ui/tooltip";
 import { formatTotal } from "@helpers/listing";
 import { PRESS, SELECTED } from "@helpers/press";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { explain, runCompare } from "@lib/api/compare";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useHashJob } from "@lib/query/use-hash-job";
 import { useQuery } from "@tanstack/react-query";
+import { dictionary } from "@text/index";
 import { useEffect, useState } from "react";
 
 import type { CompareEntry, CompareResult, Verdict } from "@lib/api/compare";
@@ -70,13 +73,7 @@ const VERDICT_INK: Record<Verdict, string> = {
   inconclusive: "text-ink-faint",
 };
 
-const VERDICT_LABEL: Record<Verdict, string> = {
-  differs: "differs",
-  onlyA: "only left",
-  onlyB: "only right",
-  identical: "identical",
-  inconclusive: "unchecked",
-};
+const VERDICT_LABEL: Record<Verdict, string> = dictionary.dialogs.compare.verdicts;
 
 type Filter = "all" | Verdict;
 
@@ -93,9 +90,11 @@ export function CompareModal({
   /** Hand a row to the transfer modal, preloaded. */
   onCopy: (copy: CompareCopy) => void;
 }) {
+  const t = useTranslations("dialogs");
+
   return (
     <Overlay
-      label={`Compare ${target.a.path} with ${target.b.path}`}
+      label={interpolate(t.compare.dialog, { a: target.a.path, b: target.b.path })}
       onClosed={onClose}
       panelClassName="bg-app border-line-strong flex w-full max-w-[62rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
       testId="compare-modal"
@@ -123,6 +122,7 @@ function ComparePanel({
   onReveal: (entry: CompareEntry, result: CompareResult) => void;
   onCopy: (copy: CompareCopy) => void;
 }) {
+  const t = useTranslations("dialogs");
   const { csrfToken } = useAuth();
   const hashJob = useHashJob();
   const [filter, setFilter] = useState<Filter>("all");
@@ -234,7 +234,7 @@ function ComparePanel({
         className="bg-strip border-line flex h-topbar flex-none items-center gap-2 border-b px-3"
         data-testid="compare-header"
       >
-        <span className="text-brand font-mono text-xs font-semibold tracking-label">compare</span>
+        <span className="text-brand font-mono text-xs font-semibold tracking-label">{t.compare.title}</span>
         <span className="text-ink-muted min-w-0 flex-1 truncate font-mono text-cmd">
           {target.a.label}:{target.a.path} <span className="text-ink-faint">⇄</span> {target.b.label}:{target.b.path}
         </span>
@@ -267,11 +267,13 @@ function ComparePanel({
         className="border-line max-h-96 min-h-24 flex-1 overflow-y-auto border-t border-b"
         data-testid="compare-list"
       >
-        {compare.isPending && <div className="text-ink-faint px-3.5 py-3 font-mono text-xs">walking both trees…</div>}
+        {compare.isPending && (
+          <div className="text-ink-faint px-3.5 py-3 font-mono text-xs">{t.common.walkingBothTrees}</div>
+        )}
 
         {result && shown.length === 0 && (
           <div className="text-ink-faint px-3.5 py-3 font-mono text-xs">
-            {result.entries.length === 0 ? "the two directories hold the same names" : "no rows match this filter"}
+            {result.entries.length === 0 ? t.compare.sameNames : t.compare.noMatch}
           </div>
         )}
 
@@ -287,21 +289,16 @@ function ComparePanel({
 
         {shown.length > RENDER_LIMIT && (
           <p className="text-ink-faint px-3.5 py-2 font-mono text-2xs">
-            +{shown.length - RENDER_LIMIT} more rows, not drawn. Narrow the filter to see them.
+            {interpolate(t.compare.notDrawn, { count: shown.length - RENDER_LIMIT })}
           </p>
         )}
       </div>
 
       <div className="flex flex-none items-center justify-between gap-2 px-3.5 py-2.5">
         <div className="text-ink-faint min-w-0 font-mono text-2xs/[1.5]">
-          {result && result.summary.hashable > 0 ? (
-            <>
-              {result.summary.hashable} row(s) agree about size and time. Only a checksum can say whether the bytes
-              match.
-            </>
-          ) : (
-            <>Clicking a row puts the cursor on it in both panes.</>
-          )}
+          {result && result.summary.hashable > 0
+            ? interpolate(t.compare.hashable, { count: result.summary.hashable })
+            : t.compare.revealHint}
         </div>
 
         <div className="flex flex-none gap-1.5">
@@ -319,7 +316,7 @@ function ComparePanel({
               {/* The wait, not the request. The two POSTs are answered in
                   milliseconds and the reading takes as long as it takes, so a
                   label tied to `isPending` would flicker and then lie. */}
-              {resolving ? "resolving…" : "resolve by hash"}
+              {resolving ? t.compare.resolving : t.compare.resolve}
             </button>
           )}
           <button
@@ -328,7 +325,7 @@ function ComparePanel({
             className="border-line-strong text-ink-muted hover:text-ink border px-3 py-1.5 font-mono text-cmd"
             data-testid="compare-close"
           >
-            close
+            {t.compare.close}
           </button>
         </div>
       </div>
@@ -341,13 +338,17 @@ function ComparePanel({
  * how much was looked at, then what is wrong with it.
  */
 function Summary({ result }: { result: CompareResult }) {
+  const t = useTranslations("dialogs");
+  const words = t.compare.summary;
   const { summary } = result;
-  const parts: string[] = [`${summary.total} entr${summary.total === 1 ? "y" : "ies"}`];
-  if (summary.differs > 0) parts.push(`${summary.differs} differ`);
-  if (summary.onlyA > 0) parts.push(`${summary.onlyA} only left`);
-  if (summary.onlyB > 0) parts.push(`${summary.onlyB} only right`);
-  if (summary.identical > 0) parts.push(`${summary.identical} identical`);
-  if (summary.inconclusive > 0) parts.push(`${summary.inconclusive} unchecked`);
+  const parts: string[] = [
+    interpolate(summary.total === 1 ? t.common.entryOne : t.common.entryMany, { count: summary.total }),
+  ];
+  if (summary.differs > 0) parts.push(interpolate(words.differ, { count: summary.differs }));
+  if (summary.onlyA > 0) parts.push(interpolate(words.onlyLeft, { count: summary.onlyA }));
+  if (summary.onlyB > 0) parts.push(interpolate(words.onlyRight, { count: summary.onlyB }));
+  if (summary.identical > 0) parts.push(interpolate(words.identical, { count: summary.identical }));
+  if (summary.inconclusive > 0) parts.push(interpolate(words.unchecked, { count: summary.inconclusive }));
 
   return (
     <p
@@ -355,7 +356,7 @@ function Summary({ result }: { result: CompareResult }) {
       data-testid="compare-summary"
     >
       {parts.join(" · ")}
-      <span className="text-ink-faint"> · {result.depth} levels deep</span>
+      <span className="text-ink-faint">{interpolate(words.depth, { depth: result.depth })}</span>
     </p>
   );
 }
@@ -367,6 +368,7 @@ function Summary({ result }: { result: CompareResult }) {
  * and the one thing that makes it not the whole truth has to be in the way.
  */
 function Bounds({ result }: { result: CompareResult }) {
+  const t = useTranslations("dialogs");
   if (!result.truncated && result.unreadableCount === 0) return null;
 
   return (
@@ -374,17 +376,14 @@ function Bounds({ result }: { result: CompareResult }) {
       className="bg-warning-wash border-warning text-warning mx-3.5 mt-2 border px-2.5 py-1.75 font-mono text-2xs/[1.6]"
       data-testid="compare-bounds"
     >
-      {result.truncated && (
-        <p>
-          This comparison stopped early — at {result.maxEntries} rows, or at the {result.depth}-level depth limit. What
-          is below that was not looked at.
-        </p>
-      )}
+      {result.truncated && <p>{interpolate(t.compare.truncated, { rows: result.maxEntries, depth: result.depth })}</p>}
       {result.unreadableCount > 0 && (
         <p>
-          {result.unreadableCount} director{result.unreadableCount === 1 ? "y" : "ies"} could not be listed on one side:{" "}
+          {interpolate(result.unreadableCount === 1 ? t.compare.unreadableOne : t.compare.unreadableMany, {
+            count: result.unreadableCount,
+          })}{" "}
           {result.unreadable.join(", ")}
-          {result.unreadableCount > result.unreadable.length ? ", …" : ""}
+          {result.unreadableCount > result.unreadable.length ? t.compare.unreadableMore : ""}
         </p>
       )}
     </div>
@@ -404,6 +403,7 @@ function Filters({
   needle: string;
   onNeedle: (needle: string) => void;
 }) {
+  const t = useTranslations("dialogs");
   // Only the verdicts this comparison actually produced. A filter for a bucket
   // that is empty is a control that can only ever empty the list.
   const available: Filter[] = ["all", "differs", "onlyA", "onlyB", "inconclusive", "identical"].filter(
@@ -428,7 +428,7 @@ function Filters({
             data-testid="compare-filter"
             data-filter={value}
           >
-            {value === "all" ? "all" : VERDICT_LABEL[value]}
+            {value === "all" ? t.compare.filterAll : VERDICT_LABEL[value]}
           </button>
         ))}
       </div>
@@ -436,8 +436,8 @@ function Filters({
       <input
         value={needle}
         onChange={(event) => onNeedle(event.target.value)}
-        placeholder="filter by name"
-        aria-label="Filter the comparison by name"
+        placeholder={t.compare.filterPlaceholder}
+        aria-label={t.compare.filterLabel}
         className="bg-chrome border-line text-ink-soft placeholder:text-ink-faint min-w-0 flex-1 border px-2 py-1 font-mono text-2xs"
         data-testid="compare-name-filter"
       />
@@ -465,6 +465,7 @@ function Row({
   onReveal: (entry: CompareEntry, result: CompareResult) => void;
   onCopy: (copy: CompareCopy) => void;
 }) {
+  const t = useTranslations("dialogs");
   const parent = entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "";
   const joined = (root: string) => (parent === "" ? root : `${root}/${parent}`);
 
@@ -500,7 +501,7 @@ function Row({
         <Arrow
           label="→"
           direction="right"
-          hint={entry.a ? `Copy this to ${joined(result.b.path)}` : "Nothing on the left to copy"}
+          hint={entry.a ? interpolate(t.compare.copyTo, { path: joined(result.b.path) }) : t.compare.nothingLeft}
           disabled={entry.a === null}
           onClick={() =>
             onCopy({
@@ -514,7 +515,7 @@ function Row({
         <Arrow
           label="←"
           direction="left"
-          hint={entry.b ? `Copy this to ${joined(result.a.path)}` : "Nothing on the right to copy"}
+          hint={entry.b ? interpolate(t.compare.copyTo, { path: joined(result.a.path) }) : t.compare.nothingRight}
           disabled={entry.b === null}
           onClick={() =>
             onCopy({
@@ -532,11 +533,12 @@ function Row({
 
 /** One side's facts, or a visible absence. */
 function Side({ facts }: { facts: CompareEntry["a"] }) {
+  const t = useTranslations("dialogs");
   if (facts === null) return <span className="text-ink-faint text-right font-mono text-2xs/none">—</span>;
 
   return (
     <span className="text-ink-dim text-right font-mono text-2xs/[1.4]">
-      {facts.kind === "directory" ? "dir" : formatTotal(facts.size)}
+      {facts.kind === "directory" ? t.common.directoryShort : formatTotal(facts.size)}
       <span className="text-ink-faint block">
         {new Date(facts.mtimeMs).toISOString().slice(0, 16).replace("T", " ")}
       </span>

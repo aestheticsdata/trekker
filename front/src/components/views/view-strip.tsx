@@ -3,6 +3,8 @@
 import { Tooltip } from "@components/ui/tooltip";
 import { writeViewSlot } from "@helpers/keys";
 import { CHIP_INK, CHIP_KEY_INK, CHIP_ON_INK, CHIP_ON_KEY_INK, DIRTY_DOT, describeHosts } from "@helpers/views";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 
 import type { LabelOf } from "@helpers/views";
 import type { SavedView } from "@schemas/layout";
@@ -45,25 +47,32 @@ export function ViewStrip({
   onSave: () => void;
   onOverflow: () => void;
 }) {
+  const t = useTranslations("views");
   const shown = views.slice(0, VISIBLE);
   const hidden = views.length - shown.length;
 
   return (
     <nav
-      aria-label="Saved views"
+      aria-label={t.strip.label}
       // The same views sit in the sidebar as `view-row`s; this nav and the
       // rail's `[data-section="views"]` are the two scopes.
       data-testid="view-strip"
       className="flex min-w-0 items-center gap-1.25"
     >
-      <span className="text-ink-label flex-none font-sans text-3xs font-semibold tracking-[0.16em]">VIEWS</span>
+      <span className="text-ink-label flex-none font-sans text-3xs font-semibold tracking-[0.16em]">
+        {t.strip.heading}
+      </span>
 
       {shown.map((view) => {
         const on = view.id === activeId;
         return (
           <Tooltip
             key={view.id}
-            content={`${describeHosts(view.layout, labelOf)}${on && dirty ? " · unsaved changes" : ""}`}
+            content={
+              on && dirty
+                ? interpolate(t.strip.dirtyHosts, { hosts: describeHosts(view.layout, labelOf) })
+                : describeHosts(view.layout, labelOf)
+            }
           >
             <button
               type="button"
@@ -97,7 +106,7 @@ export function ViewStrip({
               {on && dirty && (
                 <span
                   role="img"
-                  aria-label="unsaved changes"
+                  aria-label={t.unsaved}
                   data-testid="view-dirty"
                   className={`size-1 flex-none rounded-full ${DIRTY_DOT}`}
                 />
@@ -108,7 +117,7 @@ export function ViewStrip({
       })}
 
       {hidden > 0 && (
-        <Tooltip content={`${hidden} more — opens the palette`}>
+        <Tooltip content={interpolate(t.strip.overflow, { count: hidden })}>
           <button
             type="button"
             onClick={onOverflow}
@@ -120,7 +129,7 @@ export function ViewStrip({
         </Tooltip>
       )}
 
-      <Tooltip content="Save both panes and this layout as a view">
+      <Tooltip content={t.strip.saveHint}>
         <button
           type="button"
           onClick={onSave}
@@ -129,7 +138,7 @@ export function ViewStrip({
           data-testid="save-view"
           className="border-line-strong text-ink-muted hover:bg-raised flex h-5 flex-none items-center gap-1 rounded-sm border px-2 font-mono text-cmd"
         >
-          ＋ save view
+          {t.strip.save}
         </button>
       </Tooltip>
     </nav>

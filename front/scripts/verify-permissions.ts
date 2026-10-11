@@ -25,8 +25,14 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { registerAliases } from "./aliases.ts";
 
-import { describeMode, permissionRows } from "../src/helpers/permissions.ts";
+// The helper reads its words from the string tree since TRE-116, through the
+// `@text` and `@i18n` aliases — so they are taught to Node first, and the
+// helper is imported afterwards. See `aliases.ts` for why it has to be dynamic.
+registerAliases();
+
+const { describeMode, permissionRows } = await import("../src/helpers/permissions.ts");
 
 /** What the API sends as `mode` — see nest-api/src/fs/file-row.ts. */
 function octalMode(mode: number): string {

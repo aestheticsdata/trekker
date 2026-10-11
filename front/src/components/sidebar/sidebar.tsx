@@ -9,6 +9,8 @@ import { useToast } from "@components/ui/toast";
 import { Tooltip } from "@components/ui/tooltip";
 import { TransferQueue } from "@components/ui/transfers";
 import { VIEW_SLOTS, writeViewSlot } from "@helpers/keys";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { deleteBookmark, fetchBookmarks } from "@lib/api/bookmarks";
 import { fetchHostSummary } from "@lib/api/hosts";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -69,6 +71,7 @@ export function Sidebar({
    */
   onHostMenu: (host: HostView, point: Point) => void;
 }) {
+  const t = useTranslations("sidebar");
   const { data: bookmarks } = useQuery({
     queryKey: [QUERY_KEYS.BOOKMARKS],
     queryFn: fetchBookmarks,
@@ -114,7 +117,7 @@ export function Sidebar({
                 same rule the ⌘K chip follows: a chord moved in `helpers/keys.ts`
                 while this said ⌥1–9 would advertise a key that fires nothing. */}
               <Section
-                title="VIEWS"
+                section={SECTION.views}
                 counter={`${writeViewSlot(VIEW_SLOTS[0])}–${VIEW_SLOTS[VIEW_SLOTS.length - 1]}`}
               >
                 {views}
@@ -125,8 +128,8 @@ export function Sidebar({
           )}
 
           <Section
-            title="SERVERS"
-            counter={`${hosts.length} ${hosts.length === 1 ? "host" : "hosts"}`}
+            section={SECTION.servers}
+            counter={interpolate(hosts.length === 1 ? t.servers.hostOne : t.servers.hostMany, { count: hosts.length })}
           >
             {hosts.map((host) => (
               <ServerRow
@@ -139,7 +142,7 @@ export function Sidebar({
                 onMenu={(point) => onHostMenu(host, point)}
               />
             ))}
-            {hosts.length === 0 && <Empty>No hosts yet.</Empty>}
+            {hosts.length === 0 && <Empty>{t.servers.empty}</Empty>}
 
             {/* Not in the mockup, which ends this section at the last row and
               rules off into VOLUMES (TRE-102). It is here because the pane's
@@ -151,7 +154,7 @@ export function Sidebar({
               It is VIEWS' `＋ save current view…`, which since TRE-104 is one
               component rather than the same classes twice. */}
             <AddButton
-              label="＋ new host…"
+              label={t.servers.add}
               onClick={onNewHost}
             />
           </Section>
@@ -161,7 +164,7 @@ export function Sidebar({
           {/* Below SERVERS and above FAVOURITES, as the mockup orders them — and
             the order is the meaning again: this section describes the machine
             the section above it selected. */}
-          <Section title="VOLUMES">
+          <Section section={SECTION.volumes}>
             <Volumes
               host={hosts.find((host) => host.id === paneHostIds[activePane]) ?? null}
               onNavigate={onNavigate}
@@ -170,7 +173,7 @@ export function Sidebar({
 
           <Rule />
 
-          <Section title="FAVOURITES">
+          <Section section={SECTION.favourites}>
             <Favourites
               hosts={hosts}
               bookmarks={bookmarks ?? []}
@@ -183,13 +186,13 @@ export function Sidebar({
           {/* Above ACTIVITY, and the order is the meaning: this section is what
             is happening, the one below it is what happened. A finished transfer
             leaves here and appears there (TRE-24 §3). */}
-          <Section title="TRANSFERS">
+          <Section section={SECTION.transfers}>
             <TransferQueue />
           </Section>
 
           <Rule />
 
-          <Section title="ACTIVITY">
+          <Section section={SECTION.activity}>
             <ActivityStrip />
           </Section>
         </div>
@@ -209,14 +212,37 @@ export function Sidebar({
  * renders through; the rest of this file's quiet inks have the same problem and
  * are TRE-81's, along with the hundred-odd elsewhere in the app.
  */
-function Section({ title, counter, children }: { title: string; counter?: string; children: ReactNode }) {
+/**
+ * The six sections, named once. The name is the test hook and the key into the
+ * dictionary — never the heading's words, which are copy and can change.
+ */
+const SECTION = {
+  views: "views",
+  servers: "servers",
+  volumes: "volumes",
+  favourites: "favourites",
+  transfers: "transfers",
+  activity: "activity",
+} as const;
+type SectionName = (typeof SECTION)[keyof typeof SECTION];
+
+interface SectionProps {
+  section: SectionName;
+  counter?: string;
+  children: ReactNode;
+}
+
+function Section({ section, counter, children }: SectionProps) {
+  const t = useTranslations("sidebar");
+  const title = t.sections[section];
   return (
     <section
-      // One family for the six; the member is the heading, lowercased the way
-      // anything read off UI text is spelled (`views`, `servers`…). Scoping by
-      // it is what tells the two `AddButton`s and the two `Empty`s apart.
+      // One family for the six; the member is the section's name (`views`,
+      // `servers`…), which used to be read off the heading and is now fixed so
+      // copy can change under it. Scoping by it is what tells the two
+      // `AddButton`s and the two `Empty`s apart.
       data-testid="sidebar-section"
-      data-section={title.toLowerCase()}
+      data-section={section}
     >
       <h2 className="text-ink-label flex items-baseline px-2.5 pt-1.5 pb-1 font-sans text-caps font-semibold tracking-[0.16em]">
         {title}
@@ -271,6 +297,7 @@ function ServerRow({
   onBind: (pane: 0 | 1) => void;
   onMenu: (point: Point) => void;
 }) {
+  const t = useTranslations("sidebar");
   // Only asked for once the host is on screen, and cached 5s server-side.
   const { data: summary } = useQuery({
     queryKey: [QUERY_KEYS.HOST_SUMMARY, host.id],
@@ -306,7 +333,7 @@ function ServerRow({
         style={{ backgroundColor: host.colour }}
       />
 
-      <Tooltip content={`Open ${host.label} in the active pane`}>
+      <Tooltip content={interpolate(t.servers.openActive, { host: host.label })}>
         <button
           type="button"
           onClick={onPick}
@@ -321,14 +348,16 @@ function ServerRow({
 
       {/* A measurement, so it degrades to a dash rather than vanishing. */}
       <span className="text-ink-dim flex-none font-mono text-caps">
-        {summary?.pingMs === null || summary === undefined ? "—" : `${summary.pingMs}ms`}
+        {summary?.pingMs === null || summary === undefined
+          ? "—"
+          : interpolate(t.servers.pingMs, { ms: summary.pingMs })}
       </span>
 
       <span className="flex flex-none gap-0.5">
         {([0, 1] as const).map((pane) => (
           <Tooltip
             key={pane}
-            content={`Open ${host.label} in pane ${pane === 0 ? "A" : "B"}`}
+            content={interpolate(t.servers.openInPane, { host: host.label, pane: pane === 0 ? "A" : "B" })}
           >
             <button
               type="button"
@@ -373,6 +402,7 @@ function Favourites({
   bookmarks: readonly BookmarkView[];
   onNavigate: (host: HostView, path: string) => void;
 }) {
+  const t = useTranslations("sidebar");
   const { csrfToken } = useAuth();
   const queryClient = useQueryClient();
   const { push } = useToast();
@@ -380,11 +410,11 @@ function Favourites({
   const remove = useMutation({
     mutationFn: (id: string) => deleteBookmark(id, csrfToken),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.BOOKMARKS] }),
-    onError: () => push({ tone: "danger", message: "Could not remove that favourite" }),
+    onError: () => push({ tone: "danger", message: t.favourites.removeFailed }),
   });
 
   if (bookmarks.length === 0) {
-    return <Empty>None yet. Bookmark a directory from a pane.</Empty>;
+    return <Empty>{t.favourites.empty}</Empty>;
   }
 
   return (
@@ -436,11 +466,11 @@ function Favourites({
                     )}
                   </button>
                 </Tooltip>
-                <Tooltip content="Remove">
+                <Tooltip content={t.favourites.remove}>
                   <button
                     type="button"
                     onClick={() => remove.mutate(bookmark.id)}
-                    aria-label={`Remove ${bookmark.label} from favourites`}
+                    aria-label={interpolate(t.favourites.removeLabel, { label: bookmark.label })}
                     // ⚠️ Its own name, and a take never clicks a favourite by
                     // its row's box: this sits at the row's right edge,
                     // invisible until the row is hovered, and a click that

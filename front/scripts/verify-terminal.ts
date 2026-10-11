@@ -16,14 +16,19 @@
  * convention the other seven scripts here already use.
  */
 
-import {
-  COMMANDS as COMMAND_NAMES,
+import { registerAliases } from "./aliases.ts";
+
+// Since TRE-116 the parser reads its sentences from `@text/index`; see
+// `aliases.ts` for why that makes this a dynamic import.
+registerAliases();
+const {
+  COMMANDS: COMMAND_NAMES,
   columns,
   groupTargets,
   helpLines,
   parse,
   resolve,
-} from "../src/helpers/terminal.ts";
+} = await import("../src/helpers/terminal.ts");
 
 import type { TerminalContext } from "../src/helpers/terminal.ts";
 

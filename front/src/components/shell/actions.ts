@@ -1,4 +1,5 @@
 import { hintFor } from "@helpers/keys";
+import { dictionary } from "@text/index";
 
 import type { RowType } from "@lib/api/fs";
 
@@ -18,9 +19,10 @@ import type { RowType } from "@lib/api/fs";
  * menu and dead in the palette for the same selection, found by whoever tries
  * the other route, months later.
  *
- * Free of React, and its one value import is `helpers/keys.ts`, which imports
- * nothing itself — so `scripts/verify-menu.ts` can still put the whole table
- * through node, with the alias hook that script now carries.
+ * Free of React, and its value imports are `helpers/keys.ts`, which imports
+ * nothing itself, and the string tree (TRE-116) — so `scripts/verify-menu.ts`
+ * can still put the whole table through node, with the alias hook that script
+ * now carries.
  */
 
 export type ActionId =
@@ -143,8 +145,9 @@ export function isRule(row: MenuRow): row is { rule: true } {
 
 // ---------------------------------------------------------------- the rules
 
-const NO_HOST = "Bind a host to this pane first";
-const NOTHING = "Select an entry, or put the cursor on one";
+const REASONS = dictionary.actions.reasons;
+const NO_HOST = REASONS.noHost;
+const NOTHING = REASONS.nothing;
 
 type Rule = (context: ActionContext) => string | undefined;
 
@@ -162,17 +165,15 @@ function all(...rules: readonly Rule[]): Rule {
 const host: Rule = (context) => (context.hostId === null ? NO_HOST : undefined);
 const some: Rule = (context) => (context.entries.length === 0 ? NOTHING : undefined);
 const one: Rule = (context) =>
-  context.entries.length === 0 ? NOTHING : context.entries.length > 1 ? "This takes one entry at a time" : undefined;
-const otherPane: Rule = (context) =>
-  context.otherHostId === null ? "The other pane has no host to send these to" : undefined;
+  context.entries.length === 0 ? NOTHING : context.entries.length > 1 ? REASONS.oneAtATime : undefined;
+const otherPane: Rule = (context) => (context.otherHostId === null ? REASONS.noOtherHostToSend : undefined);
 /**
  * Both panes bound, for an action that reads both rather than sending anything
  * one way. `otherPane` above says "to send these to", which is the wrong
  * sentence for a comparison and would be the wrong sentence to read in a
  * tooltip explaining why `compare` is grey.
  */
-const bothPanes: Rule = (context) =>
-  context.otherHostId === null ? "The other pane has no host to compare against" : undefined;
+const bothPanes: Rule = (context) => (context.otherHostId === null ? REASONS.noOtherHostToCompare : undefined);
 
 /** Exactly one entry, of one of these kinds. */
 function onlyKind(kinds: readonly RowType[], why: string): Rule {
@@ -180,6 +181,9 @@ function onlyKind(kinds: readonly RowType[], why: string): Rule {
 }
 
 // ------------------------------------------------------------- the registry
+
+/** The words, keyed by `ActionId`; the rules and the order stay below. */
+const WORDS = dictionary.actions.registry;
 
 interface Spec {
   label: string;
@@ -206,50 +210,43 @@ const SPECS: Readonly<Record<ActionId, Spec>> = {
   // F7, not the ⇧⌘N the design spec first drew (settled by TRE-69): Chrome and
   // Firefox both take ⇧⌘N for a private window before the page sees the key, so
   // a menu advertising it would teach a shortcut that never fires.
-  newDir: { label: "new directory", short: "new", note: "a directory, here", why: host },
-  newFile: { label: "new file", note: "an empty file, here", why: host },
+  newDir: { ...WORDS.newDir, why: host },
+  newFile: { ...WORDS.newFile, why: host },
 
-  open: { label: "open", why: all(host, one) },
+  open: { ...WORDS.open, why: all(host, one) },
   // No `otherPane` rule, unlike F5 and F6: this does not send anything to the
   // other pane, it points that pane at a directory on *this* host — so a pane
   // with nothing bound to it is a pane about to have something bound to it.
   openOther: {
-    label: "open in other pane",
-    why: all(host, one, onlyKind(["dir", "link"], "Only a directory can be opened in the other pane")),
+    ...WORDS.openOther,
+    why: all(host, one, onlyKind(["dir", "link"], REASONS.openOtherDirectoryOnly)),
   },
 
-  cut: { label: "cut", note: "hold the selection, to move it", why: all(host, some) },
-  copy: { label: "copy", note: "hold the selection, to duplicate it", why: all(host, some) },
+  cut: { ...WORDS.cut, why: all(host, some) },
+  copy: { ...WORDS.copy, why: all(host, some) },
   paste: {
-    label: "paste",
-    note: "put down what the clipboard is holding",
-    why: all(host, (context) => (context.holding ? undefined : "Nothing on the clipboard")),
+    ...WORDS.paste,
+    why: all(host, (context) => (context.holding ? undefined : REASONS.clipboardEmpty)),
   },
-  duplicate: { label: "duplicate", note: "a copy beside the original, under a free name", why: all(host, some) },
+  duplicate: { ...WORDS.duplicate, why: all(host, some) },
   copyTo: {
-    label: "copy to other pane",
-    short: "copy",
-    note: "with each conflict decided per entry",
+    ...WORDS.copyTo,
     why: all(host, some, otherPane),
   },
   moveTo: {
-    label: "move to other pane",
-    short: "move",
-    note: "with each conflict decided per entry",
+    ...WORDS.moveTo,
     why: all(host, some, otherPane),
   },
 
-  refresh: { label: "refresh", note: "re-read this directory from the host", why: host },
+  refresh: { ...WORDS.refresh, why: host },
 
-  // `rename`, not `regex rename`: the long label pushed `rm` off the right edge
-  // of the toolbar at a 12px `--ui-base` (TRE-72), and the modal's own
-  // name/pattern switch says the regex is there better than a label can.
-  rename: { label: "rename", note: "one name, or a pattern over the selection", why: all(host, some) },
-  chmod: { label: "permissions", note: "mode, owner and group", why: all(host, some) },
+  // Why the label is `rename` and not `regex rename` is written beside the word.
+  rename: { ...WORDS.rename, why: all(host, some) },
+  chmod: { ...WORDS.chmod, why: all(host, some) },
   // One at a time, because the route takes one path: a file streams as itself
   // and a directory streams as a zip, and there is no third shape that is
   // several of either (TRE-26).
-  download: { label: "download", note: "a file as itself, a directory as a zip", why: all(host, one) },
+  download: { ...WORDS.download, why: all(host, one) },
   // The strip's other way in (TRE-34 §3). The directory heuristic offers logs
   // where logs usually are; this is how somebody follows the one that is not
   // there, and it is the only route that works in an ordinary directory.
@@ -257,32 +254,28 @@ const SPECS: Readonly<Record<ActionId, Spec>> = {
   // Files only, and one at a time — the strip follows a file, and "tail these
   // four" is a different feature the ticket puts out of scope.
   tail: {
-    label: "tail this file",
-    note: "follow it live in the strip under the panes",
-    why: all(host, one, onlyKind(["file"], "A tail follows a file")),
+    ...WORDS.tail,
+    why: all(host, one, onlyKind(["file"], REASONS.tailFileOnly)),
   },
-  upload: { label: "upload here", short: "upload", mark: "↑", note: "pick files to put in this directory", why: host },
+  upload: { ...WORDS.upload, mark: "↑", why: host },
   link: {
-    label: "mint signed link",
-    note: "a signed URL, good for a while",
-    why: all(host, one, onlyKind(["file"], "A signed link points at a file")),
+    ...WORDS.link,
+    why: all(host, one, onlyKind(["file"], REASONS.linkFileOnly)),
   },
 
   copyPath: {
-    label: "copy path",
-    note: "the absolute path, to the clipboard",
+    ...WORDS.copyPath,
     why: all(host, (context) => (context.kind === "directory" ? undefined : one(context))),
   },
-  copyName: { label: "copy name", note: "just the name, to the clipboard", why: one },
+  copyName: { ...WORDS.copyName, why: one },
 
   favourite: {
-    label: "add to favourites",
-    note: "keep this directory in the sidebar",
+    ...WORDS.favourite,
     why: all(
       host,
       (context) => (context.kind === "directory" ? undefined : one(context)),
       (context) =>
-        context.kind === "directory" ? undefined : onlyKind(["dir"], "Only a directory can be a favourite")(context),
+        context.kind === "directory" ? undefined : onlyKind(["dir"], REASONS.favouriteDirectoryOnly)(context),
     ),
   },
 
@@ -291,10 +284,8 @@ const SPECS: Readonly<Record<ActionId, Spec>> = {
   // entries one. Comparing "these three files" against another pane is a
   // different question, and not one this asks.
   compare: {
-    label: "compare with other pane",
-    short: "compare",
+    ...WORDS.compare,
     mark: "⇄",
-    note: "name, size and hash, both directories",
     why: all(host, bothPanes),
   },
 
@@ -303,8 +294,8 @@ const SPECS: Readonly<Record<ActionId, Spec>> = {
   // directory has no sha256, and an entry offering one would be promising a
   // number that does not exist. Selecting the directory and asking for the
   // checksums of what is in it is the same gesture, one row up.
-  hash: { label: "compute sha256", note: "runs in the background", why: all(host, some) },
-  rm: { label: "rm", note: "permanent — this app has no trash", danger: true, why: all(host, some) },
+  hash: { ...WORDS.hash, why: all(host, some) },
+  rm: { ...WORDS.rm, danger: true, why: all(host, some) },
 };
 
 // --------------------------------------------------------------- the shapes

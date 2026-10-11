@@ -1,6 +1,7 @@
 "use client";
 
 import { Tooltip } from "@components/ui/tooltip";
+import useTranslations from "@i18n/useTranslations";
 import { STRENGTH_LABELS, scoreKey } from "@schemas/auth";
 import { useId, useState } from "react";
 
@@ -54,6 +55,7 @@ export function AuthField({
   /** A name for the show/hide toggle, when `secret` — its text flips with state. */
   revealTestId?: string;
 }) {
+  const t = useTranslations("auth");
   const id = useId();
   const [revealed, setRevealed] = useState(false);
   const inputType = secret && !revealed ? "password" : secret ? "text" : type;
@@ -106,11 +108,10 @@ export function AuthField({
             onClick={() => setRevealed((current) => !current)}
             aria-pressed={revealed}
             disabled={disabled}
-            // `show` becomes `hide` on the click, so the text is no handle.
             data-testid={revealTestId}
             className="text-ink-faint hover:text-ink-muted absolute top-1/2 right-2 -translate-y-1/2 text-xs tracking-label disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {revealed ? "hide" : "show"}
+            {revealed ? t.fields.conceal : t.fields.reveal}
           </button>
         )}
       </div>

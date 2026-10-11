@@ -1,3 +1,5 @@
+import { interpolate } from "@i18n/interpolate";
+import { dictionary } from "@text/index";
 import { z } from "zod";
 
 /**
@@ -12,12 +14,14 @@ import { z } from "zod";
 /** VarChar(700) in the schema; the same ceiling, said earlier. */
 const MAX_PATH = 700;
 
+const MESSAGES = dictionary.validation.host;
+
 const ABSOLUTE_PATH = z
   .string()
   .trim()
-  .min(1, { message: "A path is required." })
-  .max(MAX_PATH, { message: `A path is at most ${MAX_PATH} characters.` })
-  .refine((value) => value.startsWith("/"), { message: "A path must be absolute — start it with /." });
+  .min(1, { message: MESSAGES.pathRequired })
+  .max(MAX_PATH, { message: interpolate(MESSAGES.pathMax, { max: MAX_PATH }) })
+  .refine((value) => value.startsWith("/"), { message: MESSAGES.pathAbsolute });
 
 export const rootSchema = z.object({
   path: ABSOLUTE_PATH,
@@ -27,11 +31,7 @@ export const rootSchema = z.object({
 export const CREDENTIAL_KINDS = ["PRIVATE_KEY", "PASSWORD", "AGENT"] as const;
 
 /** What each credential kind actually asks you to paste. */
-export const CREDENTIAL_LABELS: Record<(typeof CREDENTIAL_KINDS)[number], string> = {
-  PRIVATE_KEY: "private key",
-  PASSWORD: "password",
-  AGENT: "agent socket",
-};
+export const CREDENTIAL_LABELS: Record<(typeof CREDENTIAL_KINDS)[number], string> = MESSAGES.credentialKinds;
 
 /**
  * A schema per form, because two rules depend on the circumstances rather than
@@ -48,17 +48,11 @@ export const CREDENTIAL_LABELS: Record<(typeof CREDENTIAL_KINDS)[number], string
 export const hostSchemaFor = ({ requireCredential, owner }: { requireCredential: boolean; owner: boolean }) =>
   z
     .object({
-      label: z
-        .string()
-        .trim()
-        .min(1, { message: "A name is required." })
-        .max(64, { message: "At most 64 characters." }),
+      label: z.string().trim().min(1, { message: MESSAGES.nameRequired }).max(64, { message: MESSAGES.nameMax }),
       transport: z.enum(["LOCAL", "SSH"]),
-      colour: z.string().regex(/^#[0-9a-fA-F]{6}$/, { message: "A colour is six hex digits, e.g. #7fa8c9." }),
+      colour: z.string().regex(/^#[0-9a-fA-F]{6}$/, { message: MESSAGES.colour }),
       homePath: ABSOLUTE_PATH,
-      roots: owner
-        ? z.array(rootSchema)
-        : z.array(rootSchema).min(1, { message: "A host with no roots can serve nothing." }),
+      roots: owner ? z.array(rootSchema) : z.array(rootSchema).min(1, { message: MESSAGES.rootsRequired }),
 
       // SSH only. Kept in the object rather than behind a discriminated union so
       // that switching transport does not throw away what was already typed.
@@ -71,7 +65,7 @@ export const hostSchemaFor = ({ requireCredential, owner }: { requireCredential:
         .string()
         .trim()
         .refine((value) => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 65535, {
-          message: "A port is a whole number from 1 to 65535.",
+          message: MESSAGES.port,
         }),
       username: z.string().trim(),
       credentialKind: z.enum(CREDENTIAL_KINDS),
@@ -81,16 +75,16 @@ export const hostSchemaFor = ({ requireCredential, owner }: { requireCredential:
       if (values.transport !== "SSH") return;
 
       if (values.address === "") {
-        context.addIssue({ code: "custom", path: ["address"], message: "An SSH host needs an address." });
+        context.addIssue({ code: "custom", path: ["address"], message: MESSAGES.addressRequired });
       }
       if (values.username === "") {
-        context.addIssue({ code: "custom", path: ["username"], message: "An SSH host needs a username." });
+        context.addIssue({ code: "custom", path: ["username"], message: MESSAGES.usernameRequired });
       }
       if (requireCredential && values.credentialSecret === "") {
         context.addIssue({
           code: "custom",
           path: ["credentialSecret"],
-          message: `An SSH host needs a ${CREDENTIAL_LABELS[values.credentialKind]} to connect with.`,
+          message: interpolate(MESSAGES.credentialRequired, { credential: CREDENTIAL_LABELS[values.credentialKind] }),
         });
       }
     })
@@ -99,7 +93,7 @@ export const hostSchemaFor = ({ requireCredential, owner }: { requireCredential:
     // can still change the answer — and not at all for an owner, for whom the
     // refusal being predicted cannot occur.
     .refine((values) => owner || values.roots.some((root) => contains(root.path, values.homePath)), {
-      message: "The home sits outside every root, so this host would open on a refusal.",
+      message: MESSAGES.homeOutsideRoots,
       path: ["homePath"],
     });
 

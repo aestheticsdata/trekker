@@ -16,6 +16,8 @@ import {
   PANE_KEYS,
   suggestName,
 } from "@helpers/views";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { createView, updateView } from "@lib/api/views";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -64,9 +66,10 @@ export function ViewForm({
   /** The view that was written, so the caller can make it the active one. */
   onSaved: (view: SavedView) => void;
 }) {
+  const t = useTranslations("views");
   return (
     <Overlay
-      label={view ? `Edit the view ${view.name}` : "Save this layout as a view"}
+      label={view ? interpolate(t.form.editLabel, { name: view.name }) : t.form.saveLabel}
       testId="view-form"
       onClosed={onClose}
       panelClassName="bg-app border-line-strong flex w-full max-w-[33.75rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
@@ -100,6 +103,7 @@ function FormPanel({
   close: () => void;
   onSaved: (view: SavedView) => void;
 }) {
+  const t = useTranslations("views");
   const { csrfToken } = useAuth();
   const { push } = useToast();
   const queryClient = useQueryClient();
@@ -133,7 +137,7 @@ function FormPanel({
 
   const typed = name.trim();
   const collides = views.some((candidate) => candidate.id !== view?.id && candidate.name === typed);
-  const problem = typed === "" ? null : collides ? "A view of that name already exists." : null;
+  const problem = typed === "" ? null : collides ? t.form.nameTaken : null;
 
   /** Which view is about to lose this chord — the sentence, before the write. */
   const takenFrom = slot === null ? null : (views.find((c) => c.id !== view?.id && c.slot === slot) ?? null);
@@ -158,11 +162,14 @@ function FormPanel({
       onSaved(written);
       push({
         tone: "success",
-        message: `${written.name} ${view ? "updated" : "saved"}`,
+        message: interpolate(view ? t.form.updated : t.form.saved, { name: written.name }),
         // The server settles the shortcut, so this is what actually happened
         // rather than what was asked for.
         detail: displaced
-          ? `${written.slot === null ? "shortcut" : writeViewSlot(written.slot)} taken from ${displaced.name}`
+          ? interpolate(t.form.slotTaken, {
+              slot: written.slot === null ? t.form.slotTakenNone : writeViewSlot(written.slot),
+              name: displaced.name,
+            })
           : written.slot === null
             ? undefined
             : writeViewSlot(written.slot),
@@ -170,7 +177,7 @@ function FormPanel({
       close();
     },
     onError: (error) => {
-      setFailure(error instanceof ApiError ? error.message : "The view could not be saved.");
+      setFailure(error instanceof ApiError ? error.message : t.form.saveFailed);
     },
   });
 
@@ -186,19 +193,19 @@ function FormPanel({
     <>
       <header className="bg-line border-line-strong flex h-topbar flex-none items-center gap-2.25 border-b px-3">
         <span className="text-ink font-mono text-xs font-semibold tracking-label">
-          {view ? "edit view" : "save view"}
+          {view ? t.form.titleEdit : t.form.titleSave}
         </span>
-        <span className="text-ink-muted min-w-0 truncate font-mono text-2xs">a named snapshot of both panes</span>
+        <span className="text-ink-muted min-w-0 truncate font-mono text-2xs">{t.form.subtitle}</span>
         <div className="flex-1" />
-        <Tooltip content="Close (⎋)">
+        <Tooltip content={t.close.hint}>
           <button
             type="button"
             onClick={close}
-            aria-label="Close"
+            aria-label={t.close.label}
             data-testid="view-form-close"
             className="text-ink-dim flex-none font-mono text-2xs"
           >
-            esc ✕
+            {t.close.glyph}
           </button>
         </Tooltip>
       </header>
@@ -206,7 +213,7 @@ function FormPanel({
       <div className="px-3.5 pt-3.25 pb-2.5">
         <div className="mb-1.25 flex items-baseline justify-between gap-2">
           <span className={`${FORM_LABEL_INK} font-sans text-3xs/none font-medium tracking-[0.12em] uppercase`}>
-            name
+            {t.form.name}
           </span>
           {/* Always rendered, so nothing below it moves when a problem appears
               — the rule the auth screens set. */}
@@ -227,7 +234,7 @@ function FormPanel({
             if (event.key === "Enter" && ready) save.mutate();
           }}
           maxLength={64}
-          aria-label="View name"
+          aria-label={t.form.nameLabel}
           data-testid="view-form-name"
           className={`bg-chrome text-ink w-full border px-2.5 py-2 font-mono text-sm/none ${
             problem ? "border-danger" : "border-accent"
@@ -237,7 +244,7 @@ function FormPanel({
         <div
           className={`${FORM_LABEL_INK} mt-3 mb-1.25 font-sans text-3xs/none font-medium tracking-[0.12em] uppercase`}
         >
-          shortcut
+          {t.form.shortcut}
         </div>
         <div className="flex flex-wrap gap-1">
           {VIEW_SLOTS.map((candidate) => (
@@ -254,7 +261,7 @@ function FormPanel({
             />
           ))}
           <SlotButton
-            label="none"
+            label={t.form.slotNone}
             held={null}
             on={slot === null}
             onPick={() => setSlot(null)}
@@ -266,7 +273,7 @@ function FormPanel({
             shortcut is a decision, and a decision reported after the fact is an
             apology. */}
         <p className={`${FORM_QUIET_INK} mt-1.5 h-3 font-mono text-2xs/none`}>
-          {takenFrom ? `takes ${writeViewSlot(slot as ViewSlot)} from ${takenFrom.name}` : " "}
+          {takenFrom ? interpolate(t.form.takes, { slot: writeViewSlot(slot as ViewSlot), name: takenFrom.name }) : " "}
         </p>
       </div>
 
@@ -276,7 +283,7 @@ function FormPanel({
           return (
             <PreviewRow
               key={pane}
-              term={`pane ${pane.toUpperCase()}`}
+              term={interpolate(t.form.preview.pane, { pane: pane.toUpperCase() })}
               colour={colourOf(layout[pane].host)}
               value={described.where}
               detail={described.sorted}
@@ -284,7 +291,7 @@ function FormPanel({
           );
         })}
         <PreviewRow
-          term="layout"
+          term={t.form.preview.layout}
           colour={null}
           value={describeLayout(layout).how}
           detail={describeLayout(layout).filter}
@@ -298,14 +305,14 @@ function FormPanel({
       {view === null && (
         <div className="flex gap-4 px-3.5 py-2.75">
           <Check
-            label="sort order & glob filter"
+            label={t.form.keepSorts}
             on={keeps.sorts}
             onToggle={() => setKeeps({ ...keeps, sorts: !keeps.sorts })}
             data-testid="view-form-keep"
             data-keep="sorts"
           />
           <Check
-            label="layout, inspector & heat map"
+            label={t.form.keepLayout}
             on={keeps.layout}
             onToggle={() => setKeeps({ ...keeps, layout: !keeps.layout })}
             data-testid="view-form-keep"
@@ -326,7 +333,7 @@ function FormPanel({
       <footer className="bg-chrome border-line flex h-11 flex-none items-center gap-2 border-t px-3.5">
         {/* 2a says "stored on this machine", which was true of localStorage and
             is the thing this ticket changed. */}
-        <span className="text-ink-muted font-mono text-2xs/none">on your account, on every browser</span>
+        <span className="text-ink-muted font-mono text-2xs/none">{t.form.storedWhere}</span>
         <div className="flex-1" />
         <button
           type="button"
@@ -334,7 +341,7 @@ function FormPanel({
           data-testid="view-form-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
-          cancel
+          {t.form.cancel}
         </button>
         <button
           type="button"
@@ -345,7 +352,7 @@ function FormPanel({
           data-testid="view-form-save"
           className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
-          {save.isPending ? "saving…" : view ? "update view" : "save view"}
+          {save.isPending ? t.form.saving : view ? t.form.update : t.form.save}
         </button>
       </footer>
     </>
@@ -372,8 +379,15 @@ function SlotButton({
   on: boolean;
   onPick: () => void;
 } & ComponentPropsWithoutRef<"button">) {
+  const t = useTranslations("views");
   return (
-    <Tooltip content={held === null ? `Use ${label}` : `${label} is ${held}'s — this takes it`}>
+    <Tooltip
+      content={
+        held === null
+          ? interpolate(t.form.slotUse, { slot: label })
+          : interpolate(t.form.slotHeld, { slot: label, holder: held })
+      }
+    >
       <button
         // The spread is what lets a call site's `data-testid` reach the
         // button: a hyphenated attribute compiles clean against closed props

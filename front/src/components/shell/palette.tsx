@@ -31,6 +31,8 @@ import {
   rank,
   withHeads,
 } from "@helpers/palette";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { fetchListing } from "@lib/api/fs";
 import { QUERY_KEYS } from "@lib/query/keys";
 import { useQuery } from "@tanstack/react-query";
@@ -127,6 +129,7 @@ export function Palette({
   onShell: (line: string) => void;
   onClosed: () => void;
 }) {
+  const t = useTranslations("actions");
   const [query, setQuery] = useState(initialQuery);
   const [at, setAt] = useState(0);
   /**
@@ -180,12 +183,14 @@ export function Palette({
       : [
           {
             id: `path:${path.target}`,
-            group: "GO TO",
+            group: t.palette.groups.goTo,
             label: path.target,
             detail:
-              hostId === null ? "this pane has no host to go anywhere on" : `go here on ${hostLabel ?? "this host"}`,
+              hostId === null
+                ? t.palette.path.noHost
+                : interpolate(t.palette.path.goHere, { host: hostLabel ?? t.palette.path.thisHost }),
             icon: GLYPH.goTo,
-            unavailableReason: hostId === null ? "Bind a host to this pane first" : undefined,
+            unavailableReason: hostId === null ? t.reasons.noHost : undefined,
             run: () => onGo(path.target),
           },
           ...candidates
@@ -194,9 +199,9 @@ export function Palette({
             .map(
               (name): PaletteEntry => ({
                 id: `path:${joinInto(path.dir, name)}`,
-                group: "GO TO",
+                group: t.palette.groups.goTo,
                 label: joinInto(path.dir, name),
-                detail: "directory",
+                detail: t.palette.path.directory,
                 icon: GLYPH.goTo,
                 run: () => onGo(joinInto(path.dir, name)),
               }),
@@ -280,7 +285,7 @@ export function Palette({
 
   return (
     <Overlay
-      label="Command palette"
+      label={t.palette.label}
       align="top"
       testId="palette"
       onClosed={() => {
@@ -311,9 +316,9 @@ export function Palette({
                 ref={inputRef}
                 type="text"
                 value={query}
-                aria-label="Command palette"
+                aria-label={t.palette.label}
                 data-testid="palette-input"
-                placeholder="go to a path, run an action, search…"
+                placeholder={t.palette.placeholder}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (matches(event, KEYS.palette)) {
@@ -406,9 +411,9 @@ export function Palette({
                     data-testid="palette-empty"
                     className={`${PALETTE_QUIET_INK} px-3 py-6.5 text-center font-mono text-xs/[1.6]`}
                   >
-                    no command matches “{query}”
+                    {interpolate(t.palette.empty.noMatch, { query })}
                     <br />
-                    <span className={FALLBACK_INK}>↩ runs it in the terminal instead</span>
+                    <span className={FALLBACK_INK}>{t.palette.empty.fallback}</span>
                   </p>
                 )}
               </div>
@@ -417,10 +422,10 @@ export function Palette({
             <div
               className={`${PALETTE_RULE} ${PALETTE_QUIET_INK} flex h-6.5 flex-none items-center gap-3.5 border-t px-3 font-mono text-caption/none`}
             >
-              <span className="whitespace-nowrap">↑↓ navigate</span>
-              <span className="whitespace-nowrap">↩ run</span>
-              <span className="whitespace-nowrap">⇥ autocomplete</span>
-              <span className="whitespace-nowrap">⎋ close</span>
+              <span className="whitespace-nowrap">{t.palette.footer.navigate}</span>
+              <span className="whitespace-nowrap">{t.palette.footer.run}</span>
+              <span className="whitespace-nowrap">{t.palette.footer.complete}</span>
+              <span className="whitespace-nowrap">{t.palette.footer.close}</span>
               <span
                 className="min-w-0 flex-1 truncate text-right"
                 data-testid="palette-cwd"

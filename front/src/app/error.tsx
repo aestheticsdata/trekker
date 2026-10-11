@@ -1,5 +1,7 @@
 "use client";
 
+import useTranslations from "@i18n/useTranslations";
+
 /**
  * Everything below the root layout, which since TRE-89 includes the private
  * tree's session check — so this is the screen a signed-in operator gets when
@@ -14,9 +16,11 @@
  * layout that mounts one — so nothing here may read `useAuth`.
  */
 export default function ErrorBoundary({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
+  const t = useTranslations("app");
+
   return (
     <main className="flex h-screen flex-col items-center justify-center gap-4 font-mono text-sm">
-      <p className="text-ink">Something broke.</p>
+      <p className="text-ink">{t.error.message}</p>
       {/* A server-side throw is redacted to a digest in production; the
           identifier is what matches it to the line in the API's log. */}
       <p className="text-ink-dim">{error.message}</p>
@@ -26,7 +30,7 @@ export default function ErrorBoundary({ error, retry }: { error: Error & { diges
         onClick={() => retry()}
         className="border-line text-ink-dim hover:text-ink border px-3 py-1.5 text-xs tracking-widest"
       >
-        RETRY
+        {t.error.retry}
       </button>
     </main>
   );

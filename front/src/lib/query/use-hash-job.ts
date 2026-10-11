@@ -2,6 +2,7 @@
 
 import { useAuth } from "@auth/context/AuthContext";
 import { useToast } from "@components/ui/toast";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { startHash } from "@lib/api/hashes";
 import { QUERY_KEYS } from "@lib/query/keys";
@@ -27,6 +28,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
  * a file whose digest was already in the database.
  */
 export function useHashJob() {
+  const t = useTranslations("query");
   const { csrfToken } = useAuth();
   const { push } = useToast();
   const queryClient = useQueryClient();
@@ -40,8 +42,8 @@ export function useHashJob() {
     onError: (error) => {
       push({
         tone: "danger",
-        message: "No checksums",
-        detail: error instanceof ApiError ? error.message : "The job could not be queued.",
+        message: t.hashJob.failed,
+        detail: error instanceof ApiError ? error.message : t.hashJob.failedDetail,
       });
     },
   });

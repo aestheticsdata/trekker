@@ -34,7 +34,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WARN_CHIP_FILL, WARN_CHIP_INK } from "../src/helpers/disks.ts";
-import { AGE_BUCKETS, HEAT, HEAT_OFF_INK, PANE_SURFACES } from "../src/helpers/heat.ts";
 import { MARK_ON_PANE, MARK_ON_PANEL, MOCKUP_LINK_HEX } from "../src/helpers/listing.ts";
 import {
   DANGER_FILL,
@@ -47,23 +46,6 @@ import {
   SELECTED,
   SELECTED_FILL,
 } from "../src/helpers/press.ts";
-import {
-  FALLBACK_INK,
-  ICON_INK,
-  ICON_ON_INK,
-  KEY_INK,
-  PALETTE_INPUT_INK,
-  PALETTE_LABEL_INK,
-  PALETTE_QUIET_INK,
-  PALETTE_SURFACE,
-  ROW_DANGER_INK,
-  ROW_DETAIL_INK,
-  ROW_DETAIL_ON_INK,
-  ROW_FILL,
-  ROW_LABEL_INK,
-  ROW_LABEL_ON_INK,
-  ROW_OFF_INK,
-} from "../src/helpers/palette.ts";
 import {
   COMMAND_SURFACE,
   ELEVATE_FILL,
@@ -84,22 +66,6 @@ import {
   TAIL_NOTE_INK,
   TAIL_SURFACE,
 } from "../src/helpers/tail.ts";
-import {
-  PROMPT_CHAR_INK,
-  PROMPT_WHERE_INK,
-  PROMPT_WHO_INK,
-  TERMINAL_BAR,
-  TERMINAL_DONE_INK,
-  TERMINAL_ECHO_INK,
-  TERMINAL_ERROR_INK,
-  TERMINAL_HINT_INK,
-  TERMINAL_LABEL_INK,
-  TERMINAL_OUTPUT_INK,
-  TERMINAL_QUIET_INK,
-  TERMINAL_SURFACE,
-  TERMINAL_TABLE_INK,
-  TERMINAL_TITLE_INK,
-} from "../src/helpers/terminal.ts";
 import {
   TOOLTIP_INK,
   TOOLTIP_LABEL_INK,
@@ -127,7 +93,49 @@ import {
   ROW_ON_FILL,
   ROW_ON_INK,
 } from "../src/helpers/views.ts";
-import { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK } from "../src/helpers/treemap.ts";
+import { registerAliases } from "./aliases.ts";
+
+// The heat buckets and the treemap's fold read their words from `@text/index`
+// (TRE-116), so these two are loaded after the aliases are taught to Node; see
+// `aliases.ts` for why that has to be a dynamic import.
+registerAliases();
+
+const { AGE_BUCKETS, HEAT, HEAT_OFF_INK, PANE_SURFACES } = await import("../src/helpers/heat.ts");
+const { BAND_CLASS, BAND_LABEL_INK, BAND_REST_CLASS, BAND_SIZE_INK } = await import("../src/helpers/treemap.ts");
+// The palette's group headers and the terminal's sentences do too.
+const {
+  FALLBACK_INK,
+  ICON_INK,
+  ICON_ON_INK,
+  KEY_INK,
+  PALETTE_INPUT_INK,
+  PALETTE_LABEL_INK,
+  PALETTE_QUIET_INK,
+  PALETTE_SURFACE,
+  ROW_DANGER_INK,
+  ROW_DETAIL_INK,
+  ROW_DETAIL_ON_INK,
+  ROW_FILL,
+  ROW_LABEL_INK,
+  ROW_LABEL_ON_INK,
+  ROW_OFF_INK,
+} = await import("../src/helpers/palette.ts");
+const {
+  PROMPT_CHAR_INK,
+  PROMPT_WHERE_INK,
+  PROMPT_WHO_INK,
+  TERMINAL_BAR,
+  TERMINAL_DONE_INK,
+  TERMINAL_ECHO_INK,
+  TERMINAL_ERROR_INK,
+  TERMINAL_HINT_INK,
+  TERMINAL_LABEL_INK,
+  TERMINAL_OUTPUT_INK,
+  TERMINAL_QUIET_INK,
+  TERMINAL_SURFACE,
+  TERMINAL_TABLE_INK,
+  TERMINAL_TITLE_INK,
+} = await import("../src/helpers/terminal.ts");
 
 /** WCAG 2.1 AA for text below 18.66px bold / 24px regular, which is all of it. */
 const AA = 4.5;

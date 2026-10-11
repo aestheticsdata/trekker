@@ -19,6 +19,8 @@ import {
 } from "@helpers/listing";
 import { describeMode, permissionRows } from "@helpers/permissions";
 import { ON_FILL, PRESS } from "@helpers/press";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { startDownload } from "@lib/api/download";
 import { fetchListing, fetchStat } from "@lib/api/fs";
 import { cancelHash, fetchHashState, hashStreamUrl, shortDigest } from "@lib/api/hashes";
@@ -26,6 +28,7 @@ import { QUERY_KEYS } from "@lib/query/keys";
 import { useHashJob } from "@lib/query/use-hash-job";
 import { useSignedLink } from "@lib/query/use-signed-link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { dictionary } from "@text/index";
 import { Fragment, useEffect, useState } from "react";
 
 import type { SortDirection, SortKey } from "@helpers/listing";
@@ -62,12 +65,7 @@ const STALE_MS = 10_000;
 /** How many names a multi-selection lists before it starts counting instead. */
 const NAMES_SHOWN = 8;
 
-const TYPE_LABEL: Record<RowType, string> = {
-  dir: "directory",
-  file: "file",
-  link: "symlink",
-  other: "special file",
-};
+const TYPE_LABEL: Record<RowType, string> = dictionary.inspector.types;
 
 export function Inspector({
   host,
@@ -102,6 +100,7 @@ export function Inspector({
   /** Opens the permissions modal on whatever is selected (TRE-21). */
   onEditPermissions: () => void;
 }) {
+  const t = useTranslations("inspector");
   const one = selected.length === 1 ? selected[0] : null;
 
   /**
@@ -163,7 +162,7 @@ export function Inspector({
 
   return (
     <aside
-      aria-label="Inspector"
+      aria-label={t.label}
       // 218px. Below the inspector breakpoint there is none at all — at that
       // width the two panes are already the narrowest thing worth showing, and
       // the toolbar's toggle goes with it rather than leaving a control with
@@ -174,8 +173,8 @@ export function Inspector({
       data-panel={panel ?? undefined}
     >
       <header className="bg-line text-brand flex h-6 flex-none items-center justify-between px-2.5 font-sans text-caps font-semibold tracking-[0.16em]">
-        <span>INSPECTOR</span>
-        <Tooltip content="Hide the inspector (⌘I)">
+        <span>{t.title}</span>
+        <Tooltip content={t.hide}>
           <button
             type="button"
             onClick={onClose}
@@ -191,11 +190,11 @@ export function Inspector({
           spacer. The scroller does the same job and survives a long path or a
           selection of forty names, which the spacer would push off the edge. */}
       {loading ? (
-        <Notice>reading the directory…</Notice>
+        <Notice>{t.notices.loading}</Notice>
       ) : error ? (
-        <Notice>this directory could not be read</Notice>
+        <Notice>{t.notices.unreadable}</Notice>
       ) : host === null ? (
-        <Notice>no host bound to this pane</Notice>
+        <Notice>{t.notices.noHost}</Notice>
       ) : selected.length === 0 ? (
         <DirectoryPanel
           path={path}
@@ -257,6 +256,7 @@ function DirectoryPanel({
   detail: FileRowDetail | null;
   now: number;
 }) {
+  const t = useTranslations("inspector");
   const folders = rows.filter((row) => row.type === "dir").length;
   // Directories still being walked are left out rather than counted as zero
   // (TRE-107); `unsized` is what turns the total into a floor below.
@@ -269,16 +269,21 @@ function DirectoryPanel({
 
   return (
     <Scroller>
-      <Preview>folder · {rows.length === 1 ? "1 item" : `${rows.length} items`}</Preview>
+      <Preview>{folderCaption(rows.length)}</Preview>
       <Name>{path === "/" ? "/" : (path.split("/").filter(Boolean).pop() ?? "/")}</Name>
 
       <Stats
         cells={[
-          { label: "ITEMS", value: String(rows.length) },
-          { label: "SIZE", value: formatTotal(bytes), hint: partialTotalHint(unsized), quiet: unsized > 0 },
-          { label: "FOLDERS", value: String(folders) },
+          { label: t.directory.stats.items, value: String(rows.length) },
           {
-            label: "NEWEST",
+            label: t.directory.stats.size,
+            value: formatTotal(bytes),
+            hint: partialTotalHint(unsized),
+            quiet: unsized > 0,
+          },
+          { label: t.directory.stats.folders, value: String(folders) },
+          {
+            label: t.directory.stats.newest,
             value: newest ? formatAge(ageDays(newest.mtime, now)) : "—",
             hint: newest?.name,
             quiet: true,
@@ -287,16 +292,16 @@ function DirectoryPanel({
       />
 
       <Meta>
-        <MetaRow label="path">{path}</MetaRow>
-        <MetaRow label="sort">
+        <MetaRow label={t.directory.meta.path}>{path}</MetaRow>
+        <MetaRow label={t.directory.meta.sort}>
           {sort} {dir === 1 ? "▲" : "▼"}
         </MetaRow>
-        <MetaRow label="filter">{glob || "none"}</MetaRow>
+        <MetaRow label={t.directory.meta.filter}>{glob || t.directory.noFilter}</MetaRow>
       </Meta>
 
       <Permissions
         mode={detail?.mode ?? null}
-        line={detail ? `${detail.mode} · directory` : null}
+        line={detail ? interpolate(t.directory.modeLine, { mode: detail.mode }) : null}
       />
     </Scroller>
   );
@@ -329,6 +334,7 @@ function EntryPanel({
   onSignedLink: (() => void) | null;
   minting: boolean;
 }) {
+  const t = useTranslations("inspector");
   const isLink = entry.type === "link";
 
   // The real thing, where the entry is an image the server will serve
@@ -348,21 +354,18 @@ function EntryPanel({
 
         <Stats
           cells={[
-            { label: "SIZE", value: formatSize(entry.size, entry.type) },
+            { label: t.entry.stats.size, value: formatSize(entry.size, entry.type) },
             {
               // A directory's own size is not carried (TRE-107), and rounding
               // an unknown up to a block would invent the very 4 KiB this
               // ticket removed.
-              label: "ON DISK",
+              label: t.entry.stats.onDisk,
               value: isLink || entry.size === null ? "—" : formatTotal(onDiskBytes(entry.size)),
-              hint:
-                isLink || entry.size === null
-                  ? undefined
-                  : "Rounded up to a 4 KiB block — an estimate, not a measurement",
+              hint: isLink || entry.size === null ? undefined : t.entry.onDiskHint,
             },
-            { label: "MODE", value: entry.mode },
+            { label: t.entry.stats.mode, value: entry.mode },
             {
-              label: "AGE",
+              label: t.entry.stats.age,
               value: formatAge(ageDays(entry.mtime, now)),
               hint: formatInstant(entry.mtime),
               quiet: true,
@@ -371,20 +374,20 @@ function EntryPanel({
         />
 
         <Meta>
-          <MetaRow label="host">{host.label}</MetaRow>
-          <MetaRow label="path">{entryPath}</MetaRow>
-          <MetaRow label="type">
+          <MetaRow label={t.entry.meta.host}>{host.label}</MetaRow>
+          <MetaRow label={t.entry.meta.path}>{entryPath}</MetaRow>
+          <MetaRow label={t.entry.meta.type}>
             {TYPE_LABEL[entry.type]}
             {entry.linkTarget ? ` → ${entry.linkTarget}` : ""}
           </MetaRow>
-          <MetaRow label="bytes">{entry.size === null ? "—" : formatExactBytes(entry.size)}</MetaRow>
-          <MetaRow label="modified">{formatInstant(entry.mtime)}</MetaRow>
-          <MetaRow label="accessed">{detail?.atime ? formatInstant(detail.atime) : "—"}</MetaRow>
-          <MetaRow label="owner">
+          <MetaRow label={t.entry.meta.bytes}>{entry.size === null ? "—" : formatExactBytes(entry.size)}</MetaRow>
+          <MetaRow label={t.entry.meta.modified}>{formatInstant(entry.mtime)}</MetaRow>
+          <MetaRow label={t.entry.meta.accessed}>{detail?.atime ? formatInstant(detail.atime) : "—"}</MetaRow>
+          <MetaRow label={t.entry.meta.owner}>
             {entry.owner}:{entry.group}
           </MetaRow>
-          <MetaRow label="inode">{detail?.inode != null ? String(detail.inode) : "—"}</MetaRow>
-          <MetaRow label="links">{detail?.nlink != null ? String(detail.nlink) : "—"}</MetaRow>
+          <MetaRow label={t.entry.meta.inode}>{detail?.inode != null ? String(detail.inode) : "—"}</MetaRow>
+          <MetaRow label={t.entry.meta.links}>{detail?.nlink != null ? String(detail.nlink) : "—"}</MetaRow>
         </Meta>
 
         <Permissions
@@ -423,6 +426,7 @@ function SelectionPanel({
   selected: readonly FileRow[];
   onEditPermissions: () => void;
 }) {
+  const t = useTranslations("inspector");
   const folders = selected.filter((row) => row.type === "dir").length;
   const bytes = selected.reduce((sum, row) => sum + (row.size ?? 0), 0);
   const unsized = selected.reduce((count, row) => (row.size === null ? count + 1 : count), 0);
@@ -431,13 +435,13 @@ function SelectionPanel({
 
   return (
     <Scroller>
-      <Preview>{selected.length} entries</Preview>
-      <Name>{selected.length} selected</Name>
+      <Preview>{interpolate(t.selection.entries, { count: selected.length })}</Preview>
+      <Name>{interpolate(t.selection.selected, { count: selected.length })}</Name>
 
       <Stats
         cells={[
           {
-            label: "TOTAL SIZE",
+            label: t.selection.stats.totalSize,
             value: formatTotal(bytes),
             hint: partialTotalHint(unsized),
             // Dimmed while directories are still being walked (TRE-110): the
@@ -445,9 +449,9 @@ function SelectionPanel({
             // by "true, but do not read it as the headline".
             quiet: unsized > 0,
           },
-          { label: "MODES", value: String(modes.length), quiet: modes.length === 1 },
-          { label: "FILES", value: String(selected.length - folders) },
-          { label: "FOLDERS", value: String(folders) },
+          { label: t.selection.stats.modes, value: String(modes.length), quiet: modes.length === 1 },
+          { label: t.selection.stats.files, value: String(selected.length - folders) },
+          { label: t.selection.stats.folders, value: String(folders) },
         ]}
       />
 
@@ -468,7 +472,9 @@ function SelectionPanel({
           </div>
         ))}
         {selected.length > listed.length && (
-          <p className="text-ink-faint pt-1.5 font-mono text-2xs">+{selected.length - listed.length} more</p>
+          <p className="text-ink-faint pt-1.5 font-mono text-2xs">
+            {interpolate(t.selection.more, { count: selected.length - listed.length })}
+          </p>
         )}
       </div>
 
@@ -505,6 +511,7 @@ function SelectionPanel({
  * means hashing what is inside it.
  */
 function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: string; isFile: boolean }) {
+  const t = useTranslations("inspector");
   const queryClient = useQueryClient();
   const { push } = useToast();
   const { csrfToken } = useAuth();
@@ -562,7 +569,7 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
       if (next.status === "RUNNING") return;
 
       if (next.status === "FAILED") {
-        push({ tone: "danger", message: "The checksum job failed", detail: next.error ?? undefined });
+        push({ tone: "danger", message: t.integrity.failed, detail: next.error ?? undefined });
       }
       // The digest is in the database by now, so this is what turns a finished
       // job into a line of hex without waiting for anything to go stale.
@@ -576,7 +583,7 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
       source.close();
       setFrame(null);
     };
-  }, [jobId, queryClient, push]);
+  }, [jobId, queryClient, push, t]);
 
   const hash = state.data?.hash ?? null;
   const busy = jobId !== null;
@@ -586,9 +593,9 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
     try {
       // The whole digest, never the sixteen characters on screen.
       await navigator.clipboard.writeText(hash.digest);
-      push({ tone: "success", message: "sha256 copied", detail: hash.digest });
+      push({ tone: "success", message: t.integrity.copied, detail: hash.digest });
     } catch {
-      push({ tone: "warning", message: "Could not copy", detail: "This browser refused clipboard access." });
+      push({ tone: "warning", message: t.integrity.copyFailed, detail: t.integrity.clipboardRefused });
     }
   };
 
@@ -610,7 +617,7 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
       data-testid="integrity"
     >
       <div className="flex items-baseline justify-between">
-        <Heading>INTEGRITY</Heading>
+        <Heading>{t.integrity.heading}</Heading>
         {/* ⚠️ One slot, three tenants, and none of them is safe to reach by
             text: `stop` cancels a job, `copy` writes the clipboard, `compute`
             POSTs one — and the digest a take hovers sits directly under
@@ -623,7 +630,7 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
               className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
               data-testid="integrity-stop"
             >
-              stop
+              {t.integrity.stop}
             </button>
           ) : hash ? (
             <button
@@ -632,7 +639,7 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
               className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
               data-testid="integrity-copy"
             >
-              copy
+              {t.integrity.copy}
             </button>
           ) : (
             <button
@@ -641,19 +648,19 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
               className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
               data-testid="integrity-compute"
             >
-              compute
+              {t.integrity.compute}
             </button>
           ))}
       </div>
 
       {!isFile ? (
         <p className="text-ink-soft font-mono text-caption">
-          sha256 <span className="text-ink-faint">per file</span>
+          {t.integrity.algorithm} <span className="text-ink-faint">{t.integrity.perFile}</span>
         </p>
       ) : busy ? (
         <>
           <p className="text-ink-soft font-mono text-caption">
-            sha256 <span className="text-ink-dim">computing…</span>
+            {t.integrity.algorithm} <span className="text-ink-dim">{t.integrity.computing}</span>
           </p>
           <p className="text-ink-faint font-mono text-caption">{describeJob(frame, running)}</p>
         </>
@@ -664,21 +671,19 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
               className="text-ink-soft font-mono text-caption break-all"
               data-testid="integrity-digest"
             >
-              sha256 <span className="text-ink">{shortDigest(hash.digest)}…</span>
+              {t.integrity.algorithm} <span className="text-ink">{shortDigest(hash.digest)}…</span>
             </p>
           </Tooltip>
           <p className="text-ink-faint font-mono text-caption">
-            {formatInstant(hash.computedAt)} · {hash.method === "REMOTE" ? "on the host" : "streamed"}
+            {formatInstant(hash.computedAt)} · {hash.method === "REMOTE" ? t.integrity.onHost : t.integrity.streamed}
           </p>
         </>
       ) : (
         <>
           <p className="text-ink-soft font-mono text-caption">
-            sha256 <span className="text-ink-faint">not computed</span>
+            {t.integrity.algorithm} <span className="text-ink-faint">{t.integrity.notComputed}</span>
           </p>
-          {state.data?.superseded && (
-            <p className="text-ink-faint font-mono text-caption">the file changed since it was last hashed</p>
-          )}
+          {state.data?.superseded && <p className="text-ink-faint font-mono text-caption">{t.integrity.superseded}</p>}
         </>
       )}
     </section>
@@ -695,12 +700,13 @@ function Integrity({ hostId, entryPath, isFile }: { hostId: string; entryPath: s
  * accepted with — and saying it beats an empty line that reads as a stall.
  */
 function describeJob(frame: HashProgress | null, running: { files: number; queued: boolean } | null): string {
+  const text = dictionary.inspector.integrity.job;
   if (frame === null) {
     if (running === null) return "";
-    return running.queued ? `${running.files} file(s) · waiting for a slot` : `${running.files} file(s)`;
+    return interpolate(running.queued ? text.waiting : text.files, { count: running.files });
   }
-  const failed = frame.filesFailed > 0 ? ` · ${frame.filesFailed} unreadable` : "";
-  return `${frame.filesDone}/${frame.files} file(s)${failed}`;
+  const failed = frame.filesFailed > 0 ? interpolate(text.unreadable, { count: frame.filesFailed }) : "";
+  return interpolate(text.progress, { done: frame.filesDone, total: frame.files }) + failed;
 }
 
 /**
@@ -926,6 +932,7 @@ function Permissions({
   /** Present only where there is a selection to change (TRE-21). */
   onEdit?: () => void;
 }) {
+  const t = useTranslations("inspector");
   const rows = mode === null ? null : permissionRows(mode);
 
   return (
@@ -933,7 +940,7 @@ function Permissions({
       {/* Baseline-aligned, as 2a draws it: the link is the same row as the
           heading, not a control floating beside it. */}
       <div className="flex items-baseline justify-between">
-        <Heading>PERMISSIONS</Heading>
+        <Heading>{t.permissions.heading}</Heading>
         {/* ⚠️ Opens the chmod dialog, and sits on the heading row directly
             above the grid a take sweeps cell by cell. Its own name, so no
             sweep that overshoots by a row can read as a click on it. */}
@@ -944,13 +951,13 @@ function Permissions({
             className="text-ink-dim hover:text-ink-soft mb-1.75 font-mono text-caption/none"
             data-testid="permissions-edit"
           >
-            edit
+            {t.permissions.edit}
           </button>
         )}
       </div>
 
       {rows === null || mode === null ? (
-        <p className="text-ink-faint font-mono text-2xs">unknown</p>
+        <p className="text-ink-faint font-mono text-2xs">{t.permissions.unknown}</p>
       ) : (
         <>
           <div
@@ -1015,10 +1022,10 @@ function Permissions({
  * a worse lie than a dim one, and the inverse is true too.
  */
 const ENTRY_ACTIONS: ReadonlyArray<{ id: string; label: string; reason?: string; primary?: boolean }> = [
-  { id: "download", label: "download", primary: true },
-  { id: "open", label: "open in →", reason: "Read-only previews are not part of M1" },
-  { id: "extract", label: "extract", reason: "Archive extraction is not scheduled yet" },
-  { id: "link", label: "signed link" },
+  { id: "download", label: dictionary.inspector.actions.download, primary: true },
+  { id: "open", label: dictionary.inspector.actions.open, reason: dictionary.inspector.actions.openReason },
+  { id: "extract", label: dictionary.inspector.actions.extract, reason: dictionary.inspector.actions.extractReason },
+  { id: "link", label: dictionary.inspector.actions.link },
 ];
 
 function Actions({
@@ -1030,6 +1037,7 @@ function Actions({
   onSignedLink: (() => void) | null;
   minting: boolean;
 }) {
+  const t = useTranslations("inspector");
   const handlers: Record<string, (() => void) | null> = { download: onDownload, link: onSignedLink };
 
   return (
@@ -1066,7 +1074,7 @@ function Actions({
               data-testid="inspector-action"
               data-action={action.id}
             >
-              {busy ? "signing…" : action.label}
+              {busy ? t.actions.signing : action.label}
             </button>
           </Tooltip>
         );
@@ -1082,31 +1090,23 @@ function Actions({
  * to the types a real listing contains.
  */
 function previewCaption(row: FileRow, items: number | null): string {
-  if (row.type === "dir") {
-    if (items === null) return "folder";
-    return `folder · ${items === 1 ? "1 item" : `${items} items`}`;
-  }
-  if (row.type === "link") return "symlink";
-  if (row.type === "other") return "special file";
+  const text = dictionary.inspector.preview;
+  if (row.type === "dir") return items === null ? text.folder : folderCaption(items);
+  if (row.type === "link") return text.symlink;
+  if (row.type === "other") return text.specialFile;
 
   const tag = typeLetters(row.extension);
-  if (tag === "IMG") return "image preview";
-  if (tag === "MP4") return "preview · video";
-  if (tag === "GZ") return `preview · ${ARCHIVE_NAMES[row.extension] ?? row.extension} archive`;
-  return row.extension ? `preview · ${row.extension}` : "preview";
+  if (tag === "IMG") return text.image;
+  if (tag === "MP4") return text.video;
+  if (tag === "GZ") return interpolate(text.archive, { format: ARCHIVE_NAMES[row.extension] ?? row.extension });
+  return row.extension ? interpolate(text.extension, { extension: row.extension }) : text.generic;
 }
 
-/**
- * The format an archive extension stands for, where the two differ.
- *
- * `.gz` is the whole reason this exists: the mockup's own file is a
- * `.sql.gz` and its caption reads "gzip archive", not "gz archive". Anything
- * not named here already reads correctly as itself — "zip archive", "xz
- * archive" — so the map stays as short as the difference is.
- */
-const ARCHIVE_NAMES: Record<string, string> = {
-  gz: "gzip",
-  tgz: "gzip",
-  bz2: "bzip2",
-  zst: "zstd",
-};
+/** `folder · 6 items`, for the directory panel and a selected folder alike. */
+function folderCaption(items: number): string {
+  const text = dictionary.inspector.preview;
+  return items === 1 ? text.folderOne : interpolate(text.folderMany, { count: items });
+}
+
+/** The format an archive extension stands for, where the two differ. */
+const ARCHIVE_NAMES: Record<string, string> = dictionary.inspector.archiveNames;

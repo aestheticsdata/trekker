@@ -1,6 +1,7 @@
 "use client";
 
 import { markShape, typeLetters } from "@helpers/listing";
+import useTranslations from "@i18n/useTranslations";
 
 import type { MarkInk } from "@helpers/listing";
 import type { RowType } from "@lib/api/fs";
@@ -38,6 +39,7 @@ export function FileMark({
   /** Which ground this is drawn on — `MARK_ON_PANE` or `MARK_ON_PANEL`. */
   ink: MarkInk;
 } & ComponentPropsWithoutRef<"span">) {
+  const t = useTranslations("explorer");
   const shape = markShape(type);
 
   if (shape === "file") {
@@ -65,7 +67,7 @@ export function FileMark({
     // kind of thing a row is.
     <span
       role="img"
-      aria-label={shape === "folder" ? "directory" : "symlink"}
+      aria-label={shape === "folder" ? t.fileMark.directory : t.fileMark.symlink}
       className="relative block h-3.25 w-3.25 flex-none"
       {...rest}
     >

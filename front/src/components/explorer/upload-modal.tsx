@@ -7,7 +7,10 @@ import { formatSize } from "@helpers/listing";
 import { isDotFile, MAX_PICKED, pickedFromInput } from "@helpers/picked";
 import { PRESS, SELECTED } from "@helpers/press";
 import { remainingAfter, roomFor } from "@helpers/space";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { uploadSpace } from "@lib/api/upload";
+import { dictionary } from "@text/index";
 import { useEffect, useRef, useState } from "react";
 
 import type { Picked, PickedFile } from "@helpers/picked";
@@ -52,9 +55,9 @@ const RENDER_LIMIT = 200;
  * is the first time anybody has been shown it, let alone offered the other two.
  */
 const POLICIES: ReadonlyArray<{ value: ConflictPolicy; label: string }> = [
-  { value: "keepBoth", label: "keep both" },
-  { value: "overwrite", label: "overwrite" },
-  { value: "skip", label: "skip" },
+  { value: "keepBoth", label: dictionary.dialogs.upload.policies.keepBoth },
+  { value: "overwrite", label: dictionary.dialogs.upload.policies.overwrite },
+  { value: "skip", label: dictionary.dialogs.upload.policies.skip },
 ];
 
 export interface UploadTarget {
@@ -78,9 +81,11 @@ export function UploadModal({
   /** Hands the list back to the explorer, which owns the sending. */
   onConfirm: (files: readonly PickedFile[], conflict: ConflictPolicy) => void;
 }) {
+  const t = useTranslations("dialogs");
+
   return (
     <Overlay
-      label={`Upload into ${target.directory}`}
+      label={interpolate(t.upload.dialog, { directory: target.directory })}
       onClosed={onClose}
       testId="upload-modal"
       panelClassName="bg-app border-line-strong flex max-h-[80vh] w-full max-w-[32rem] flex-col overflow-hidden rounded-sm border shadow-2xl"
@@ -105,6 +110,7 @@ function UploadPanel({
   close: () => void;
   onConfirm: (files: readonly PickedFile[], conflict: ConflictPolicy) => void;
 }) {
+  const t = useTranslations("dialogs");
   // Through `merge` even on the way in, so every row has a distinct fingerprint
   // and that fingerprint can be its key.
   const [files, setFiles] = useState<readonly PickedFile[]>(() => merge([], target.initial.files));
@@ -185,7 +191,9 @@ function UploadPanel({
   return (
     <>
       <header className="bg-chrome border-line flex h-topbar flex-none items-center gap-2 border-b px-3">
-        <span className="text-ink-label flex-none font-mono text-xs font-semibold tracking-label">upload</span>
+        <span className="text-ink-label flex-none font-mono text-xs font-semibold tracking-label">
+          {t.upload.title}
+        </span>
         <span
           aria-hidden
           className="text-ink-faint flex-none font-mono text-xs"
@@ -196,15 +204,15 @@ function UploadPanel({
           host={target.host}
           path={target.directory}
         />
-        <Tooltip content="Close (⎋)">
+        <Tooltip content={t.common.closeTooltip}>
           <button
             type="button"
             onClick={close}
-            aria-label="Close"
+            aria-label={t.common.close}
             data-testid="upload-close"
             className="text-ink-dim flex-none font-mono text-2xs"
           >
-            esc ✕
+            {t.common.escClose}
           </button>
         </Tooltip>
       </header>
@@ -215,7 +223,7 @@ function UploadPanel({
              leaving them to be found in a footer beside `cancel`. */
           <div className="flex flex-col items-center gap-2.5 px-3.5 py-9">
             <span className="text-ink-muted font-mono text-cmd">
-              {files.length === 0 ? "Nothing chosen yet." : "Everything chosen is a dot-file."}
+              {files.length === 0 ? t.upload.nothingChosen : t.upload.allDotFiles}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -224,7 +232,7 @@ function UploadPanel({
                 data-testid="upload-pick-files"
                 className={`${PRESS} px-3.5 py-1.75 font-mono text-xs/none font-medium`}
               >
-                choose files…
+                {t.upload.chooseFiles}
               </button>
               <button
                 type="button"
@@ -232,10 +240,10 @@ function UploadPanel({
                 data-testid="upload-pick-folder"
                 className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
               >
-                choose a folder…
+                {t.upload.chooseFolder}
               </button>
             </div>
-            <span className="text-ink-faint font-mono text-2xs">or drop them onto a pane</span>
+            <span className="text-ink-faint font-mono text-2xs">{t.upload.dropHint}</span>
           </div>
         ) : (
           <>
@@ -256,7 +264,7 @@ function UploadPanel({
             ))}
             {hidden > 0 && (
               <div className="text-ink-faint border-raised border-t px-3.5 py-1.5 font-mono text-2xs">
-                and {hidden} more, not listed
+                {interpolate(t.upload.notListed, { count: hidden })}
               </div>
             )}
           </>
@@ -265,8 +273,7 @@ function UploadPanel({
 
       {truncated && (
         <div className="bg-warning-wash border-warning text-warning mx-3.5 mt-2.5 border px-2.5 py-1.75 font-mono text-cmd/[1.5]">
-          That is more than {MAX_PICKED} files. Only the first {MAX_PICKED} were collected — send the rest in another
-          pass.
+          {interpolate(t.upload.truncated, { max: MAX_PICKED })}
         </div>
       )}
 
@@ -276,7 +283,10 @@ function UploadPanel({
               `transfer-modal` words it. Two modals writing to one disk that
               disagreed about whether it has room would be worse than either of
               them being wrong on its own. */}
-          {`Needs ${formatSize(total, "file")} and ${formatSize(space.free ?? 0, "file")} is free at the destination.`}
+          {interpolate(t.common.noRoom, {
+            needed: formatSize(total, "file"),
+            free: formatSize(space.free ?? 0, "file"),
+          })}
         </div>
       )}
 
@@ -286,16 +296,16 @@ function UploadPanel({
               What is worth saying is the part nothing else says — that this
               one succeeding is the problem, because a host with nothing left
               stops doing things that have nothing to do with the upload. */}
-          {`This fits, but would leave only ${formatSize(remainingAfter(total, space), "file")} free on the host.`}
+          {interpolate(t.upload.tight, { size: formatSize(remainingAfter(total, space), "file") })}
         </div>
       )}
 
       <div className="border-line flex flex-none flex-wrap items-center gap-x-2.5 gap-y-1.5 border-t px-3.5 py-2.25">
         <span className="text-ink-faint font-sans text-3xs/none font-medium tracking-[0.12em] uppercase">
-          if it exists
+          {t.upload.ifExists}
         </span>
         <fieldset
-          aria-label="What to do when the destination already holds the name"
+          aria-label={t.upload.policyLabel}
           className="border-line-strong flex h-5 flex-none overflow-hidden rounded-sm border"
         >
           {POLICIES.map((policy) => {
@@ -331,7 +341,7 @@ function UploadPanel({
               checked={skipDots}
               onChange={(event) => setSkipDots(event.target.checked)}
             />
-            skip {dotted} dot-file{dotted === 1 ? "" : "s"}
+            {interpolate(dotted === 1 ? t.upload.skipDotsOne : t.upload.skipDotsMany, { count: dotted })}
           </label>
         )}
       </div>
@@ -339,16 +349,22 @@ function UploadPanel({
       <footer className="bg-chrome border-line flex h-11 flex-none items-center gap-2 border-t px-3.5">
         <span className="text-ink-muted font-mono text-2xs/none">
           {sending.length === 0
-            ? "nothing to send"
-            : `${sending.length} file${sending.length === 1 ? "" : "s"}, ${formatSize(total, "file")}`}
+            ? t.upload.nothingToSend
+            : interpolate(sending.length === 1 ? t.upload.sendingOne : t.upload.sendingMany, {
+                count: sending.length,
+                size: formatSize(total, "file"),
+              })}
         </span>
         {/* Standing, not only when it is a problem. A number somebody has seen
             before it matters is one they can act on while it still can be. */}
         {space.free !== null && (
           <span className="text-ink-faint font-mono text-2xs/none">
             {space.total
-              ? `${formatSize(space.free, "file")} free of ${formatSize(space.total, "file")}`
-              : `${formatSize(space.free, "file")} free`}
+              ? interpolate(t.upload.freeOf, {
+                  free: formatSize(space.free, "file"),
+                  total: formatSize(space.total, "file"),
+                })
+              : interpolate(t.common.free, { size: formatSize(space.free, "file") })}
           </span>
         )}
         <div className="flex-1" />
@@ -362,7 +378,7 @@ function UploadPanel({
             data-testid="upload-add-more"
             className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
           >
-            add more…
+            {t.upload.addMore}
           </button>
         )}
         <button
@@ -371,7 +387,7 @@ function UploadPanel({
           data-testid="upload-cancel"
           className="border-line-strong text-ink-soft border px-3.5 py-1.75 font-mono text-xs/none"
         >
-          cancel
+          {t.common.cancel}
         </button>
         <button
           ref={commit}
@@ -384,7 +400,7 @@ function UploadPanel({
           data-testid="upload-submit"
           className={`${PRESS} disabled:bg-line disabled:text-ink-faint px-3.5 py-1.75 font-mono text-xs/none font-medium disabled:cursor-not-allowed`}
         >
-          upload
+          {t.upload.submit}
         </button>
       </footer>
 

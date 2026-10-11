@@ -1,6 +1,7 @@
 import "@styles/globals.css";
 import Providers from "@app/providers";
 import { UI_BASE_SCRIPT } from "@helpers/ui-scale";
+import { dictionary } from "@text/index";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 
 import type { Metadata, Viewport } from "next";
@@ -22,8 +23,8 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Trekker",
-  description: "A file explorer for the servers you actually run.",
+  title: dictionary.app.metadata.title,
+  description: dictionary.app.metadata.description,
   /*
    * The peak is monochrome and bleeds to the edges of its 32×32 grid — no rounded navy backplate
    * any more — so the ink has to follow the browser chrome instead of supplying its own contrast.

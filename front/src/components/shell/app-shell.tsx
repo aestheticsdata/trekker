@@ -7,6 +7,7 @@ import { TopBar } from "@components/shell/top-bar";
 import { ToastProvider } from "@components/ui/toast";
 import { TransferProvider } from "@components/ui/transfers";
 import { UploadProvider } from "@components/ui/uploads";
+import useTranslations from "@i18n/useTranslations";
 import { useState } from "react";
 
 import type { Action } from "@components/shell/actions";
@@ -196,16 +197,16 @@ export function AppShell({
  * visitor's time.
  */
 function TooNarrowNotice() {
+  const t = useTranslations("shell");
+
   return (
     <div
       className="hidden h-screen flex-col items-center justify-center gap-2 px-8 text-center max-usable:flex"
       data-testid="too-narrow-notice"
     >
-      <p className="text-ink text-sm tracking-caps">TREKKER</p>
-      <p className="text-ink-muted text-xs">This app needs a wider screen.</p>
-      <p className="text-ink-faint text-2xs">
-        Two directories side by side is the whole point, and it does not survive a phone.
-      </p>
+      <p className="text-ink text-sm tracking-caps">{t.wordmark}</p>
+      <p className="text-ink-muted text-xs">{t.tooNarrow.lead}</p>
+      <p className="text-ink-faint text-2xs">{t.tooNarrow.body}</p>
     </div>
   );
 }

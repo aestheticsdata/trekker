@@ -2,6 +2,8 @@
 
 import { Tooltip } from "@components/ui/tooltip";
 import { SELECTED } from "@helpers/press";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 
 import type { Action } from "@components/shell/actions";
 
@@ -74,19 +76,21 @@ export function Toolbar({
   onInspectorChange?: (open: boolean) => void;
   actions?: readonly Action[];
 }) {
+  const t = useTranslations("actions");
+
   return (
     <div
       className="bg-app border-line flex h-toolbar shrink-0 items-center gap-2.25 border-b px-2.5"
       data-testid="toolbar"
     >
       <Segmented
-        label="View mode"
+        label={t.toolbar.viewMode.label}
         testId="view-mode"
         value={viewMode}
         onChange={(value) => onViewModeChange?.(value as ViewMode)}
         options={[
-          { value: "list", label: "list" },
-          { value: "detail", label: "detail" },
+          { value: "list", label: t.toolbar.viewMode.list },
+          { value: "detail", label: t.toolbar.viewMode.detail },
         ]}
       />
 
@@ -98,13 +102,13 @@ export function Toolbar({
       <Rule />
 
       <label className="border-line-strong bg-chrome focus-within:border-accent-soft flex h-5 w-40 items-center gap-1.5 rounded-sm border px-2 stats:w-52.5">
-        <span className="text-ink-label font-mono text-2xs">glob</span>
+        <span className="text-ink-label font-mono text-2xs">{t.toolbar.glob.label}</span>
         <input
           type="text"
           value={glob}
           onChange={(event) => onGlobChange?.(event.target.value)}
-          placeholder="*.log"
-          aria-label="Filter by glob"
+          placeholder={t.toolbar.glob.placeholder}
+          aria-label={t.toolbar.glob.field}
           data-testid="glob-input"
           className="text-ink-soft placeholder:text-ink-faint caret-brand min-w-0 flex-1 bg-transparent font-mono text-xs"
         />
@@ -113,13 +117,13 @@ export function Toolbar({
             className="text-ink-dim font-mono text-2xs whitespace-nowrap"
             data-testid="glob-hits"
           >
-            {globMatches} {globMatches === 1 ? "hit" : "hits"}
+            {interpolate(globMatches === 1 ? t.toolbar.glob.hitOne : t.toolbar.glob.hitMany, { count: globMatches })}
           </span>
         )}
       </label>
 
       <Toggle
-        label="heat"
+        label={t.toolbar.heat}
         testId="heat-toggle"
         pressed={heat}
         onChange={() => onHeatChange?.(!heat)}
@@ -128,9 +132,9 @@ export function Toolbar({
       {/* Hidden exactly where the panel is, rather than left as a switch with
           nothing to open below the inspector breakpoint. */}
       <Toggle
-        label="inspector"
+        label={t.toolbar.inspector.label}
         testId="inspector-toggle"
-        hint="Show the inspector (⌘I)"
+        hint={t.toolbar.inspector.hint}
         tone="accent"
         className="hidden inspector:flex"
         pressed={inspector}
@@ -249,15 +253,16 @@ function Segmented({
  * 18px than ◧ ever did.
  */
 function SplitControl({ value, onChange }: { value: SplitMode; onChange: (mode: SplitMode) => void }) {
+  const t = useTranslations("actions");
   const options: ReadonlyArray<{ value: SplitMode; label: string }> = [
-    { value: "left", label: "Left pane only" },
-    { value: "split", label: "Both panes" },
-    { value: "right", label: "Right pane only" },
+    { value: "left", label: t.toolbar.split.left },
+    { value: "split", label: t.toolbar.split.both },
+    { value: "right", label: t.toolbar.split.right },
   ];
 
   return (
     <fieldset
-      aria-label="Split"
+      aria-label={t.toolbar.split.label}
       className="flex gap-0.75"
     >
       {options.map((option) => {

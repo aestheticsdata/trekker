@@ -4,6 +4,8 @@ import { useAuth } from "@auth/context/AuthContext";
 import { Button, Field, Segmented, TextInput } from "@components/hosts/field";
 import { RootsEditor } from "@components/hosts/roots-editor";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { interpolate } from "@i18n/interpolate";
+import useTranslations from "@i18n/useTranslations";
 import { ApiError } from "@lib/api/client";
 import { acceptHostKey, createHost, deleteHost, fetchHosts, testHost, updateHost } from "@lib/api/hosts";
 import { CREDENTIAL_LABELS, cleanPath, HOST_COLOURS, hostSchemaFor } from "@schemas/host";
@@ -37,6 +39,7 @@ export function HostForm({
   onDeleted: (host: HostView) => void;
   onCancel: () => void;
 }) {
+  const t = useTranslations("hosts");
   const { csrfToken, user } = useAuth();
   // The install's owner (TRE-48). Read here rather than threaded down from the
   // manager: it is a property of who is signed in, not of which host is open.
@@ -107,7 +110,7 @@ export function HostForm({
       const fresh = (await fetchHosts()).find((entry) => entry.id === host.id);
       if (fresh) onSaved(fresh);
     } catch (error) {
-      setFailure(error instanceof ApiError ? error.message : "Could not accept the host key.");
+      setFailure(error instanceof ApiError ? error.message : t.form.failures.acceptKey);
     } finally {
       setAccepting(false);
     }
@@ -120,7 +123,7 @@ export function HostForm({
     try {
       const values = watch();
       if (!values.credentialSecret) {
-        setFailure(`Paste the ${CREDENTIAL_LABELS[values.credentialKind]} to test with — it is not stored yet.`);
+        setFailure(interpolate(t.form.failures.pasteSecret, { kind: CREDENTIAL_LABELS[values.credentialKind] }));
         return;
       }
       setProbe(
@@ -139,7 +142,7 @@ export function HostForm({
         ),
       );
     } catch (error) {
-      setFailure(error instanceof ApiError ? error.message : "The API could not be reached.");
+      setFailure(error instanceof ApiError ? error.message : t.form.failures.unreachable);
     } finally {
       setProbing(false);
     }
@@ -152,7 +155,7 @@ export function HostForm({
       const saved = host ? await updateHost(host.id, payload, csrfToken) : await createHost(payload, csrfToken);
       onSaved(saved);
     } catch (error) {
-      setFailure(error instanceof ApiError ? error.message : "The API could not be reached.");
+      setFailure(error instanceof ApiError ? error.message : t.form.failures.unreachable);
     }
   };
 
@@ -163,7 +166,7 @@ export function HostForm({
       await deleteHost(host.id, csrfToken);
       onDeleted(host);
     } catch (error) {
-      setFailure(error instanceof ApiError ? error.message : "The API could not be reached.");
+      setFailure(error instanceof ApiError ? error.message : t.form.failures.unreachable);
     }
   };
 
@@ -176,14 +179,14 @@ export function HostForm({
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
         <Field
-          label="name"
+          label={t.form.labels.name}
           htmlFor="host-label"
           error={errors.label?.message}
         >
           <TextInput
             id="host-label"
             autoFocus
-            placeholder="web server"
+            placeholder={t.form.placeholders.name}
             invalid={Boolean(errors.label)}
             data-testid="host-form-label"
             {...register("label")}
@@ -192,9 +195,9 @@ export function HostForm({
 
         <div className="flex gap-3">
           <div className="flex-1">
-            <Field label="transport">
+            <Field label={t.form.labels.transport}>
               <Segmented
-                label="Transport"
+                label={t.form.transport.label}
                 value={transport}
                 // The API refuses to change what kind of host a host is: a
                 // LOCAL row's whole identity is the machine the API runs on.
@@ -203,23 +206,23 @@ export function HostForm({
                 options={[
                   {
                     value: "LOCAL",
-                    label: "local",
+                    label: t.form.transport.local,
                     disabled: localTaken,
-                    hint: localTaken ? "This account already has a local host" : "The machine the API runs on",
+                    hint: localTaken ? t.form.transport.localTaken : t.form.transport.localHint,
                   },
-                  { value: "SSH", label: "ssh" },
+                  { value: "SSH", label: t.form.transport.ssh },
                 ]}
               />
             </Field>
           </div>
 
-          <Field label="colour">
+          <Field label={t.form.labels.colour}>
             <div className="flex h-6 items-center gap-1">
               {HOST_COLOURS.map((swatch) => (
                 <button
                   key={swatch}
                   type="button"
-                  aria-label={`Colour ${swatch}`}
+                  aria-label={interpolate(t.form.colourSwatch, { swatch })}
                   aria-pressed={colour === swatch}
                   // The hex is the value the host row stores in `colour`, not a
                   // tone describing state — so it is the member's name here.
@@ -239,13 +242,13 @@ export function HostForm({
             <div className="flex gap-2">
               <div className="flex-1">
                 <Field
-                  label="address"
+                  label={t.form.labels.address}
                   htmlFor="host-address"
                   error={errors.address?.message}
                 >
                   <TextInput
                     id="host-address"
-                    placeholder="host.example.com"
+                    placeholder={t.form.placeholders.address}
                     spellCheck={false}
                     autoComplete="off"
                     invalid={Boolean(errors.address)}
@@ -256,7 +259,7 @@ export function HostForm({
               </div>
               <div className="w-16">
                 <Field
-                  label="port"
+                  label={t.form.labels.port}
                   htmlFor="host-port"
                   error={errors.port?.message}
                 >
@@ -271,7 +274,7 @@ export function HostForm({
               </div>
               <div className="flex-1">
                 <Field
-                  label="username"
+                  label={t.form.labels.username}
                   htmlFor="host-username"
                   error={errors.username?.message}
                 >
@@ -288,23 +291,25 @@ export function HostForm({
             </div>
 
             <Field
-              label="credential"
+              label={t.form.labels.credential}
               hint={
                 host?.hasCredential
-                  ? `A ${CREDENTIAL_LABELS[host.credentialKind ?? "PRIVATE_KEY"]} is stored. Leave blank to keep it.`
-                  : "Sent once, encrypted at rest, and never readable again."
+                  ? interpolate(t.form.credential.stored, {
+                      kind: CREDENTIAL_LABELS[host.credentialKind ?? "PRIVATE_KEY"],
+                    })
+                  : t.form.credential.fresh
               }
               error={errors.credentialSecret?.message}
             >
               <div className="flex flex-col gap-1.5">
                 <Segmented
-                  label="Credential kind"
+                  label={t.form.credential.kindLabel}
                   value={watch("credentialKind")}
                   onChange={(value) => setValue("credentialKind", value)}
                   options={[
-                    { value: "PRIVATE_KEY", label: "key" },
-                    { value: "PASSWORD", label: "password" },
-                    { value: "AGENT", label: "agent" },
+                    { value: "PRIVATE_KEY", label: t.form.credential.key },
+                    { value: "PASSWORD", label: t.form.credential.password },
+                    { value: "AGENT", label: t.form.credential.agent },
                   ]}
                 />
                 <textarea
@@ -315,9 +320,9 @@ export function HostForm({
                   data-testid="host-form-secret"
                   placeholder={
                     watch("credentialKind") === "PRIVATE_KEY"
-                      ? "-----BEGIN OPENSSH PRIVATE KEY-----"
+                      ? t.form.placeholders.privateKey
                       : watch("credentialKind") === "AGENT"
-                        ? "/run/user/1000/keyring/ssh"
+                        ? t.form.placeholders.agentSocket
                         : ""
                   }
                   className="bg-chrome border-line-strong text-ink-soft placeholder:text-ink-faint focus:border-accent-soft caret-brand w-full resize-none rounded-xs border px-2 py-1 font-mono text-xs"
@@ -343,14 +348,14 @@ export function HostForm({
         )}
 
         <Field
-          label="home"
+          label={t.form.labels.home}
           htmlFor="host-home"
-          hint={owner ? "Where a pane opens." : "Where a pane opens. It must sit inside a root."}
+          hint={owner ? t.form.homeHint.owner : t.form.homeHint.member}
           error={errors.homePath?.message}
         >
           <TextInput
             id="host-home"
-            placeholder="/srv"
+            placeholder={t.form.placeholders.home}
             spellCheck={false}
             autoComplete="off"
             invalid={Boolean(errors.homePath)}
@@ -374,15 +379,14 @@ export function HostForm({
         {confirmDelete && host ? (
           <div className="flex flex-col gap-1.5">
             <p className="text-ink-muted font-mono text-2xs">
-              Deleting {host.label} also removes its roots, its stored credential, its pinned keys and its bookmarks.
-              Type the name to confirm.
+              {interpolate(t.form.deletion.warning, { label: host.label })}
             </p>
             <div className="flex items-center gap-2">
               <TextInput
                 value={typedName}
                 onChange={(event) => setTypedName(event.target.value)}
                 placeholder={host.label}
-                aria-label="Type the host name to confirm deletion"
+                aria-label={t.form.deletion.confirmLabel}
                 autoComplete="off"
                 data-testid="host-form-delete-name"
               />
@@ -397,7 +401,7 @@ export function HostForm({
                 onClick={remove}
                 data-testid="host-form-delete-confirm"
               >
-                delete
+                {t.form.deletion.delete}
               </Button>
               <Button
                 type="button"
@@ -407,7 +411,7 @@ export function HostForm({
                 }}
                 data-testid="host-form-delete-keep"
               >
-                keep
+                {t.form.deletion.keep}
               </Button>
             </div>
           </div>
@@ -420,14 +424,14 @@ export function HostForm({
               // `save`, `add host` or `saving…` by state; the name holds still.
               data-testid="host-form-save"
             >
-              {isSubmitting ? "saving…" : host ? "save" : "add host"}
+              {isSubmitting ? t.form.actions.saving : host ? t.form.actions.save : t.form.actions.add}
             </Button>
             <Button
               type="button"
               onClick={onCancel}
               data-testid="host-form-cancel"
             >
-              cancel
+              {t.form.actions.cancel}
             </Button>
             <div className="flex-1" />
             {host && (
@@ -437,7 +441,7 @@ export function HostForm({
                 onClick={() => setConfirmDelete(true)}
                 data-testid="host-form-delete"
               >
-                delete
+                {t.form.actions.delete}
               </Button>
             )}
           </div>
@@ -481,6 +485,8 @@ function ProbePanel({
   onTest: () => void;
   onUseHome: (dir: string) => void;
 }) {
+  const t = useTranslations("hosts");
+
   return (
     <div className="border-line-strong flex flex-col gap-1.5 rounded-xs border p-2">
       <div className="flex items-center gap-2">
@@ -490,13 +496,13 @@ function ProbePanel({
           disabled={probing}
           data-testid="host-form-test"
         >
-          {probing ? "connecting…" : "test connection"}
+          {probing ? t.probe.testing : t.probe.test}
         </Button>
         {probe && (
           <span
             className={`font-mono text-2xs ${probe.authenticated ? "text-success" : probe.reachable ? "text-warning" : "text-danger-soft"}`}
           >
-            {probe.authenticated ? "authenticated" : probe.reachable ? "reachable, auth refused" : "unreachable"}
+            {probe.authenticated ? t.probe.authenticated : probe.reachable ? t.probe.authRefused : t.probe.unreachable}
           </span>
         )}
       </div>
@@ -506,41 +512,34 @@ function ProbePanel({
       {fingerprint && !fingerprintMismatch && (
         <div className="flex flex-col gap-0.5">
           <span className="text-ink-faint font-mono text-3xs tracking-label">
-            HOST KEY{algorithm ? ` · ${algorithm}` : ""}
+            {algorithm ? interpolate(t.probe.hostKeyAlgorithm, { algorithm }) : t.probe.hostKey}
           </span>
           <span className="text-ink-soft font-mono text-2xs break-all">{fingerprint}</span>
-          {verified === false && (
-            <span className="text-warning font-mono text-2xs">
-              Taken on first sight and never checked against the host.
-            </span>
-          )}
+          {verified === false && <span className="text-warning font-mono text-2xs">{t.probe.unverified}</span>}
           <span className="text-ink-muted font-mono text-2xs">
-            Compare it against <code>ssh-keygen -lf {keyFileFor(probe?.fingerprintAlgorithm)}</code> on the host itself.
-            Pinning only means something if someone read it once.
+            {t.probe.compare.before}{" "}
+            <code>{interpolate(t.probe.compare.command, { file: keyFileFor(probe?.fingerprintAlgorithm) })}</code>{" "}
+            {t.probe.compare.after}
           </span>
         </div>
       )}
 
       {fingerprintMismatch && (
         <div className="border-danger-soft flex flex-col gap-1 rounded-xs border p-2">
-          <span className="text-danger-soft font-mono text-3xs tracking-label">HOST KEY DOES NOT MATCH</span>
+          <span className="text-danger-soft font-mono text-3xs tracking-label">{t.probe.mismatch.heading}</span>
 
           <div className="flex flex-col gap-0.5">
-            <span className="text-ink-faint font-mono text-3xs tracking-label">PINNED</span>
+            <span className="text-ink-faint font-mono text-3xs tracking-label">{t.probe.mismatch.pinned}</span>
             <span className="text-ink-soft font-mono text-2xs break-all">
-              {pinnedFingerprint ?? "— (this algorithm was never pinned)"}
+              {pinnedFingerprint ?? t.probe.mismatch.neverPinned}
             </span>
           </div>
           <div className="flex flex-col gap-0.5">
-            <span className="text-ink-faint font-mono text-3xs tracking-label">OFFERED NOW</span>
+            <span className="text-ink-faint font-mono text-3xs tracking-label">{t.probe.mismatch.offered}</span>
             <span className="text-danger-soft font-mono text-2xs break-all">{probe?.fingerprint}</span>
           </div>
 
-          <p className="text-ink-muted font-mono text-2xs">
-            The connection was refused during key exchange, before any credential was offered, so nothing was sent to
-            whatever answered. Either the host was rebuilt, or you are not talking to the machine you think you are.
-            Check the fingerprint on the host itself before accepting — not over the connection that is failing.
-          </p>
+          <p className="text-ink-muted font-mono text-2xs">{t.probe.mismatch.explanation}</p>
 
           {canAccept && (
             <Button
@@ -549,7 +548,7 @@ function ProbePanel({
               disabled={accepting}
               data-testid="host-form-accept-key"
             >
-              {accepting ? "accepting…" : "accept the offered key"}
+              {accepting ? t.probe.mismatch.accepting : t.probe.mismatch.accept}
             </Button>
           )}
         </div>
@@ -562,7 +561,7 @@ function ProbePanel({
           data-testid="host-form-use-home"
           className="text-ink-label self-start font-mono text-2xs hover:underline"
         >
-          use {probe.homeDir} as the home
+          {interpolate(t.probe.useHome, { dir: probe.homeDir })}
         </button>
       )}
     </div>
