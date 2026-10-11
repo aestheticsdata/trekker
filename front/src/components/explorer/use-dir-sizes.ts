@@ -111,16 +111,40 @@ export function useDirSizes({
       withCredentials: true,
     });
 
+    // Answers since the last flush, applied together (TRE-114). One state write
+    // per frame was one Explorer render per directory measured — both panes'
+    // rows, several times a second for as long as a big directory streams.
+    let pending = new Map<string, DirSize>();
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /** Takes what is buffered, so each answer is applied exactly once. */
+    const take = (): ReadonlyMap<string, DirSize> => {
+      const batch = pending;
+      pending = new Map();
+      return batch;
+    };
+
+    const flush = (): void => {
+      flushTimer = null;
+      const batch = take();
+      setSizes((current) => ({ ...current, known: withAnswers(current.known, batch) }));
+    };
+
     let closed = false;
     const close = (): void => {
+      if (flushTimer !== null) clearTimeout(flushTimer);
+      flushTimer = null;
       if (closed) return;
       closed = true;
       source.close();
     };
 
+    // Whatever is still buffered lands with the end of the walk, in the same
+    // write, so a finished walk is never missing its last few figures.
     const finish = (): void => {
       close();
-      setSizes((current) => ({ ...current, walking: false }));
+      const batch = take();
+      setSizes((current) => ({ known: withAnswers(current.known, batch), walking: false }));
     };
 
     source.onmessage = (event: MessageEvent<string>) => {
@@ -141,15 +165,12 @@ export function useDirSizes({
       }
       if (typeof frame.name !== "string") return;
 
-      setSizes((current) => {
-        const known = new Map(current.known);
-        known.set(frame.name, {
-          bytes: typeof frame.bytes === "number" ? frame.bytes : null,
-          partial: frame.partial === true,
-          error: typeof frame.error === "string" ? frame.error : null,
-        });
-        return { ...current, known };
+      pending.set(frame.name, {
+        bytes: typeof frame.bytes === "number" ? frame.bytes : null,
+        partial: frame.partial === true,
+        error: typeof frame.error === "string" ? frame.error : null,
       });
+      flushTimer ??= setTimeout(flush, FLUSH_MS);
     };
 
     // **Not a retry**, and this is the one thing about this stream that must
@@ -177,6 +198,25 @@ export function useDirSizes({
  * naming too few leaves a visible row waiting behind an invisible one.
  */
 const VISIBLE_ROWS = 60;
+
+/**
+ * How long answers wait to be applied together (TRE-114).
+ *
+ * Five Explorer renders a second at most, however many directories answer in
+ * that time. Short enough that a figure appearing still reads as it arriving.
+ */
+const FLUSH_MS = 200;
+
+/** What was known, with a batch of answers on top. */
+function withAnswers(
+  known: ReadonlyMap<string, DirSize>,
+  batch: ReadonlyMap<string, DirSize>,
+): ReadonlyMap<string, DirSize> {
+  if (batch.size === 0) return known;
+  const next = new Map(known);
+  for (const [name, size] of batch) next.set(name, size);
+  return next;
+}
 
 /**
  * The listing with what is known folded in.

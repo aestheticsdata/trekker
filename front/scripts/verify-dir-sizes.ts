@@ -13,6 +13,10 @@
  * for effects; `EventSource` is a recorder; `@lib/api/fs` is a stub that puts
  * the arguments in the URL, so the seed each stream opened with can be read
  * back. There is still no test runner in `front/` (TRE-39).
+ *
+ * And the frames are batched (TRE-114): one state write per directory answered
+ * was one Explorer render each. The timers are a hand-turned clock, so "at most
+ * five renders a second" is counted rather than waited for.
  */
 
 import { registerHooks } from "node:module";
@@ -59,6 +63,23 @@ class RecordingSource {
 }
 (globalThis as { EventSource?: unknown }).EventSource = RecordingSource;
 
+interface Timer {
+  at: number;
+  run: () => void;
+}
+
+const timers = new Map<number, Timer>();
+let clock = 0;
+let nextTimer = 1;
+(globalThis as { setTimeout: unknown }).setTimeout = (run: () => void, ms = 0) => {
+  const id = nextTimer++;
+  timers.set(id, { at: clock + ms, run });
+  return id;
+};
+(globalThis as { clearTimeout: unknown }).clearTimeout = (id: number) => {
+  timers.delete(id);
+};
+
 const { render, unmount } = await import("./fake-react.ts");
 const { useDirSizes } = await import("../src/components/explorer/use-dir-sizes.ts");
 
@@ -73,9 +94,33 @@ interface Pane {
 let pane: Pane = { hostId: "h1", path: "/srv", ready: false, elevated: false, firstVisible: 0 };
 let sizes: DirSizes = { known: new Map(), walking: false };
 
+/** Explorer renders a state write caused, counted as React would pay them. */
+let renders = 0;
+
 function commit(change: Partial<Pane>): void {
   pane = { ...pane, ...change };
+  const before = sizes;
   sizes = render(() => useDirSizes(pane));
+  if (sizes !== before) renders += 1;
+}
+
+/** Turns the clock, firing what falls due in order, and re-renders after each. */
+function advance(ms: number): void {
+  const until = clock + ms;
+  for (;;) {
+    const due = [...timers].filter(([, timer]) => timer.at <= until).sort(([, a], [, b]) => a.at - b.at)[0];
+    if (due === undefined) break;
+    timers.delete(due[0]);
+    clock = due[1].at;
+    due[1].run();
+    commit({});
+  }
+  clock = until;
+}
+
+function answer(name: string, bytes: number): void {
+  latest().onmessage?.({ data: JSON.stringify({ name, bytes, partial: false }) });
+  commit({});
 }
 
 const opens = (): number => RecordingSource.all.length;
@@ -103,8 +148,10 @@ check("arriving opens one stream, not two", opens(), 1);
 check("it opened at the top of the listing", latest().opened.firstVisible, 0);
 
 // --- figures arrive, then the cursor walks
-latest().onmessage?.({ data: JSON.stringify({ name: "logs", bytes: 4_200_000, partial: false }) });
-commit({});
+answer("logs", 4_200_000);
+check("a figure waits for the batch", sizes.known.has("logs"), false);
+advance(200);
+check("and lands with it", sizes.known.get("logs")?.bytes, 4_200_000);
 for (let step = 1; step <= 10; step += 1) commit({ firstVisible: 7 + step });
 check("ten arrow keys open nothing", opens(), 1);
 check("and close nothing", live(), 1);
@@ -124,13 +171,36 @@ check("with nothing carried over", sizes.known.size, 0);
 commit({ elevated: false });
 check("the window expiring restarts nothing", opens(), 2);
 
+// --- a big directory: 300 answers spread over one second
+renders = 0;
+for (let index = 0; index < 300; index += 1) {
+  answer(`dir-${index}`, index);
+  advance(1000 / 300);
+}
+advance(200);
+check("300 answers in a second land in at most 6 renders", renders <= 6, true);
+check("every one of them known", sizes.known.size, 300);
+
+// --- the end of the walk carries what is still buffered
+answer("late-1", 1);
+answer("late-2", 2);
+latest().onmessage?.({ data: JSON.stringify({ done: true }) });
+commit({});
+check("done lands the buffered figures at once", [sizes.known.has("late-1"), sizes.known.has("late-2")], [true, true]);
+check("and stops walking", sizes.walking, false);
+check("with no flush left behind", timers.size, 0);
+
 // --- leaving, and Back onto a restored cursor
+commit({ elevated: true });
+commit({ elevated: false });
+answer("unsent", 9);
 commit({ path: "/srv/www", ready: false, firstVisible: -1 });
 check("leaving closes the stream", live(), 0);
+check("and drops its unflushed figures", [timers.size, sizes.known.has("unsent")], [0, false]);
 commit({ ready: true, firstVisible: 0 });
 commit({ path: "/srv", firstVisible: 42 });
 check("Back opens at the restored cursor", latest().opened.firstVisible, 42);
-check("one stream per visit across the trip", opens(), 4);
+check("one stream per visit across the trip", opens(), 5);
 check("and only the current one alive", live(), 1);
 
 unmount();

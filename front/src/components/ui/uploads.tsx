@@ -6,7 +6,7 @@ import { headDigest } from "@helpers/digest";
 import { formatSize } from "@helpers/listing";
 import { ApiError } from "@lib/api/client";
 import { resumeOffset, surveyUploads, UploadRefusal, uploadBatch } from "@lib/api/upload";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 import type { PickedFile } from "@helpers/picked";
 import type { ConflictPolicy, ResumeClaim, UploadResult } from "@lib/api/upload";
@@ -46,8 +46,15 @@ export interface UploadRow {
   abort: () => void;
 }
 
-interface UploadContextValue {
-  rows: readonly UploadRow[];
+/**
+ * What can be asked of the uploads, apart from what they show (TRE-114).
+ *
+ * Its own context, and an identity that never changes: the rows move on every
+ * progress event — every 50 to 350ms for as long as a file is in the air — and
+ * the explorer, which only ever asks to *start* one, used to re-render with
+ * every one of them, and every mounted row with it.
+ */
+interface UploadActions {
   /**
    * Send them. Returns once every file has settled, so a caller can refresh the
    * listing at the end rather than once per file.
@@ -56,7 +63,9 @@ interface UploadContextValue {
   dismiss: (id: number) => void;
 }
 
-const UploadContext = createContext<UploadContextValue | null>(null);
+const UploadActionsContext = createContext<UploadActions | null>(null);
+/** The rows, for the tray — the one thing on screen that draws them. */
+const UploadRowsContext = createContext<readonly UploadRow[] | null>(null);
 
 /** Rows kept on screen after they finish, so a completed batch is legible. */
 const KEEP_FINISHED = 12;
@@ -160,7 +169,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     patchEach(changes);
   };
 
-  const start: UploadContextValue["start"] = async (hostId, directory, files, conflict = "keepBoth") => {
+  const start: UploadActions["start"] = async (hostId, directory, files, conflict = "keepBoth") => {
     if (files.length === 0) return;
 
     // Batch after batch, not all at once. Ten parallel requests share one
@@ -349,13 +358,27 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // `start` closes over this render's token and toast, so the stable actions
+  // below call whichever one is current rather than the first one ever made.
+  const latestStart = useRef(start);
+  useEffect(() => {
+    latestStart.current = start;
+  });
+
+  // Made once, in a state initialiser rather than a memo: an identity that is
+  // stable by construction, not by the compiler's say-so.
+  const [actions] = useState<UploadActions>(() => ({
+    start: (hostId, directory, files, conflict) => latestStart.current(hostId, directory, files, conflict),
+    dismiss: (id) => setRows((current) => current.filter((row) => row.id !== id)),
+  }));
+
   return (
-    <UploadContext.Provider
-      value={{ rows, start, dismiss: (id) => setRows((current) => current.filter((row) => row.id !== id)) }}
-    >
-      {children}
-      <UploadTray />
-    </UploadContext.Provider>
+    <UploadActionsContext.Provider value={actions}>
+      <UploadRowsContext.Provider value={rows}>
+        {children}
+        <UploadTray />
+      </UploadRowsContext.Provider>
+    </UploadActionsContext.Provider>
   );
 }
 
@@ -451,9 +474,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function useUploads(): UploadContextValue {
-  const value = useContext(UploadContext);
+export function useUploads(): UploadActions {
+  const value = useContext(UploadActionsContext);
   if (value === null) throw new Error("useUploads must be used inside an UploadProvider");
+  return value;
+}
+
+function useUploadRows(): readonly UploadRow[] {
+  const value = useContext(UploadRowsContext);
+  if (value === null) throw new Error("useUploadRows must be used inside an UploadProvider");
   return value;
 }
 
@@ -465,7 +494,8 @@ export function useUploads(): UploadContextValue {
  * would have finished uploads shove in-flight ones around the screen.
  */
 function UploadTray() {
-  const { rows, dismiss } = useUploads();
+  const rows = useUploadRows();
+  const { dismiss } = useUploads();
   if (rows.length === 0) return null;
 
   const sending = rows.filter((row) => row.state === "sending").length;
