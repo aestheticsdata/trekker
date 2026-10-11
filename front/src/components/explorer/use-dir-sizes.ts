@@ -1,7 +1,7 @@
 "use client";
 
 import { dirSizesStreamUrl } from "@lib/api/fs";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { DirSizeFrame, FileRow } from "@lib/api/fs";
 
@@ -65,10 +65,37 @@ export function useDirSizes({
    * already knows where the cursor is, whereas the offset lives behind a scroll
    * listener in the virtualiser, and lifting it up here would re-render this
    * component on every wheel event — undoing precisely what TRE-19 bought.
+   *
+   * Read once, when the stream opens, and never a reason to open another
+   * (TRE-152). The cursor moves on every arrow key; a stream that followed it
+   * killed and respawned every `du` on the host per keypress, spent the
+   * account's `limit:dirsize` in seconds, and sent every figure on screen back
+   * to the measuring ring.
    */
   firstVisible: number;
 }): DirSizes {
   const [sizes, setSizes] = useState<DirSizes>(NOTHING);
+
+  // How many sudo windows have opened while this pane was mounted — the
+  // stream's dependency instead of `elevated` itself, which flips back to false
+  // when a window expires and would restart the walk then too. Derived during
+  // render, React's pattern for state that follows a prop, so the opening and
+  // the restart land in one commit.
+  const [windows, setWindows] = useState(0);
+  const [wasElevated, setWasElevated] = useState(elevated);
+  if (elevated !== wasElevated) {
+    setWasElevated(elevated);
+    if (elevated) setWindows(windows + 1);
+  }
+
+  // The latest cursor, for the stream to read when it opens. Written in its own
+  // effect, declared before the stream's so a commit that both moves the cursor
+  // and opens the stream opens it on the new one. `verify-dir-sizes.ts` counts
+  // the opens, so the dependency cannot creep back.
+  const seed = useRef(firstVisible);
+  useEffect(() => {
+    seed.current = firstVisible;
+  }, [firstVisible]);
 
   useEffect(() => {
     if (hostId === null || !ready) {
@@ -80,7 +107,7 @@ export function useDirSizes({
     // against rows that happen to share a name.
     setSizes({ known: new Map(), walking: true });
 
-    const source = new EventSource(dirSizesStreamUrl(hostId, path, Math.max(0, firstVisible), VISIBLE_ROWS), {
+    const source = new EventSource(dirSizesStreamUrl(hostId, path, Math.max(0, seed.current), VISIBLE_ROWS), {
       withCredentials: true,
     });
 
@@ -136,7 +163,7 @@ export function useDirSizes({
     // which kills the walks — without it, a held-down arrow key would leave a
     // `du` running per directory passed through.
     return close;
-  }, [hostId, path, ready, elevated, firstVisible]);
+  }, [hostId, path, ready, windows]);
 
   return sizes;
 }
