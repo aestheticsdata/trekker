@@ -22,3 +22,8 @@ onlyBuiltDependencies:
   - ssh2
   - sharp
   - unrs-resolver
+
+# House rule: TypeScript stays on the latest 5.x. The Nest 12 CLI asks for ~6.0; it builds fine on
+# 5.9.3, so the whole workspace is held there (TRE-155).
+overrides:
+  typescript: 5.9.3

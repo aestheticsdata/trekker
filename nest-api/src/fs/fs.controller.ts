@@ -64,6 +64,7 @@ import {
 } from "@fs/upload.service";
 import { CsrfGuard } from "@users/guards/csrf.guard";
 import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/session-auth.guard";
+import { LiveStreamsService } from "@infrastructure/live-streams/live-streams.service";
 
 /**
  * Reading the filesystem (TRE-13), changing what it permits (TRE-21), changing
@@ -98,6 +99,7 @@ export class FsController {
     private readonly upload: UploadService,
     private readonly tail: TailService,
     private readonly audit: AuditService,
+    private readonly liveStreams: LiveStreamsService,
   ) {}
 
   /**
@@ -137,6 +139,8 @@ export class FsController {
     });
 
     openStream(res);
+    // Ended by a shutdown before the HTTP drain, which it would otherwise hold (TRE-155).
+    const release = this.liveStreams.hold(res);
     sendFrame(res, {
       event: "ready",
       data: {
@@ -154,6 +158,7 @@ export class FsController {
       if (closed) return;
       closed = true;
       clearInterval(ping);
+      release();
       opened.unsubscribe();
     };
 
@@ -212,6 +217,8 @@ export class FsController {
     });
 
     openStream(res);
+    // Ended by a shutdown before the HTTP drain, which it would otherwise hold (TRE-155).
+    const release = this.liveStreams.hold(res);
     const send = (payload: DirSizeFrame | { done: true }): void => {
       if (!res.writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`);
     };
@@ -224,6 +231,7 @@ export class FsController {
       if (closed) return;
       closed = true;
       clearInterval(ping);
+      release();
       run.cancel();
     };
 

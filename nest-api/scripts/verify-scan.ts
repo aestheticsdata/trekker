@@ -316,7 +316,7 @@ async function verifySsh(root: string): Promise<void> {
     check("a listing answers promptly under a running scan", listMs < 3_000, `${listMs} ms`);
   } finally {
     await driver.dispose();
-    pool.onModuleDestroy();
+    pool.onApplicationShutdown();
   }
 }
 

@@ -238,7 +238,7 @@ async function main(): Promise<void> {
       );
     } finally {
       await ssh.dispose();
-      pool.onModuleDestroy();
+      pool.onApplicationShutdown();
     }
   }
 

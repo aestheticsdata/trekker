@@ -13,6 +13,7 @@ import { type ScanStateView, type ScanView, ScanService } from "@scans/scan.serv
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { CsrfGuard } from "@users/guards/csrf.guard";
 import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/session-auth.guard";
+import { LiveStreamsService } from "@infrastructure/live-streams/live-streams.service";
 
 import type { Request, Response } from "express";
 
@@ -38,6 +39,7 @@ export class ScansController {
     private readonly scans: ScanService,
     private readonly events: ScanEventsService,
     private readonly audit: AuditService,
+    private readonly liveStreams: LiveStreamsService,
   ) {}
 
   /**
@@ -74,6 +76,8 @@ export class ScansController {
       "X-Accel-Buffering": "no",
     });
     res.write(": connected\n\n");
+    // Ended by a shutdown before the HTTP drain, which it would otherwise hold (TRE-155).
+    const release = this.liveStreams.hold(res);
 
     const unsubscribe = this.events.subscribe(userId, (progress) => {
       if (progress.hostId !== id) return;
@@ -86,6 +90,7 @@ export class ScansController {
     heartbeat.unref();
 
     req.on("close", () => {
+      release();
       clearInterval(heartbeat);
       unsubscribe();
       res.end();

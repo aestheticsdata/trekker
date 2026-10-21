@@ -178,7 +178,7 @@ async function main(): Promise<void> {
   } finally {
     await rm(workspace, { recursive: true, force: true }).catch(() => {});
     await ssh.dispose();
-    pool.onModuleDestroy();
+    pool.onApplicationShutdown();
   }
 
   console.log(`\nPASS=${pass} FAIL=${fail}`);

@@ -30,15 +30,15 @@
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "lint": "eslint \"{src,test,prisma,scripts,mock}/**/*.ts\" prisma.config.ts --fix",
     "typecheck": "tsc --noEmit",
-    "test": "jest --passWithNoTests",
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest --passWithNoTests",
     "test:db": "NODE_OPTIONS='--experimental-vm-modules' jest --config ./test/jest-db.json --runInBand"
   },
   "dependencies": {
-    "@nestjs/common": "^11.0.1",
-    "@nestjs/config": "^4.0.3",
-    "@nestjs/core": "^11.0.1",
-    "@nestjs/platform-express": "^11.0.1",
-    "@nestjs/throttler": "^6.5.0",
+    "@nestjs/common": "^12.2.0",
+    "@nestjs/config": "^12.0.1",
+    "@nestjs/core": "^12.2.0",
+    "@nestjs/platform-express": "^12.2.0",
+    "@nestjs/throttler": "^6.7.1",
     "@prisma/adapter-mariadb": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "bcryptjs": "^3.0.3",
@@ -57,9 +57,9 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@eslint/js": "^9.18.0",
-    "@nestjs/cli": "^11.0.0",
-    "@nestjs/schematics": "^11.0.0",
-    "@nestjs/testing": "^11.0.1",
+    "@nestjs/cli": "^12.0.10",
+    "@nestjs/schematics": "^12.0.10",
+    "@nestjs/testing": "^12.2.0",
     "@types/busboy": "^1.5.4",
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.19.0",
@@ -82,7 +82,7 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.23.11",
-    "typescript": "^5.7.3",
+    "typescript": "5.9.3",
     "typescript-eslint": "^8.20.0"
   },
   "jest": {

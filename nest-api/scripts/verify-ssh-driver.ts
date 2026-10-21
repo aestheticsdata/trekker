@@ -163,7 +163,7 @@ async function main(): Promise<void> {
     check("recursive rmdir", (await codeOf(() => driver.stat(root))) === "ENOENT");
   } finally {
     await driver.rmdir(root, { recursive: true }).catch(() => undefined);
-    pool.onModuleDestroy();
+    pool.onApplicationShutdown();
   }
 
   console.log(`\nPASS=${pass} FAIL=${fail}`);

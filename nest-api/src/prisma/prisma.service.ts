@@ -1,4 +1,4 @@
-import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
+import { Injectable, Logger, type OnApplicationShutdown, type OnModuleInit } from "@nestjs/common";
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { describeTarget, parseDatabaseUrl } from "../config/database-url";
 import { PrismaClient } from "../../generated/prisma/client";
@@ -13,7 +13,7 @@ const CONNECT_TIMEOUT_MS = 10_000;
  * you whether the database is reachable.
  */
 @Injectable()
-export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+export class PrismaService extends PrismaClient implements OnModuleInit, OnApplicationShutdown {
   private static readonly logger = new Logger(PrismaService.name);
   private readonly target: string;
 
@@ -56,7 +56,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     PrismaService.logger.log(`Prisma connected to ${this.target}`);
   }
 
-  async onModuleDestroy(): Promise<void> {
+  // After the HTTP server has drained (TRE-155): `onModuleDestroy` runs before it, and a request
+  // still in flight would find this closed under it.
+  async onApplicationShutdown(): Promise<void> {
     await this.$disconnect();
   }
 }

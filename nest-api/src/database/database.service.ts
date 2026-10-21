@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
+import { Injectable, Logger, OnApplicationShutdown } from "@nestjs/common";
 import mariadb, { type Pool } from "mariadb";
 import { parseDatabaseUrl } from "@config/database-url";
 import { withTimeout } from "@infrastructure/with-timeout.util";
@@ -13,7 +13,7 @@ const PING_TIMEOUT_MS = 2_000;
  * layer being correctly wired to tell you the database is reachable.
  */
 @Injectable()
-export class DatabaseService implements OnModuleDestroy {
+export class DatabaseService implements OnApplicationShutdown {
   private readonly logger = new Logger(DatabaseService.name);
   private readonly pool: Pool;
 
@@ -27,7 +27,9 @@ export class DatabaseService implements OnModuleDestroy {
     });
   }
 
-  async onModuleDestroy(): Promise<void> {
+  // After the HTTP server has drained (TRE-155): `onModuleDestroy` runs before it, and a request
+  // still in flight would find this closed under it.
+  async onApplicationShutdown(): Promise<void> {
     await this.pool.end();
   }
 

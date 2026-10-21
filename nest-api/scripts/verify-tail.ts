@@ -281,7 +281,7 @@ async function verifySsh(directory: string): Promise<void> {
     await verifySource("SSH — the polling source", driver, directory, "poll");
   } finally {
     await driver.dispose();
-    pool.onModuleDestroy();
+    pool.onApplicationShutdown();
   }
 }
 

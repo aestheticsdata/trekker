@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, Logger, type OnModuleDestroy } from "@nestjs/common";
+import { ConflictException, Injectable, Logger, type BeforeApplicationShutdown } from "@nestjs/common";
 import type { HostDriver } from "@hosts/drivers/host-driver";
 import {
   MAX_TAILS_PER_HOST,
@@ -99,21 +99,11 @@ interface TailEntry {
 }
 
 @Injectable()
-export class TailRegistryService implements OnModuleDestroy {
+export class TailRegistryService implements BeforeApplicationShutdown {
   private readonly logger = new Logger(TailRegistryService.name);
   private readonly entries = new Map<string, TailEntry>();
   private readonly perSession = new Map<string, number>();
   private nextSubscriberId = 1;
-
-  constructor() {
-    // `main.ts` does not call `enableShutdownHooks()`, so `onModuleDestroy`
-    // never fires on a `pm2 reload` — see the design note. The poller does not
-    // care, but a LOCAL `tail` child would outlive the redeploy, so the
-    // registry listens for itself rather than relying on a hook that does not
-    // run. Removing this is correct only once that call exists.
-    process.once("SIGTERM", this.closeAll);
-    process.once("SIGINT", this.closeAll);
-  }
 
   /**
    * Attach to a file, starting a source only if nothing is following it yet.
@@ -167,13 +157,13 @@ export class TailRegistryService implements OnModuleDestroy {
     return this.entries.get(`${hostId}:${realPath}`)?.subscribers.size ?? 0;
   }
 
-  onModuleDestroy(): void {
+  /**
+   * Before the HTTP drain (TRE-155): `main.ts` now calls `enableShutdownHooks()`, so a `pm2 reload`
+   * reaches this hook, and a LOCAL `tail` child no longer outlives the redeploy. The registry used to
+   * listen for SIGTERM / SIGINT itself because no hook ran.
+   */
+  beforeApplicationShutdown(): void {
     this.closeAll();
-    // Removed as well as fired: a module torn down and rebuilt — which is every
-    // test in this suite — would otherwise leave a listener per instance on a
-    // process-wide emitter, and the tenth one warns about a leak that is real.
-    process.removeListener("SIGTERM", this.closeAll);
-    process.removeListener("SIGINT", this.closeAll);
   }
 
   // ------------------------------------------------------------------ admission

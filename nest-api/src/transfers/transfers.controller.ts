@@ -12,6 +12,7 @@ import {
 } from "@transfers/transfer.service";
 import { CsrfGuard } from "@users/guards/csrf.guard";
 import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/session-auth.guard";
+import { LiveStreamsService } from "@infrastructure/live-streams/live-streams.service";
 
 import type { Request, Response } from "express";
 
@@ -34,6 +35,7 @@ export class TransfersController {
   constructor(
     private readonly transfers: TransferService,
     private readonly events: TransferEventsService,
+    private readonly liveStreams: LiveStreamsService,
   ) {}
 
   @Get()
@@ -68,6 +70,8 @@ export class TransfersController {
     // Flushed immediately so the browser's `EventSource` fires `open` now
     // rather than when the first transfer happens to start.
     res.write(": connected\n\n");
+    // Ended by a shutdown before the HTTP drain, which it would otherwise hold (TRE-155).
+    const release = this.liveStreams.hold(res);
 
     const unsubscribe = this.events.subscribe(userId, (progress) => {
       res.write(`data: ${JSON.stringify(progress)}\n\n`);
@@ -81,6 +85,7 @@ export class TransfersController {
     heartbeat.unref();
 
     req.on("close", () => {
+      release();
       clearInterval(heartbeat);
       unsubscribe();
       res.end();

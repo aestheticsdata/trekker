@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from "@nestjs/common";
 import { createClient, type RedisClientType } from "redis";
 import { withTimeout } from "@infrastructure/with-timeout.util";
 
@@ -7,7 +7,7 @@ export const SESSION_PREFIX = "trekker:";
 const PING_TIMEOUT_MS = 1_000;
 
 @Injectable()
-export class RedisService implements OnModuleInit, OnModuleDestroy {
+export class RedisService implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(RedisService.name);
   private readonly client: RedisClientType;
 
@@ -44,7 +44,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async onModuleDestroy(): Promise<void> {
+  // After the HTTP server has drained (TRE-155): `onModuleDestroy` runs before it, and a request
+  // still in flight would find this closed under it.
+  async onApplicationShutdown(): Promise<void> {
     if (this.client.isOpen) {
       await this.client.quit();
     }

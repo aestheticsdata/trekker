@@ -13,6 +13,7 @@ import { type HashJobView, type HashStateView, HashService } from "@hashes/hash.
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { CsrfGuard } from "@users/guards/csrf.guard";
 import { type AuthenticatedRequest, SessionAuthGuard } from "@users/guards/session-auth.guard";
+import { LiveStreamsService } from "@infrastructure/live-streams/live-streams.service";
 
 import type { Request, Response } from "express";
 
@@ -37,6 +38,7 @@ export class HashesController {
     private readonly hashes: HashService,
     private readonly events: HashEventsService,
     private readonly audit: AuditService,
+    private readonly liveStreams: LiveStreamsService,
   ) {}
 
   /**
@@ -74,6 +76,8 @@ export class HashesController {
       "X-Accel-Buffering": "no",
     });
     res.write(": connected\n\n");
+    // Ended by a shutdown before the HTTP drain, which it would otherwise hold (TRE-155).
+    const release = this.liveStreams.hold(res);
 
     const unsubscribe = this.events.subscribe(userId, (progress) => {
       res.write(`data: ${JSON.stringify(progress)}\n\n`);
@@ -85,6 +89,7 @@ export class HashesController {
     heartbeat.unref();
 
     req.on("close", () => {
+      release();
       clearInterval(heartbeat);
       unsubscribe();
       res.end();

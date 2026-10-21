@@ -259,7 +259,7 @@ async function main(): Promise<void> {
     check("a failed connect leaves nothing pooled", pool.openConnectionCount === 0);
     pool.evictHost("no-such-host", "test");
     check("evicting an unknown host is a no-op", pool.openConnectionCount === 0);
-    pool.onModuleDestroy();
+    pool.onApplicationShutdown();
   } finally {
     await rm(root, { recursive: true, force: true });
   }

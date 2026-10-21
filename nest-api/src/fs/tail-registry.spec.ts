@@ -142,7 +142,7 @@ describe("TailRegistryService", () => {
   });
 
   afterEach(() => {
-    registry.onModuleDestroy();
+    registry.beforeApplicationShutdown();
     jest.useRealTimers();
     jest.restoreAllMocks();
   });
@@ -397,7 +397,7 @@ describe("TailRegistryService", () => {
       const first = attach(registry, driver);
       const second = attach(registry, driver, { sessionId: "session-2", realPath: "/var/log/other.log" });
 
-      registry.onModuleDestroy();
+      registry.beforeApplicationShutdown();
 
       expect(registry.count()).toBe(0);
       expect(first.subscriber.ended).toBe(true);

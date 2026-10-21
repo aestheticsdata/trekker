@@ -21,6 +21,8 @@ import { SESSION_COOKIE_NAME, SESSION_TTL_SECONDS } from "@users/session.constan
 import { UsersModule } from "@users/users.module";
 import { ViewsModule } from "@views/views.module";
 import { PrismaService } from "./prisma/prisma.service";
+import { ROUTING_OPTIONS } from "@config/routing";
+import { LiveStreamsModule } from "@infrastructure/live-streams/live-streams.module";
 
 /**
  * The guards, over HTTP (TRE-56).
@@ -431,6 +433,7 @@ beforeAll(async () => {
     // route, plus the global audit interceptor that wraps them.
     imports: [
       FakeInfrastructureModule,
+      LiveStreamsModule,
       AuditModule,
       SecretStoreModule,
       HostsModule,
@@ -445,7 +448,7 @@ beforeAll(async () => {
     ],
   }).compile();
 
-  app = moduleRef.createNestApplication();
+  app = moduleRef.createNestApplication(ROUTING_OPTIONS);
 
   // The same middleware main.ts installs, in the same order. The store is
   // in-memory rather than Redis-backed; everything above it is production's.

@@ -215,7 +215,7 @@ describe("shutting down", () => {
     sudo.open(SESSION, HOST, PASSWORD);
     sudo.open(OTHER_SESSION, OTHER_HOST, PASSWORD);
 
-    sudo.onModuleDestroy();
+    sudo.onApplicationShutdown();
 
     expect(sudo.openCount()).toBe(0);
   });

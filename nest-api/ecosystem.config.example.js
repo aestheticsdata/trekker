@@ -250,6 +250,10 @@ module.exports = {
       // written anywhere a second process could read it.
       instances: 1,
       exec_mode: "fork",
+      // How long a reload waits for the requests in flight (TRE-155): streams and tails end at once,
+      // queued jobs are reclaimed by the next boot, so this only bounds a request already running —
+      // an upload, a listing over a slow SSH link. PM2's default (1.6 s) would cut most of those.
+      kill_timeout: 30000,
       autorestart: true,
       env_development: devEnv,
       env_production: prodEnv,

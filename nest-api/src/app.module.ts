@@ -11,6 +11,7 @@ import { HashesModule } from "@hashes/hashes.module";
 import { HealthModule } from "@health/health.module";
 import { loadEnv } from "@config/load-env";
 import { RedisModule } from "@redis/redis.module";
+import { LiveStreamsModule } from "@infrastructure/live-streams/live-streams.module";
 import { HostsModule } from "@hosts/hosts.module";
 import { ScansModule } from "@scans/scans.module";
 import { SecretStoreModule } from "@secrets/secret-store.module";
@@ -37,6 +38,7 @@ loadEnv();
     DatabaseModule,
     PrismaModule,
     RedisModule,
+    LiveStreamsModule,
     // Before every feature module that mutates anything. It is @Global and
     // binds the interceptor with APP_INTERCEPTOR, so ordering is not load-
     // bearing — but reading it here first states the intent: nothing below

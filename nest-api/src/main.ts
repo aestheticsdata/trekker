@@ -6,6 +6,7 @@ import type { Application, NextFunction, Request, Response } from "express";
 import session from "express-session";
 import { AppModule } from "./app.module";
 import { AppConfig } from "@config/app.config";
+import { ROUTING_OPTIONS } from "@config/routing";
 import { formatRouteLog } from "@infrastructure/logger";
 import { RedisService } from "@redis/redis.service";
 import { SESSION_COOKIE_NAME, SESSION_TTL_SECONDS } from "@users/session.constants";
@@ -18,7 +19,7 @@ import { SESSION_COOKIE_NAME, SESSION_TTL_SECONDS } from "@users/session.constan
 const HEALTH_PATH = "/health";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, ROUTING_OPTIONS);
   // Behind nginx: without this, req.ip is the proxy and every rate limit counts
   // the whole internet as one client, and a Secure cookie is never set.
   (app.getHttpAdapter().getInstance() as Application).set("trust proxy", 1);
@@ -102,6 +103,11 @@ async function bootstrap() {
 
   // Host given explicitly: `listen(port)` alone binds every interface, and
   // this API must only ever be reached through nginx on loopback (TRE-40).
+  // A deploy's `pm2 reload` sends SIGINT (TRE-155): the live streams and the tails end first, Nest
+  // lets the requests in flight finish, then the SSH pool, sudo windows, database, Redis and Prisma
+  // close. Queued hashes, scans and transfers are aborted and reclaimed by the next boot, as before.
+  // PM2's `kill_timeout` (ecosystem.config.js) bounds how long it may take.
+  app.enableShutdownHooks();
   await app.listen(appConfig.port, appConfig.host);
   console.log(`Trekker API listening on ${appConfig.host}:${appConfig.port}`);
 }

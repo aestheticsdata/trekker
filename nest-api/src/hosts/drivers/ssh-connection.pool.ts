@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { DriverError } from "@hosts/drivers/driver-error";
-import { Injectable, Logger, type OnModuleDestroy } from "@nestjs/common";
+import { Injectable, Logger, type OnApplicationShutdown } from "@nestjs/common";
 import { secretsEqual } from "@secrets/secret-store.service";
 import { Client, type ConnectConfig, type SFTPWrapper } from "ssh2";
 
@@ -198,7 +198,7 @@ export interface HostProbeResult {
  * fixing the gap. Giving `acquire` a signal and a deadline is its own change.
  */
 @Injectable()
-export class SshConnectionPool implements OnModuleDestroy {
+export class SshConnectionPool implements OnApplicationShutdown {
   private readonly logger = new Logger(SshConnectionPool.name);
   private readonly entries = new Map<string, PooledEntry>();
   /**
@@ -621,7 +621,9 @@ export class SshConnectionPool implements OnModuleDestroy {
     return this.entries.get(`${hostId}:${username}`)?.inFlight ?? 0;
   }
 
-  onModuleDestroy(): void {
+  // After the HTTP server has drained (TRE-155): `onModuleDestroy` runs before it, and a request
+  // still in flight would find this closed under it.
+  onApplicationShutdown(): void {
     for (const key of [...this.entries.keys()]) this.evict(key, "shutdown");
   }
 }

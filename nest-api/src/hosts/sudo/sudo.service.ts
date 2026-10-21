@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from "@nestjs/common";
+import { Inject, Injectable, OnApplicationShutdown, OnModuleInit, Optional } from "@nestjs/common";
 
 /**
  * Who is allowed to run something as root, on which host, for how long
@@ -70,7 +70,7 @@ interface Window {
 export const SUDO_CLOCK = Symbol("SUDO_CLOCK");
 
 @Injectable()
-export class SudoService implements OnModuleInit, OnModuleDestroy {
+export class SudoService implements OnModuleInit, OnApplicationShutdown {
   private readonly windows = new Map<string, Window>();
   private timer?: NodeJS.Timeout;
 
@@ -83,7 +83,9 @@ export class SudoService implements OnModuleInit, OnModuleDestroy {
     this.timer.unref();
   }
 
-  onModuleDestroy(): void {
+  // After the HTTP server has drained (TRE-155): `onModuleDestroy` runs before it, and a request
+  // still in flight would find this closed under it.
+  onApplicationShutdown(): void {
     if (this.timer) clearInterval(this.timer);
     // Not merely tidiness. A process on its way out should not be holding
     // passwords while it goes, however short the interval.

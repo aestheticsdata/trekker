@@ -248,7 +248,7 @@ async function verifySsh(files: Array<{ path: string; content: Buffer }>, local:
     check("both drivers agree on every file", disagreed.length === 0, describe(disagreed));
   } finally {
     await driver.dispose();
-    pool.onModuleDestroy();
+    pool.onApplicationShutdown();
   }
 }
 
