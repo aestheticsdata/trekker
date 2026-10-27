@@ -26,4 +26,7 @@ onlyBuiltDependencies:
 # House rule: TypeScript stays on the latest 5.x. The Nest 12 CLI asks for ~6.0; it builds fine on
 # 5.9.3, so the whole workspace is held there (TRE-155).
 overrides:
+  # Patched for security advisories in transitive deps (2026-10-27).
+  source-map-js: "^1.2.2"
+  fast-uri: "^3.1.9"
   typescript: 5.9.3
