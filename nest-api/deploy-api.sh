@@ -111,6 +111,8 @@ check_pnpm_baseline() {
 }
 
 deploy() {
+  # Local build output and node_modules go on exit, success or failure — see deploy-common.sh.
+  trap 'clean_local_build "$SCRIPT_DIR" "$SCRIPT_DIR/node_modules/.*nest\.js start" dist coverage' EXIT
   check_pnpm_baseline
   cd "$SCRIPT_DIR"
   # Setup problems before readiness problems: "you haven't configured this" is a

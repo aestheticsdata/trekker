@@ -3,8 +3,10 @@
 #
 # The gate is the only thing standing between a broken tree and the server now
 # that there is no CI, so "it refuses on a failure" is a claim that has to be
-# demonstrated rather than asserted. This breaks lint, typecheck, tests, build
-# and the secret sweep one at a time and checks the refusal names the right one.
+# demonstrated rather than asserted. This breaks lint, typecheck, tests and the
+# secret sweep one at a time and checks the refusal names the right one. (No
+# build case: the gate runs no local build since 2026-11-08, the server's is the
+# one that counts.)
 #
 #   bash scripts/verify-deploy-gate.sh        (or: pnpm verify:gate)
 #
@@ -59,9 +61,9 @@ expect() {
 
 echo "=== the gate, with each check broken in turn ==="
 
-# The four broken-check cases have nothing to say about the sweep and should not
+# The three broken-check cases have nothing to say about the sweep and should not
 # pay for it, so they waive it. Case 1 runs it for real where it can — on a
-# machine without gitleaks it is waived too, and case 7 is what proves that a
+# machine without gitleaks it is waived too, and case 6 is what proves that a
 # missing scanner is a refusal rather than a pass.
 SWEEP=(TREKKER_ALLOW_UNSCANNED=1)
 if command -v gitleaks >/dev/null 2>&1; then
@@ -74,7 +76,7 @@ fi
 expect "everything passing" 0 "Pre-deploy checks passed" "${SWEEP[@]}"
 
 # 2. lint — badly formatted but perfectly valid TypeScript, so biome is the only
-#    one of the five that objects.
+#    one of the four that objects.
 printf 'export const gateProbe    =     1;\n' > "$REPO/front/src/helpers/gate-probe.ts"
 cleanup_files+=("$REPO/front/src/helpers/gate-probe.ts")
 expect "lint broken" 1 "Pre-deploy check failed: lint" TREKKER_ALLOW_UNSCANNED=1
@@ -97,28 +99,12 @@ SPEC
 cleanup_files+=("$REPO/nest-api/src/gate-probe.spec.ts")
 expect "tests broken" 1 "Pre-deploy check failed: tests" TREKKER_ALLOW_UNSCANNED=1
 
-# 5. build — a page that throws while Next collects page data. Valid TS, well
-#    formatted, no failing test: the build is the first thing to notice.
-mkdir -p "$REPO/front/src/app/gate-probe"
-cat > "$REPO/front/src/app/gate-probe/page.tsx" <<'PAGE'
-throw new Error("gate probe: this page cannot be built");
-
-export default function GateProbePage() {
-  return null;
-}
-PAGE
-cleanup_files+=("$REPO/front/src/app/gate-probe/page.tsx")
-expect "build broken" 1 "Pre-deploy check failed: build" TREKKER_ALLOW_UNSCANNED=1
-# Next leaves .next/types/validator.ts pointing at the removed route, and
-# every later tsc --noEmit fails on a page that no longer exists.
-rm -rf "$REPO/front/src/app/gate-probe" "$REPO/front/.next"
-
-# 6. the sweep — a gitleaks on PATH that reports findings.
+# 5. the sweep — a gitleaks on PATH that reports findings.
 printf '#!/bin/sh\necho "gate probe: pretend leak"\nexit 1\n' > "$STUBS/gitleaks"
 chmod +x "$STUBS/gitleaks"
 expect "secret sweep broken" 1 "Pre-deploy check failed: secret sweep" PATH="$STUBS:$PATH"
 
-# 7. With no scanner at all, it refuses rather than passing — and waives only
+# 6. With no scanner at all, it refuses rather than passing — and waives only
 #    when told to, out loud. Tested against `preflight_scanner_available` rather
 #    than a whole gate run: a PATH with no gitleaks on it has no pnpm either, and
 #    this one function is the entire decision.
