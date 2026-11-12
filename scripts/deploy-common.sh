@@ -491,6 +491,10 @@ zeus_report() {
     [ -n "${ZEUS_COMMIT:-}" ] && printf ',"commit":"%s"' "$(json_escape "$ZEUS_COMMIT")"
     [ -n "${ZEUS_BRANCH:-}" ] && printf ',"branch":"%s"' "$(json_escape "$ZEUS_BRANCH")"
     [ -n "$summary" ] && printf ',"summary":"%s"' "$(json_escape "$summary")"
+    # ZEU-93. Only a release that is now live has a rollback, and only the deploy knows whether it
+    # changed the schema — absent, Zeus assumes it may have, and never rolls it back on its own.
+    [[ "${ZEUS_MIGRATIONS_APPLIED:-}" =~ ^[0-9]+$ ]] && printf ',"migrationsApplied":%s' "$ZEUS_MIGRATIONS_APPLIED"
+    [ "$status" = "success" ] && [ -n "${ZEUS_ROLLBACK_SCRIPT:-}" ] && printf ',"rollbackScript":"%s"' "$ZEUS_ROLLBACK_SCRIPT"
     printf ',"commits":%s}' "$commits"
   } > "$payload"
 

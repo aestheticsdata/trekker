@@ -15,6 +15,10 @@ load_deploy_config
 
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WEB_ROOT="$TREKKER_REMOTE_ROOT"
+
+# ZEU-93. The one rollback, as a file on ks-b: this script's own auto-rollback, `./deploy-front.sh rollback`
+# and Zeus's post-deploy verification all run it. Rewritten on every deploy by `install_rollback_script`.
+ROLLBACK_SCRIPT_REMOTE="$WEB_ROOT/rollback-front.sh"
 CURRENT_DIR="$WEB_ROOT/public_html"
 BACKUP_DIR="$WEB_ROOT/public_html.bak"
 RELEASES_DIR="$WEB_ROOT/front-releases"
@@ -51,17 +55,56 @@ chmod 600 "$HOME/.pm2/dump.pm2" 2>/dev/null || true
 EOF
 }
 
-remote_rollback() {
+# ZEU-93. Writes `rollback-front.sh` on ks-b with this script's paths resolved into it: the restore,
+# then the reload. Written to a temporary name and moved, so Zeus never runs half a file.
+install_rollback_script() {
   ssh "$TREKKER_DEPLOY_HOST" \
     CURRENT_DIR="$CURRENT_DIR" \
     BACKUP_DIR="$BACKUP_DIR" \
+    PM2_ECOSYSTEM_FILE="$PM2_ECOSYSTEM_FILE" \
+    REMOTE_PATH="$REMOTE_PATH" \
+    TARGET="$ROLLBACK_SCRIPT_REMOTE" \
     'bash -s' << 'EOF'
 set -Eeuo pipefail
+TMP="$TARGET.tmp.$$"
+{
+  echo '#!/usr/bin/env bash'
+  echo '# Written by deploy-front.sh on every deploy (ZEU-93) - do not edit it here, edit the script.'
+  echo '# Restores the previous front release and reloads it: run by the deploy on failure, by'
+  echo '# ./deploy-front.sh rollback, and by Zeus when a release degrades.'
+  echo 'set -Eeuo pipefail'
+  echo 'export PATH="$HOME/.npm-global/bin:$HOME/.local/share/pnpm:/usr/local/bin:/usr/bin:/bin:$PATH"'
+  printf 'CURRENT_DIR=%q\n' "$CURRENT_DIR"
+  printf 'BACKUP_DIR=%q\n' "$BACKUP_DIR"
+  printf 'PM2_ECOSYSTEM_FILE=%q\n' "$PM2_ECOSYSTEM_FILE"
+  printf 'REMOTE_PATH=%q\n' "$REMOTE_PATH"
+  cat << 'BODY'
 [ -d "$BACKUP_DIR" ] || { echo "❌ ERROR: no backup at $BACKUP_DIR" >&2; exit 1; }
 rm -rf "$CURRENT_DIR"
 mv "$BACKUP_DIR" "$CURRENT_DIR"
 echo "✅ Front rollback done (restored from backup)"
+export PATH="$REMOTE_PATH:$PATH"
+cd "$CURRENT_DIR"
+[ -f "$PM2_ECOSYSTEM_FILE" ] || { echo "❌ ERROR: missing $CURRENT_DIR/$PM2_ECOSYSTEM_FILE" >&2; exit 1; }
+pm2 startOrReload "$CURRENT_DIR/$PM2_ECOSYSTEM_FILE" --update-env
+pm2 save
+
+# The front's own config holds no secrets, but `pm2 save` rewrites the one
+# dump.pm2 shared by every process on this box — the API's resolved environment,
+# master key included, among them. So this deploy loosens the API's secret if it
+# does not tighten it back (TRE-54).
+chmod 600 "$HOME/.pm2/dump.pm2" 2>/dev/null || true
+echo "previous front release restored and reloaded"
+BODY
+} > "$TMP"
+chmod 700 "$TMP"
+mv "$TMP" "$TARGET"
 EOF
+}
+
+# Restores the previous release and reloads — by running the file above, never steps of its own.
+remote_rollback() {
+  install_rollback_script && ssh "$TREKKER_DEPLOY_HOST" "bash '$ROLLBACK_SCRIPT_REMOTE'"
 }
 
 # The pnpm version is deliberately not written down here. Each project pins it
@@ -111,6 +154,10 @@ deploy() {
   run_preflight_checks
   compute_release_metadata
   zeus_init "front"
+  ZEUS_ROLLBACK_SCRIPT="$ROLLBACK_SCRIPT_REMOTE"
+  ZEUS_MIGRATIONS_APPLIED=0
+  # ZEU-93. Only paths in it, so it can go in before anything changes on ks-b.
+  install_rollback_script
 
   local STAGING_DIR="$RELEASES_DIR/$RELEASE_NAME"
   local SWITCH_DONE="false"

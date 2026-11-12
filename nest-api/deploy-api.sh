@@ -17,6 +17,10 @@ load_deploy_config
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 API_ROOT="$TREKKER_REMOTE_ROOT"
 
+# ZEU-93. The one rollback, as a file on ks-b: this script's own auto-rollback, `./deploy-api.sh rollback`
+# and Zeus's post-deploy verification all run it. Rewritten on every deploy by `install_rollback_script`.
+ROLLBACK_SCRIPT_REMOTE="$API_ROOT/rollback-api.sh"
+
 # The deployed unit is the whole pnpm workspace, not just nest-api/.
 #
 # The sibling apps ship one package because each of their halves is an independent
@@ -38,19 +42,58 @@ NEST_RELEASES_DIR="$API_ROOT/api-releases"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 ECOSYSTEM_FILE="$SCRIPT_DIR/ecosystem.config.js"
 
-remote_rollback() {
+# ZEU-93. Writes `rollback-api.sh` on ks-b with this script's paths resolved into it: the restore,
+# then the reload. Written to a temporary name and moved, so Zeus never runs half a file.
+install_rollback_script() {
   ssh "$TREKKER_DEPLOY_HOST" \
     NEST_DIR="$NEST_DIR" \
     NEST_BACKUP_DIR="$NEST_BACKUP_DIR" \
     API_ROOT="$API_ROOT" \
+    REMOTE_PATH="$REMOTE_PATH" \
+    TARGET="$ROLLBACK_SCRIPT_REMOTE" \
     'bash -s' << 'EOF'
 set -Eeuo pipefail
+TMP="$TARGET.tmp.$$"
+{
+  echo '#!/usr/bin/env bash'
+  echo '# Written by deploy-api.sh on every deploy (ZEU-93) - do not edit it here, edit the script.'
+  echo '# Restores the previous api release and reloads it: run by the deploy on failure, by'
+  echo '# ./deploy-api.sh rollback, and by Zeus when a release degrades.'
+  echo 'set -Eeuo pipefail'
+  echo 'export PATH="$HOME/.npm-global/bin:$HOME/.local/share/pnpm:/usr/local/bin:/usr/bin:/bin:$PATH"'
+  printf 'NEST_DIR=%q\n' "$NEST_DIR"
+  printf 'NEST_BACKUP_DIR=%q\n' "$NEST_BACKUP_DIR"
+  printf 'API_ROOT=%q\n' "$API_ROOT"
+  printf 'REMOTE_PATH=%q\n' "$REMOTE_PATH"
+  cat << 'BODY'
 cd "$API_ROOT"
 [ -d "$NEST_BACKUP_DIR" ] || { echo "❌ ERROR: no backup at $NEST_BACKUP_DIR" >&2; exit 1; }
 rm -rf "$NEST_DIR"
 mv "$NEST_BACKUP_DIR" "$NEST_DIR"
 echo "✅ API rollback done (restored from backup)"
+export PATH="$REMOTE_PATH:$PATH"
+cd "$API_ROOT"
+command -v pm2 >/dev/null 2>&1 || { echo "❌ ERROR: pm2 not found on the server" >&2; exit 1; }
+pm2 startOrReload ecosystem.config.js --env production --update-env
+pm2 save
+
+# `pm2 save` copies the resolved environment — master key included — into
+# dump.pm2, and writes it with the daemon's umask rather than this shell's, so
+# setting umask here would not reach it (TRE-54). Tightened after the fact,
+# which is second best and stated as such: the file exists readable for the
+# instant between the save and this line.
+chmod 600 "$HOME/.pm2/dump.pm2" 2>/dev/null || true
+echo "previous api release restored and reloaded"
+BODY
+} > "$TMP"
+chmod 700 "$TMP"
+mv "$TMP" "$TARGET"
 EOF
+}
+
+# Restores the previous release and reloads — by running the file above, never steps of its own.
+remote_rollback() {
+  install_rollback_script && ssh "$TREKKER_DEPLOY_HOST" "bash '$ROLLBACK_SCRIPT_REMOTE'"
 }
 
 restart_pm2() {
@@ -125,6 +168,15 @@ deploy() {
   run_preflight_checks
   compute_release_metadata
   zeus_init "api"
+  ZEUS_ROLLBACK_SCRIPT="$ROLLBACK_SCRIPT_REMOTE"
+  # ZEU-93. A release that ADDS a migration changes the schema under the code before it. Counted over
+  # the shipped range; unknown without a base, which Zeus reads as "may have migrated".
+  ZEUS_MIGRATIONS_APPLIED=""
+  if [ -n "${ZEUS_BASE_HASH:-}" ] && git -C "$SCRIPT_DIR" cat-file -e "${ZEUS_BASE_HASH}^{commit}" 2>/dev/null; then
+    ZEUS_MIGRATIONS_APPLIED=$(git -C "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)" diff --name-only --diff-filter=A "${ZEUS_BASE_HASH}..HEAD" -- "nest-api/prisma/migrations" | grep -c . || true)
+  fi
+  # ZEU-93. Only paths in it, so it can go in before anything changes on ks-b.
+  install_rollback_script
 
   local NEST_RELEASE_REMOTE="$NEST_RELEASES_DIR/$RELEASE_NAME"
   local SWITCH_DONE="false"
